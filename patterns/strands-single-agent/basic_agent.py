@@ -104,7 +104,7 @@ def create_strands_agent(user_id: str, session_id: str) -> Agent:
     # server becomes a live MCPClient tool provider on the agent. Fail-soft: any
     # discovery/config error yields zero extra clients and the agent still runs
     # on its built-in and gateway tools. (Misconfiguration is caught loudly at
-    # deploy time by the CDK config-manager / Terraform variable validation, so
+    # deploy time by the CDK config-manager validation, so
     # this runtime guard is defense-in-depth, not the primary check.)
     if is_discovery_enabled():
         try:

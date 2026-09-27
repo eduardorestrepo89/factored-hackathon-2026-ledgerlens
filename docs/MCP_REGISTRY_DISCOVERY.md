@@ -59,17 +59,6 @@ backend:
 
 Deploy with `cdk deploy`.
 
-### Terraform (`terraform.tfvars`)
-
-```hcl
-mcp_registry = {
-  enabled     = true
-  registry_id = "arn:aws:agent-registry:us-east-1:123456789012:registry/my-registry"
-}
-```
-
-Deploy with `terraform apply`.
-
 ## Configuration Reference
 
 | Field | Required | Default | Description |
@@ -78,7 +67,7 @@ Deploy with `terraform apply`.
 | `registry_id` | When enabled | `""` | ARN or id of the AWS Agent Registry. A full ARN scopes the IAM grant to that registry; a bare id falls back to the account/region `registry/*` wildcard. |
 
 Validation is **fail-loud**: enabling the feature without a `registry_id` fails
-at synth/plan time (CDK `config-manager` and the Terraform variable validation).
+at synth time (CDK `config-manager`).
 
 ## Environment Variables (set by the infrastructure)
 
@@ -157,7 +146,7 @@ the agent as `registry_<slug>_<tool_name>`.
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | No discovered tools appear | Feature disabled, or registry has no Approved MCP records | Set `enabled: true` + `registry_id`; approve records in the registry |
-| Synth/plan fails on `registry_id` | `enabled` true but `registry_id` empty | Provide the registry ARN/id |
+| Synth fails on `registry_id` | `enabled` true but `registry_id` empty | Provide the registry ARN/id |
 | A known server isn't connected | Non-HTTP transport, auth-required, or missing `remotes[0].url` | Check the record's descriptor; v1 connects public streamable-HTTP only |
 | `AccessDeniedException` in logs | Role lacks discovery permissions or registry not readable | Confirm the `AgentRegistryDiscoveryAccess` statement covers the registry |
 | APIs return `ValidationException` for the namespace | Registry created under deprecated `bedrock-agentcore` namespace | Migrate the registry to `agent-registry` |
@@ -167,4 +156,3 @@ the agent as `registry_<slug>_<tool_name>`.
 - `patterns/strands-single-agent/tools/mcp_registry.py` — discovery + client builder
 - `patterns/strands-single-agent/basic_agent.py` — wires discovered clients into the agent
 - `infra-cdk/lib/utils/config-manager.ts`, `infra-cdk/lib/backend-construct.ts`, `infra-cdk/config.yaml` — CDK config, IAM, env
-- `infra-terraform/modules/backend/{variables,runtime}.tf`, `infra-terraform/{variables,main}.tf`, `terraform.tfvars.example` — Terraform parity

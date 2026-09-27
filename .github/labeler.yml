@@ -6,7 +6,6 @@ infrastructure:
   - changed-files:
       - any-glob-to-any-file:
           - "infra-cdk/**"
-          - "infra-terraform/**"
 
 backend:
   - changed-files:
