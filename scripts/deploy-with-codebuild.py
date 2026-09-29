@@ -512,9 +512,6 @@ def get_or_create_codebuild_project(
         '      - echo "Source dir contents:" && ls -la $CODEBUILD_SRC_DIR/\n'
         "      - cd $CODEBUILD_SRC_DIR/infra-cdk && cdk bootstrap\n"
         "      - cd $CODEBUILD_SRC_DIR/infra-cdk && cdk deploy --all --require-approval never\n"
-        "  post_build:\n"
-        "    commands:\n"
-        "      - cd $CODEBUILD_SRC_DIR && python scripts/deploy-frontend.py\n"
     )
 
     # Check if project already exists
@@ -962,13 +959,7 @@ def main() -> int:
     print()
     if final_status == "SUCCEEDED":
         log_success(f"Build finished with status: {final_status}")
-        try:
-            outputs = get_stack_outputs(stack_name=stack_name)
-            app_url = outputs.get("AmplifyUrl")
-            if app_url:
-                log_success(f"App URL: {app_url}")
-        except (subprocess.CalledProcessError, ValueError):
-            log_info("Could not retrieve App URL - check the AWS console")
+        log_info("Backend deployed. Frontend not deployed - run scripts/deploy-frontend.py when needed")
 
         # Success: remove all build resources, leaving zero footprint.
         print()
