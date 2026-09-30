@@ -6,7 +6,10 @@ from decimal import Decimal
 from typing import Any
 
 from ledgerlens.application.ports.database_repository import DatabaseRepository
-from ledgerlens.application.ports.errors import QueryNotFoundError
+from ledgerlens.application.ports.errors import (
+    DataSourceConnectionError,
+    QueryNotFoundError,
+)
 from ledgerlens.application.ports.query_provider import QueryProvider
 from ledgerlens.domain.value_objects.transaction_filters import TransactionFilters
 
@@ -82,3 +85,82 @@ def make_filters(**overrides: Any) -> TransactionFilters:
     }
     values.update(overrides)
     return TransactionFilters(**values)
+
+
+Outcome = list[dict[str, Any]] | Exception
+
+
+class FakeCursor:
+    """psycopg cursor double: records execute() and returns or raises its outcome."""
+
+    def __init__(self, outcome: Outcome) -> None:
+        """Serve ``outcome`` from execute()/fetchall()."""
+        self._outcome = outcome
+        self.executed: list[tuple[str, Mapping[str, object]]] = []
+
+    def __enter__(self) -> "FakeCursor":
+        """Support ``with connection.cursor() as cursor``."""
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Nothing to clean up."""
+
+    def execute(self, query: str, params: Mapping[str, object]) -> None:
+        """Record the call; raise the outcome if it is an exception."""
+        self.executed.append((query, params))
+        if isinstance(self._outcome, Exception):
+            raise self._outcome
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        """Return the canned rows."""
+        assert not isinstance(self._outcome, Exception)
+        return self._outcome
+
+
+class FakeConnection:
+    """psycopg connection double exposing cursor(), close() and closed."""
+
+    def __init__(self, outcome: Outcome | None = None) -> None:
+        """Every cursor from this connection serves ``outcome``."""
+        self._outcome: Outcome = outcome if outcome is not None else []
+        self.cursors: list[FakeCursor] = []
+        self.closed = False
+
+    def cursor(self) -> FakeCursor:
+        """Open a new cursor double."""
+        cursor = FakeCursor(self._outcome)
+        self.cursors.append(cursor)
+        return cursor
+
+    def close(self) -> None:
+        """Mark the connection closed."""
+        self.closed = True
+
+
+class FakeConnector:
+    """PsycopgConnector double; each connection() serves the next outcome.
+
+    The last outcome repeats. A DataSourceConnectionError outcome is raised by
+    connection() itself; any other exception is raised by cursor.execute().
+    """
+
+    def __init__(self, *outcomes: Outcome) -> None:
+        """Queue the outcomes; with none, every query returns no rows."""
+        self._outcomes: list[Outcome] = list(outcomes) or [[]]
+        self.connections: list[FakeConnection] = []
+        self.reset_calls = 0
+
+    def connection(self) -> Any:
+        """Return a connection double for the next outcome."""
+        outcome = (
+            self._outcomes.pop(0) if len(self._outcomes) > 1 else self._outcomes[0]
+        )
+        if isinstance(outcome, DataSourceConnectionError):
+            raise outcome
+        connection = FakeConnection(outcome)
+        self.connections.append(connection)
+        return connection
+
+    def reset(self) -> None:
+        """Count resets."""
+        self.reset_calls += 1
