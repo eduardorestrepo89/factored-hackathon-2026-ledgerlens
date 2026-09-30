@@ -1,7 +1,7 @@
 # `list_card_transactions` Lambda: Design
 
 **Date:** 2026-09-29
-**Status:** Approved in brainstorming, pending spec review
+**Status:** Approved. Implementation plan: `docs/superpowers/plans/2026-09-29-list-card-transactions-lambda.md`
 **Parent design:** [LEDGERLENS_PRODUCT_DESIGN.md](../../LEDGERLENS_PRODUCT_DESIGN.md), §7.4
 
 ---
@@ -52,11 +52,15 @@ gateway/tools/ledgerlens_tools/                     ← CDK asset root, shared b
     │   ├── repositories/postgresql_repository.py   ← PostgreSQLRepository(DatabaseRepository)
     │   └── queries/file_query_provider.py          ← FileQueryProvider(QueryProvider)
     ├── utils/
+    │   ├── connectors/base.py                      ← PsycopgConnector (Protocol)
     │   └── connectors/aurora_postgresql.py         ← AuroraPostgreSQLConnector
     ├── queries/
     │   └── postgresql/list_card_transactions.sql
     └── delivery/
-        ├── dependencies/list_card_transactions.py  ← build_dependencies(connector) and config
+        ├── settings.py                             ← DatabaseSettings.from_env, ConfigurationError
+        ├── database.py                             ← engine wiring shared by every tool
+        ├── presenters/card_transactions.py         ← result → agent JSON
+        ├── dependencies/list_card_transactions.py  ← build_dependencies(connector, settings)
         └── list_card_transactions_handler.py       ← handler(event, context)
 
 gateway/tools/list_card_transactions/tool_spec.json ← agent-facing name, description, inputSchema
@@ -73,7 +77,7 @@ Each tool adds files to the same core:
 - `application/use_cases/<tool>.py`
 - `queries/postgresql/<tool>.sql`
 - `delivery/<tool>_handler.py`
-- `delivery/dependencies/<tool>.py` with its own `build_dependencies(connector)`
+- `delivery/dependencies/<tool>.py` with its own `build_dependencies(connector, settings)`
 - `gateway/tools/<tool>/tool_spec.json`
 
 The ports, repository, query provider and connector are reused. Each tool deploys as **its own Lambda**, built from the same asset with a different handler, so each gets its own IAM role, timeout and Cedar action. Each handler imports `build_dependencies` from its own tool's dependencies module, so the function name is the same everywhere.
@@ -154,8 +158,8 @@ class CardTransaction:
     transaction_date: datetime
     card_last4: str
     amount: Decimal
-    currency: str
-    transaction_status: str
+    currency: str | None
+    transaction_status: str | None
     merchant_name: str | None
     merchant_category: str | None
     channel: str | None
@@ -170,7 +174,7 @@ class CardTransactionsResult:
     truncated: bool
 ```
 
-- Nullable fields are `| None` because the dataset has about 5% nulls in nullable columns.
+- Nullable fields (including `currency` and `transaction_status`) are `| None` because the dataset has about 5% nulls in nullable columns. A null there is returned as JSON null, not treated as a data-integrity error.
 - `transaction_status` on the entity is a `str`, not the enum. The database can hold values outside the three filter values (see Risks).
 
 ### 3.3 Use case (`application/use_cases/list_card_transactions.py`)
@@ -217,7 +221,8 @@ Error: `{"error": "<agent-facing message>"}`.
 - Optional filters are cast so the type is known even when the value is `NULL`, for example `(%(card_last4)s::text IS NULL OR RIGHT(p.product_number, 4) = %(card_last4)s)`.
 - Duplicate rows are removed with `DISTINCT ON (transaction_id)` inside a sub-query. The outer query orders by `transaction_date DESC` and applies `LIMIT %(limit)s`.
 - Partitions are pruned with `process_date BETWEEN %(date_from)s AND %(date_to)s`.
-- A header comment in the file lists its parameters and the assumptions still to be checked.
+- The merchant filter uses `strpos(lower(t.merchant_name), lower(%(merchant)s::text)) > 0` instead of `ILIKE`, so wildcard characters in the customer's text match literally and no `%%` escaping is needed.
+- A header comment in the file lists its parameters and the assumptions still to be checked. The file must contain no `%` outside placeholders (psycopg would read it as a placeholder); a unit test enforces this.
 
 ### 3.6 `tool_spec.json`
 One tool, `list_card_transactions`:
@@ -276,7 +281,7 @@ An empty result is **not** an error. It returns `count: 0`.
 - Any failure to open raises `DataSourceConnectionError`.
 
 ### 5.2 Repository (`infrastructure/repositories/postgresql_repository.py`)
-`PostgreSQLRepository(connector: AuroraPostgreSQLConnector)` implements `execute_query`:
+`PostgreSQLRepository(connector: PsycopgConnector)` implements `execute_query`:
 - It gets `connector.connection()`, runs the query with the params and returns `fetchall()`.
 - On `psycopg.OperationalError` it calls `connector.reset()` and **retries once**. A second failure raises `DataSourceConnectionError`.
 - Other `psycopg` errors map as shown in §4.1.
@@ -291,7 +296,7 @@ An empty result is **not** an error. It returns `count: 0`.
   | `DB_STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout |
   | `MAX_ROWS` | `25` | Row cap per call |
 
-- `build_dependencies(connector: AuroraPostgreSQLConnector) -> ListCardTransactionsUseCase` connects the pieces:
+- `build_dependencies(connector: PsycopgConnector, settings: DatabaseSettings) -> ListCardTransactionsUseCase` connects the pieces (settings are parsed once, at module load, by `DatabaseSettings.from_env`):
   - the connector
   - `PostgreSQLRepository`
   - `FileQueryProvider(<package>/queries/<DB_ENGINE>)`
@@ -302,7 +307,7 @@ An empty result is **not** an error. It returns `count: 0`.
 - When the module loads (outside `handler`), it creates the connector and calls `connector.connection()` **eagerly** inside `try/except`.
   - On failure it logs and continues, so the Lambda init doesn't crash.
   - The first query retries the connection lazily. If it fails again, the agent gets `DataSourceUnavailableError`.
-- The handler calls `build_dependencies(connector)` to get the use case. Building it is cheap (plain objects, the SQL is cached by the query provider), and the expensive part, the connection, stays global.
+- The handler calls `build_dependencies(connector, settings)` to get the use case. Building it is cheap (plain objects, the SQL is cached by the query provider), and the expensive part, the connection, stays global.
 
 ---
 
