@@ -407,7 +407,7 @@ Expected: `All checks passed!` (any import-order fixes are applied automatically
 - [ ] **Step 8: Commit**
 
 ```bash
-git add requirements-dev.txt gateway/tools/ledgerlens_tools tests/unit/ledgerlens_tools
+git add \n  gateway/tools/ledgerlens_tools/ledgerlens/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/domain/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/domain/entities/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/domain/value_objects/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/application/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/application/ports/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/application/use_cases/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/infrastructure/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/infrastructure/repositories/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/infrastructure/queries/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/utils/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/utils/connectors/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/delivery/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/delivery/dependencies/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/delivery/presenters/__init__.py \n  gateway/tools/ledgerlens_tools/ledgerlens/domain/errors.py \n  gateway/tools/ledgerlens_tools/ledgerlens/application/ports/errors.py \n  gateway/tools/ledgerlens_tools/requirements.txt \n  requirements-dev.txt \n  tests/unit/ledgerlens_tools/conftest.py \n  tests/unit/ledgerlens_tools/test_errors.py
 git commit -m "feat(tools): scaffold ledgerlens tools package and error hierarchy"
 ```
 
@@ -3430,7 +3430,7 @@ Expected: the existing `test_mcp_registry.py` still passes alongside the new tes
 Run: `grep -rnE "psycopg|boto3|ledgerlens\.(infrastructure|utils|delivery)" gateway/tools/ledgerlens_tools/ledgerlens/domain gateway/tools/ledgerlens_tools/ledgerlens/application`
 Expected: no output.
 
-Run: `grep -rnoE "TODO\(ledgerlens\): R[0-9]" gateway/tools/ledgerlens_tools | sort -t: -k3`
+Run: `grep -rnoE --include="*.py" --include="*.sql" --include="*.txt" "TODO\(ledgerlens\): R[0-9]" gateway/tools/ledgerlens_tools | sort -t: -k3`
 Expected: R1 twice (handler, requirements), R2 (connector), R3 (SQL), R4 twice (enum, SQL), R5 (handler), R6 (connector), R7 (connector), R8 (SQL), R9 (requirements).
 
 Run: `python -m ruff format gateway/tools/ledgerlens_tools tests/unit/ledgerlens_tools && python -m ruff check --fix gateway/tools/ledgerlens_tools tests/unit/ledgerlens_tools`

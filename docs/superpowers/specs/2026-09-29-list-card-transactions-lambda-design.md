@@ -272,7 +272,7 @@ An empty result is **not** an error. It returns `count: 0`.
 ## 5. Connection lifecycle and configuration
 
 ### 5.1 Connector (`utils/connectors/aurora_postgresql.py`)
-`AuroraPostgreSQLConnector(secret_arn: str, statement_timeout_ms: int, secrets_client: <boto3 client> | None = None)`:
+`AuroraPostgreSQLConnector(secret_arn: str, statement_timeout_ms: int, secrets_client: SecretsClient | None = None, connect: Callable[..., psycopg.Connection] = psycopg.connect)` (`connect` is injectable for tests):
 - `connection() -> psycopg.Connection` returns the cached connection. If it's missing or closed, it opens a new one:
   - reads the secret (host, port, dbname, username, password)
   - `sslmode="require"`, `connect_timeout=5`, `autocommit=True`, `row_factory=dict_row`
