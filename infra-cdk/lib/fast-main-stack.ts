@@ -6,6 +6,7 @@ import { AppConfig } from "./utils/config-manager"
 import { BackendConstruct } from "./backend-construct"
 import { AmplifyHostingConstruct } from "./amplify-hosting-construct"
 import { CognitoConstruct } from "./cognito-construct"
+import { DataConstruct } from "./data-construct"
 
 export interface FastAmplifyStackProps extends cdk.StackProps {
   config: AppConfig
@@ -15,6 +16,7 @@ export class FastMainStack extends cdk.Stack {
   public readonly amplifyHosting: AmplifyHostingConstruct
   public readonly backend: BackendConstruct
   public readonly cognito: CognitoConstruct
+  public readonly data: DataConstruct
 
   constructor(scope: Construct, id: string, props: FastAmplifyStackProps) {
     const description =
@@ -39,6 +41,9 @@ export class FastMainStack extends cdk.Stack {
       userPoolDomain: this.cognito.userPoolDomain,
       frontendUrl: this.amplifyHosting.amplifyUrl,
     })
+
+    // Step 3: Aurora DSQL and the job that loads the organizer snapshot into it
+    this.data = new DataConstruct(this, `${id}-data`, { config: props.config })
 
     // Outputs
     new cdk.CfnOutput(this, "AmplifyAppId", {
@@ -81,6 +86,17 @@ export class FastMainStack extends cdk.Stack {
       value: this.backend.feedbackApiUrl,
       description: "Feedback API Gateway URL",
       exportName: `${props.config.stack_name_base}-FeedbackApiUrl`,
+    })
+
+    new cdk.CfnOutput(this, "DsqlEndpoint", {
+      value: this.data.clusterEndpoint,
+      description: "Aurora DSQL cluster endpoint",
+      exportName: `${props.config.stack_name_base}-DsqlEndpoint`,
+    })
+
+    new cdk.CfnOutput(this, "DataLoadProject", {
+      value: this.data.loadProjectName,
+      description: "CodeBuild project that loads the organizer snapshot (make load-data)",
     })
 
     new cdk.CfnOutput(this, "AmplifyConsoleUrl", {

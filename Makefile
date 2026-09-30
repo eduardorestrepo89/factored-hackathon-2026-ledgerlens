@@ -56,3 +56,11 @@ lint-cicd:
 		exit 1; \
 	fi
 	@echo -e "$(GREEN)All code quality checks passed!$(NC)"
+
+
+# Load the organizer snapshot into Aurora DSQL with the CodeBuild job from
+# infra-cdk/lib/data-construct.ts. Run as: AWS_PROFILE=ledgerlens make load-data
+# The log tail keeps following; press Ctrl-C after "data_load: done".
+load-data:
+	aws codebuild start-build --project-name ledgerlens-data-load --query build.id --output text
+	aws logs tail /aws/codebuild/ledgerlens-data-load --follow --since 1m

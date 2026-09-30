@@ -61,6 +61,7 @@ export interface AppConfig {
      */
     mcp_registry: McpRegistryConfig
   }
+  data: DataConfig
 }
 
 /**
@@ -76,6 +77,14 @@ export interface McpRegistryConfig {
   enabled: boolean
   /** ARN or id of the AWS Agent Registry to discover records from. Required when enabled. */
   registry_id: string
+}
+
+/** Organizer snapshot load (docs/superpowers/specs/2026-09-29-data-loading-design.md). */
+export interface DataConfig {
+  /** Bank "today" for the load and every tool: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, no time zone. */
+  as_of: string
+  /** Event tables keep process_date in [as_of::date - (365 * window_years - 1), as_of::date]. */
+  window_years: number
 }
 
 export class ConfigManager {
@@ -167,6 +176,18 @@ export class ConfigManager {
         )
       }
 
+      // Validate the data-load snapshot settings
+      const asOf = String(parsedConfig.data?.as_of ?? "2026-06-17T23:59:59")
+      if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$/.test(asOf)) {
+        throw new Error(
+          `data.as_of '${asOf}' in ${configPath} must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS.`
+        )
+      }
+      const windowYears = parsedConfig.data?.window_years ?? 2
+      if (!Number.isInteger(windowYears) || windowYears < 1) {
+        throw new Error(`data.window_years in ${configPath} must be a positive integer.`)
+      }
+
       return {
         stack_name_base: stackNameBase,
         admin_user_email: parsedConfig.admin_user_email || null,
@@ -184,6 +205,7 @@ export class ConfigManager {
             registry_id: mcpRegistryId,
           },
         },
+        data: { as_of: asOf, window_years: windowYears },
       }
     } catch (error) {
       throw new Error(`Failed to parse configuration file ${configPath}: ${error}`)

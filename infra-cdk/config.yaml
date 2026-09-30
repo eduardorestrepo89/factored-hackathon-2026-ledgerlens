@@ -43,3 +43,10 @@ backend:
   #     - subnet-cccc3333dddd4444e
   #   security_group_ids:  # Optional - a default SG is created if omitted
   #     - sg-0abc1234def56789a
+
+
+# Organizer snapshot load (docs/superpowers/specs/2026-09-29-data-loading-design.md).
+# Change, then deploy and run `make load-data`. Reloads recreate bank/pii: never during a demo.
+data:
+  as_of: "2026-06-17T23:59:59"   # bank "today" for the load and for every tool
+  window_years: 2                # event tables: process_date in [as_of::date - (365 * window_years - 1), as_of::date]
