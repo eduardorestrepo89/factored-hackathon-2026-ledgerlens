@@ -60,7 +60,9 @@ lint-cicd:
 
 # Load the organizer snapshot into Aurora DSQL with the CodeBuild job from
 # infra-cdk/lib/data-construct.ts. Run as: AWS_PROFILE=ledgerlens make load-data
-# The log tail keeps following; press Ctrl-C after "data_load: done".
+# Waits for the build's log, then follows it; press Ctrl-C after "data_load: done".
+# The project allows one build at a time, so a second run cannot race the first.
 load-data:
 	aws codebuild start-build --project-name ledgerlens-data-load --query build.id --output text
+	@until aws logs describe-log-streams --log-group-name /aws/codebuild/ledgerlens-data-load --max-items 1 --query 'logStreams[0].logStreamName' --output text 2>/dev/null | grep -qv None; do echo "waiting for the build log..."; sleep 5; done
 	aws logs tail /aws/codebuild/ledgerlens-data-load --follow --since 1m

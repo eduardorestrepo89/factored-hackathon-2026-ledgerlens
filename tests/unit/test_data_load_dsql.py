@@ -97,8 +97,8 @@ def test_apply_schema_is_rerunnable():
             return [("idx_cases_customer_date",)]
         if sql.startswith("CREATE INDEX ASYNC"):
             return [("job-1",)]
-        if sql.startswith("SELECT sys.wait_for_job"):
-            return [(True,)]
+        if "FROM sys.jobs" in sql:
+            return [("completed", None)]
         return []
 
     plan, conn = load_plan(), FakeConn(respond)
@@ -116,30 +116,32 @@ def test_build_indexes_fails_when_a_job_fails():
     def respond(sql):
         if sql.startswith("CREATE INDEX"):
             return [("job-9",)]
-        if sql.startswith("SELECT sys.wait_for_job"):
-            return [(False,)]
         return [("failed", "Found duplicate key")]  # sys.jobs
 
     with pytest.raises(RuntimeError, match="job-9, failed: Found duplicate key"):
         build_indexes(
-            FakeConn(respond), ["CREATE INDEX ASYNC i ON bank.products (customer_id)"]
+            FakeConn(respond),
+            ["CREATE INDEX ASYNC i ON bank.products (customer_id)"],
+            sleep=lambda seconds: None,
         )
 
 
 @pytest.mark.unit
-def test_build_indexes_keeps_waiting_while_the_job_runs():
-    waits = iter([[(False,)], [(True,)]])  # first wait times out, second completes
+def test_build_indexes_polls_sys_jobs_until_complete():
+    statuses = iter([[("processing", None)], [("completed", None)]])
 
     def respond(sql):
-        if sql.startswith("CREATE INDEX"):
-            return [("job-1",)]
-        if sql.startswith("SELECT sys.wait_for_job"):
-            return next(waits)
-        return [("processing", None)]  # sys.jobs
+        return [("job-1",)] if sql.startswith("CREATE INDEX") else next(statuses)
 
-    conn = FakeConn(respond)
-    build_indexes(conn, ["CREATE INDEX ASYNC i ON bank.products (customer_id)"])
-    assert sum(s.startswith("SELECT sys.wait_for_job") for s in conn.sql()) == 2
+    conn, sleeps = FakeConn(respond), []
+    build_indexes(
+        conn,
+        ["CREATE INDEX ASYNC i ON bank.products (customer_id)"],
+        sleep=sleeps.append,
+    )
+    assert sleeps == [10]
+    # short polls only: a long sys.wait_for_job could outlive DSQL's 5-min transaction limit
+    assert not any("wait_for_job" in s for s in conn.sql())
 
 
 @pytest.mark.unit
@@ -211,3 +213,30 @@ def test_record_manifest_replaces_one_row_per_table():
         writes[1][1][0] == "bank.transactions" and writes[1][1][-1] == 10
     )  # rows_loaded
     assert conn.transactions == 2
+
+
+@pytest.mark.unit
+def test_loader_dry_run_cmd_validates_without_loading():
+    assert loader_cmd(
+        "c.dsql.us-east-1.on.aws", "s3://t/x.parquet", "bank.branches", dry_run=True
+    ) == [
+        "aurora-dsql-loader",
+        "load",
+        "--endpoint",
+        "c.dsql.us-east-1.on.aws",
+        "--source-uri",
+        "s3://t/x.parquet",
+        "--schema",
+        "bank",
+        "--table",
+        "branches",
+        "--dry-run",
+    ]
+
+
+@pytest.mark.unit
+def test_dsql_driver_imports():
+    """requirements.txt must install everything aurora_dsql_psycopg imports."""
+    import aurora_dsql_psycopg
+
+    assert callable(aurora_dsql_psycopg.connect)

@@ -88,6 +88,14 @@ def cmd_run(args) -> int:
         org_s3, secret["bucket"], secret["prefix"], [s.table for s in staged]
     )
 
+    empty = [table for table, (files, _) in prints.items() if files == 0]
+    if (
+        empty
+    ):  # recording lineage for 0 files would be wrong; usually a bad bucket/prefix
+        raise SystemExit(
+            f"no source files: {', '.join(empty)} (check bucket/prefix in HACKATHON_S3)"
+        )
+
     # 2. Upload, largest first so the longest load starts first
     team_s3 = boto3.client("s3")
     key_base = f"staging/{as_of:%Y%m%dT%H%M%S}"
@@ -107,7 +115,8 @@ def cmd_run(args) -> int:
     finally:
         conn.close()
 
-    # 4. Bulk load
+    # 4. Dry-run every table (seconds), then the bulk load (about an hour)
+    dsql.load_all(endpoint, uris, dry_run=True)
     dsql.load_all(endpoint, uris)
 
     # 5-6. Indexes, then verify counts and record lineage

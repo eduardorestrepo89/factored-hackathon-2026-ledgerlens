@@ -66,6 +66,7 @@ export class DataConstruct extends Construct {
         computeType: codebuild.ComputeType.LARGE,
       },
       timeout: cdk.Duration.minutes(180),
+      concurrentBuildLimit: 1, // two loads would race on drop/create/load
       environmentVariables: {
         AS_OF: { value: props.config.data.as_of },
         WINDOW_YEARS: { value: String(props.config.data.window_years) },
@@ -83,6 +84,8 @@ export class DataConstruct extends Construct {
             "runtime-versions": { python: "3.12" },
             commands: [
               "pip install --quiet -r requirements.txt",
+              // fail in seconds, not after staging, if a dependency is missing
+              'python -c "import duckdb, psycopg, aurora_dsql_psycopg, boto3, yaml"',
               `curl --proto '=https' --tlsv1.2 -sSfL -o /tmp/loader.tar.gz ${LOADER_URL}`,
               `echo "${LOADER_SHA256}  /tmp/loader.tar.gz" | sha256sum -c -`,
               "tar -xzf /tmp/loader.tar.gz -C /usr/local/bin aurora-dsql-loader",

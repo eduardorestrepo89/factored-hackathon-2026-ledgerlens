@@ -1,6 +1,7 @@
 """Everything that touches Aurora DSQL: schema, roles, grants, bulk load, indexes, lineage."""
 
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import astuple, dataclass
 from datetime import date, datetime
@@ -8,6 +9,7 @@ from datetime import date, datetime
 from data_load.ddl import SchemaPlan
 
 LOADER = "aurora-dsql-loader"
+POLL_SECONDS = 10
 
 INSERT_MANIFEST = (
     "INSERT INTO app.load_manifest (table_name, as_of, window_start, window_end, "
@@ -73,7 +75,7 @@ def apply_schema(conn, plan: SchemaPlan) -> None:
     build_indexes(conn, missing)
 
 
-def build_indexes(conn, statements: list[str]) -> None:
+def build_indexes(conn, statements: list[str], sleep=time.sleep) -> None:
     """Submit every CREATE INDEX ASYNC, then wait for each job."""
     with conn.cursor() as cur:
         jobs = []
@@ -81,15 +83,13 @@ def build_indexes(conn, statements: list[str]) -> None:
             cur.execute(stmt)
             jobs.append((cur.fetchone()[0], stmt))
         for job_id, stmt in jobs:
-            _wait_for_job(cur, job_id, stmt)
+            _wait_for_job(cur, job_id, stmt, sleep)
 
 
-def _wait_for_job(cur, job_id: str, stmt: str) -> None:
-    """sys.wait_for_job returns false on failure *or* timeout; sys.jobs tells them apart."""
+def _wait_for_job(cur, job_id: str, stmt: str, sleep) -> None:
+    """Poll sys.jobs with short statements: a long sys.wait_for_job call could
+    outlive DSQL's 5-minute transaction limit on a big index."""
     while True:
-        cur.execute("SELECT sys.wait_for_job(%s)", (job_id,))
-        if cur.fetchone()[0]:
-            return
         cur.execute("SELECT status, details FROM sys.jobs WHERE job_id = %s", (job_id,))
         rows = cur.fetchall()
         status, details = rows[0] if rows else ("missing", "job not found")
@@ -99,36 +99,32 @@ def _wait_for_job(cur, job_id: str, stmt: str) -> None:
             raise RuntimeError(
                 f"index build failed (job {job_id}, {status}: {details}): {stmt}"
             )
+        sleep(POLL_SECONDS)
 
 
-def loader_cmd(endpoint: str, uri: str, table: str) -> list[str]:
+def loader_cmd(endpoint: str, uri: str, table: str, dry_run: bool = False) -> list[str]:
     schema, name = table.split(".")
-    return [
-        LOADER,
-        "load",
-        "--endpoint",
-        endpoint,
-        "--source-uri",
-        uri,
-        "--schema",
-        schema,
-        "--table",
-        name,
-        "--on-conflict",
-        "do-nothing",
-        "--verify",
-        "count",
-    ]
+    cmd = [LOADER, "load", "--endpoint", endpoint, "--source-uri", uri]
+    cmd += ["--schema", schema, "--table", name]
+    if (
+        dry_run
+    ):  # checks the file against the table without loading: seconds, not an hour
+        return [*cmd, "--dry-run"]
+    return [*cmd, "--on-conflict", "do-nothing", "--verify", "count"]
 
 
 def load_all(
-    endpoint: str, uris: dict[str, str], run=subprocess.run, parallel: int = 4
+    endpoint: str,
+    uris: dict[str, str],
+    run=subprocess.run,
+    parallel: int = 4,
+    dry_run: bool = False,
 ) -> None:
-    """Load every staged file; once all have finished, fail if any table failed."""
+    """Load (or dry-run) every staged file; once all finish, fail if any table failed."""
 
     def load_one(table: str) -> str | None:
         try:
-            run(loader_cmd(endpoint, uris[table], table), check=True)
+            run(loader_cmd(endpoint, uris[table], table, dry_run), check=True)
         except subprocess.CalledProcessError as e:
             return f"{table} (exit {e.returncode})"
         return None
@@ -136,7 +132,10 @@ def load_all(
     with ThreadPoolExecutor(max_workers=parallel) as pool:
         failed = [f for f in pool.map(load_one, uris) if f]
     if failed:
-        raise RuntimeError("aurora-dsql-loader failed for: " + ", ".join(failed))
+        step = "dry run" if dry_run else "load"
+        raise RuntimeError(
+            f"aurora-dsql-loader {step} failed for: " + ", ".join(failed)
+        )
 
 
 def record_manifest(conn, rows: list[ManifestRow]) -> None:

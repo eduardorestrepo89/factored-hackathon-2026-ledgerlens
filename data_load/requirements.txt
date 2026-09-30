@@ -1,5 +1,6 @@
 duckdb==1.5.5
 boto3==1.43.105
 psycopg[binary]==3.3.6
-aurora-dsql-python-connector==0.2.7
+aurora-dsql-python-connector[psycopg]==0.2.7
+psycopg-pool==3.3.3
 PyYAML>=6.0.1

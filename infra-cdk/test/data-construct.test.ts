@@ -38,3 +38,15 @@ test("DSQL cluster, secret and data-load job", () => {
     },
   })
 })
+
+test("one build at a time; install fails fast on a missing Python module", () => {
+  const app = new cdk.App()
+  const stack = new cdk.Stack(app, "T", { env: { account: "111111111111", region: "us-east-1" } })
+  new DataConstruct(stack, "Data", { config })
+  Template.fromStack(stack).hasResourceProperties("AWS::CodeBuild::Project", {
+    ConcurrentBuildLimit: 1,
+    Source: Match.objectLike({
+      BuildSpec: Match.stringLikeRegexp("import duckdb, psycopg, aurora_dsql_psycopg, boto3, yaml"),
+    }),
+  })
+})

@@ -73,3 +73,9 @@ def test_fingerprint_counts_files_per_table():
 def test_drift_lists_changed_and_one_sided_tables():
     assert drift({"a": "1", "b": "2"}, {"a": "1", "b": "2"}) == []
     assert drift({"a": "1", "b": "2"}, {"a": "1", "b": "X", "c": "3"}) == ["b", "c"]
+
+
+@pytest.mark.unit
+def test_source_prefix_tolerates_a_missing_trailing_slash():
+    assert source_prefix("data", "bank.transactions") == "data/transactions/"
+    assert source_prefix("data", "pii.customers") == "data/customers.csv"

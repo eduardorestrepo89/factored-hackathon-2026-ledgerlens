@@ -8,7 +8,8 @@ from data_load.stage import EVENT_TABLES
 def source_prefix(prefix: str, table: str) -> str:
     """S3 key prefix of one table's source files; `table` may be schema-qualified."""
     name = table.split(".")[-1]
-    return f"{prefix}{name}/" if name in EVENT_TABLES else f"{prefix}{name}.csv"
+    base = prefix.rstrip("/") + "/" if prefix.strip("/") else ""
+    return f"{base}{name}/" if name in EVENT_TABLES else f"{base}{name}.csv"
 
 
 def list_objects(s3, bucket: str, key_prefix: str) -> list[tuple[str, str]]:
