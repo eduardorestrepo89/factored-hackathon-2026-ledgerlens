@@ -1,0 +1,47 @@
+[
+  {
+    "name": "list_card_transactions",
+    "description": "Searches the customer's card transactions. Use to find the transaction the customer is asking about, or to list recent activity on a card. Returns at most 25 rows, newest first, as JSON with 'transactions', 'count' and 'truncated'. Amounts are strings with 2 decimals in the transaction's currency. If 'truncated' is true, more matches exist: narrow the dates or add a card, merchant, amount or status filter.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "The authenticated customer's id from get_session_context."
+        },
+        "card_last4": {
+          "type": "string",
+          "description": "Optional. Last 4 digits of the card."
+        },
+        "date_from": {
+          "type": "string",
+          "format": "date",
+          "description": "Optional. First date, YYYY-MM-DD. Defaults to 30 days before date_to. The range can't exceed 180 days."
+        },
+        "date_to": {
+          "type": "string",
+          "format": "date",
+          "description": "Optional. Last date, YYYY-MM-DD. Defaults to today (UTC)."
+        },
+        "merchant": {
+          "type": "string",
+          "description": "Optional. Case-insensitive partial match on the merchant name, up to 100 characters."
+        },
+        "min_amount": {
+          "type": "number",
+          "description": "Optional. Smallest amount to include, zero or greater."
+        },
+        "max_amount": {
+          "type": "number",
+          "description": "Optional. Largest amount to include, zero or greater."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Approved", "Declined", "Pending"],
+          "description": "Optional. Only transactions with this status."
+        }
+      },
+      "required": ["customer_id"]
+    }
+  }
+]
