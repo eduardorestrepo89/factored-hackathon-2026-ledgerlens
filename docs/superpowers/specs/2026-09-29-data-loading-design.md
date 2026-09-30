@@ -131,7 +131,8 @@ The tool Lambdas receive the same `as_of` as `LEDGERLENS_AS_OF`. Changing the da
 5. **`app.load_manifest`:**
    - **Columns:** `table_name`, `as_of`, `window_start`, `window_end`, `source_uri`, `source_files`, `source_etag_digest`, `staged_uri`, `staged_sha256`, `rows_staged`, `rows_loaded`, `loaded_at`.
    - **Key:** primary key `(table_name, as_of)`.
-6. **Roles:**
+6. **`app.cases.complaint_id`** becomes `claim_id varchar(40)`, because hand-offs now reference `app.claims` instead of `bank.complaints`.
+7. **Roles:**
    - **`ll_loader` is removed** (D7).
    - **`ll_read`** also gets `SELECT` on `app.card_blocks` and `app.claims`.
    - **`ll_write`** loses `UPDATE` on `bank.products` and `INSERT` on `bank.complaints`. It gains `INSERT` on `app.card_blocks` and `app.claims`.
