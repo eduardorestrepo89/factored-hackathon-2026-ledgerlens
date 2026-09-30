@@ -1,0 +1,8 @@
+# Runtime dependencies for every LedgerLens tool Lambda (shared asset).
+# boto3 is provided by the AWS Lambda Python runtime and is not listed here.
+#
+# TODO(ledgerlens): R1 - no CDK yet: nothing packages or deploys this asset, and no
+#   Gateway target points at it. See the CDK spec (product design section 15).
+# TODO(ledgerlens): R9 - psycopg[binary] ships native wheels. Build with a CDK
+#   PythonFunction (Docker bundling, ARM64 Linux); plain Code.fromAsset won't work.
+psycopg[binary]>=3.2,<4
