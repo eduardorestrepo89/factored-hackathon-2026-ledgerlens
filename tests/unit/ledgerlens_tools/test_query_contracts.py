@@ -53,6 +53,15 @@ def test_sql_has_no_stray_percent_signs() -> None:
     assert "%" not in PLACEHOLDER.sub("", sql())
 
 
+def test_sql_orders_null_transaction_dates_last() -> None:
+    # PostgreSQL sorts NULLs first under DESC; a NULL-dated row would then
+    # always land inside LIMIT and fail the whole call as DataIntegrityError.
+    order_bys = re.findall(r"ORDER BY[^\n]*", sql())
+    assert len(order_bys) == 2
+    for order_by in order_bys:
+        assert "transaction_date DESC NULLS LAST" in order_by
+
+
 def test_sql_selects_every_column_the_use_case_maps() -> None:
     text = sql()
     for column in (

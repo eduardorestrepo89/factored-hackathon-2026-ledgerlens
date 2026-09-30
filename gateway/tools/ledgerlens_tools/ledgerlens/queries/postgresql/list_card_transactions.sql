@@ -49,7 +49,7 @@ FROM (
       AND (%(min_amount)s::numeric IS NULL OR t.amount >= %(min_amount)s::numeric)
       AND (%(max_amount)s::numeric IS NULL OR t.amount <= %(max_amount)s::numeric)
       AND (%(status)s::text IS NULL OR t.transaction_status = %(status)s::text)
-    ORDER BY t.transaction_id, t.transaction_date DESC
+    ORDER BY t.transaction_id, t.transaction_date DESC NULLS LAST
 ) AS deduplicated
-ORDER BY deduplicated.transaction_date DESC, deduplicated.transaction_id
+ORDER BY deduplicated.transaction_date DESC NULLS LAST, deduplicated.transaction_id
 LIMIT %(limit)s
