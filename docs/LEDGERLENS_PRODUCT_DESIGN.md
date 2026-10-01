@@ -82,7 +82,7 @@ AgentCore Runtime (Strands agent, Claude Sonnet 4.5)
    ▼
 AgentCore Gateway (Cognito machine JWT → Cedar policy engine, ENFORCE)
    ▼
-Lambda tools (in VPC) ──> Aurora PostgreSQL (customer data, read replica for reads)
+Lambda tools (IAM token auth) ──> Aurora DSQL (customer data, serverless, PostgreSQL-compatible)
    └─ human_agent_hand_off ──> SNS (human agent queue / alert)
 ```
 
@@ -95,7 +95,7 @@ Lambda tools (in VPC) ──> Aurora PostgreSQL (customer data, read replica for
 | AgentCore Memory | Conversation history per (customer, session) | Exists; long-term memory off |
 | AgentCore Gateway + Cedar | Exposes the tools over MCP and enforces access per customer | Exists; replace the sample tool |
 | 9 Lambda tools | Section 7 | **To build** |
-| Aurora PostgreSQL | ERD data model | **To build** |
+| Aurora DSQL | ERD data model; tools connect with short-lived IAM tokens, no DB password | **To build.** `list_card_transactions` is already written for it. |
 | SNS | Human hand-off alerts | **To build** |
 
 ---
@@ -108,7 +108,7 @@ Lambda tools (in VPC) ──> Aurora PostgreSQL (customer data, read replica for
 1. The customer signs in with Cognito. The Runtime validates the user JWT and the agent reads `sub` (`patterns/utils/auth.py: extract_user_id_from_context`).
 2. The agent requests a machine token with `aws_client_metadata={"verified_user_id": sub}` (`get_gateway_access_token`).
 3. **Pre-token Lambda (change):**
-   - It looks up `sub` in a new mapping table, `customer_identity(cognito_sub → customer_id)`. Use DynamoDB for this, so the trigger stays fast and outside the VPC.
+   - It looks up `sub` in a new mapping table, `customer_identity(cognito_sub → customer_id)`. Use DynamoDB for this, so the trigger stays fast and needs no database connection.
    - It adds a claim: `customer_id = "CUS-000123"`.
 4. The Gateway validates the machine JWT, and the claims become Cedar principal tags: `principal.getTag("customer_id")`.
 5. Cedar checks every `tools/call`: `context.input.customer_id == principal.getTag("customer_id")`. See section 10.
@@ -599,6 +599,8 @@ RETURNING product_id, RIGHT(product_number, 4) AS last4, product_status;
 -- More than 1 row → ambiguous last 4 digits: abort and ask for more detail.
 ```
 > In production, this calls the card processor's block API, and the database update mirrors the result. Every call is written to an audit table.
+>
+> **On Aurora DSQL**, writes use optimistic concurrency: a conflicting transaction fails at commit with a serialization error (SQLSTATE `40001`). The write tools (`block_credit_card`, `open_claim`) must retry the whole transaction a few times on `40001`. The read tools only run SELECTs, so they never see it.
 
 ---
 
@@ -696,28 +698,36 @@ home AS (SELECT country FROM customers WHERE customer_id = :customer_id)
 
 ### 8.2 Recommended indexes
 ```sql
-CREATE INDEX ON transactions             (customer_id, process_date);
-CREATE INDEX ON transactions             (customer_id, transaction_date DESC);
-CREATE INDEX ON digital_events           (customer_id, process_date);
-CREATE INDEX ON call_center_interactions (customer_id, process_date);
-CREATE INDEX ON complaints               (customer_id) WHERE closing_date IS NULL;
-CREATE INDEX ON complaints               (category, subcategory, creation_date);
-CREATE INDEX ON products                 (customer_id);
-CREATE UNIQUE INDEX ON daily_exchange_rates (date, source_currency, target_currency);
+CREATE INDEX ASYNC ON transactions             (customer_id, process_date);
+CREATE INDEX ASYNC ON transactions             (customer_id, transaction_date);
+CREATE INDEX ASYNC ON digital_events           (customer_id, process_date);
+CREATE INDEX ASYNC ON call_center_interactions (customer_id, process_date);
+CREATE INDEX ASYNC ON complaints               (customer_id) WHERE closing_date IS NULL;
+CREATE INDEX ASYNC ON complaints               (category, subcategory, creation_date);
+CREATE INDEX ASYNC ON products                 (customer_id);
+CREATE UNIQUE INDEX ASYNC ON daily_exchange_rates (date, source_currency, target_currency);
 ```
+> Aurora DSQL always builds indexes in the background, so `ASYNC` is required. Each statement returns a `job_id`; wait for it with `sys.wait_for_job(job_id)` before load testing. DSQL index keys take no `ASC`/`DESC`, so the newest-first transaction listing relies on the planner reading `(customer_id, transaction_date)`; check the plan on a real cluster (R3).
 
-### 8.3 Optional: materialized baseline
-If the session-start queries are too slow, precompute each customer's habits every night, then read one row at session start:
+### 8.3 Optional: precomputed baseline
+If the session-start queries are too slow, precompute each customer's habits every night, then read one row at session start.
+
+Aurora DSQL has no materialized views, so a nightly job refreshes a regular `customer_tx_baseline` table. Arrays exist only at query time on DSQL, so the lists are stored as `jsonb`. A transaction can change at most 3,000 rows, so the job loops over `customer_id` ranges, one transaction per range:
 ```sql
-CREATE MATERIALIZED VIEW customer_tx_baseline AS
+INSERT INTO customer_tx_baseline (customer_id, p95_usd, countries_90d, merchants_90d)
 SELECT customer_id,
        percentile_cont(0.95) WITHIN GROUP (ORDER BY amount_usd) AS p95_usd,
-       array_agg(DISTINCT transaction_country)                  AS countries_90d,
-       array_agg(DISTINCT merchant_name)                        AS merchants_90d
+       jsonb_agg(DISTINCT transaction_country)                  AS countries_90d,
+       jsonb_agg(DISTINCT merchant_name)                        AS merchants_90d
 FROM transactions
 WHERE process_date >= current_date - 90
   AND transaction_status = 'Approved'
-GROUP BY customer_id;
+  AND customer_id >= :range_start AND customer_id < :range_end   -- at most 3,000 customers per run
+GROUP BY customer_id
+ON CONFLICT (customer_id) DO UPDATE
+SET p95_usd       = EXCLUDED.p95_usd,
+    countries_90d = EXCLUDED.countries_90d,
+    merchants_90d = EXCLUDED.merchants_90d;
 ```
 
 ---
@@ -880,13 +890,13 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 | Task | Why |
 |---|---|
-| Load the 13 ERD tables into Aurora PostgreSQL, with `process_date` range partitions on the fact tables | Performance |
+| Load the 13 ERD tables into Aurora DSQL. DSQL partitions and distributes data itself, so the fact tables get no manual `process_date` partitions; they rely on the section 8.2 indexes. Load in batches of at most 3,000 rows per transaction (the DSQL limit). | Performance |
 | De-duplicate `transactions` (about 2% duplicates), or rely on `tx_dedup` everywhere | Stops the agent from showing duplicate charges, which would create the very confusion it's supposed to fix |
 | Leave foreign keys unenforced until orphan rows are cleaned | Noted in the data dictionary |
 | **Confirm the enum values:** `transaction_status`, `product_type`, `product_status`, complaint `status`/`category`/`subcategory`, `response_code`, `page_title` patterns | The queries above use assumed values |
 | Create `customer_identity` (DynamoDB) and link the demo Cognito users to `customer_id`s | Identity chain |
 | Choose an `:as_of` inside the dataset's time range for demos | The historical data has nothing "recent" relative to `now()` |
-| Create a read-only DB role for the read tools and a separate role for `block_credit_card` / `open_claim` | Least privilege |
+| Create a read-only DB role (`ledgerlens_readonly`, `SELECT` only) for the read tools and a separate role for `block_credit_card` / `open_claim`. Map each to its Lambda's IAM role with `AWS IAM GRANT`. DSQL rejects `default_transaction_read_only`, so the grants are the only write guard. | Least privilege |
 
 ---
 
@@ -918,12 +928,12 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 **Infrastructure (`infra-cdk/`)**
 - [ ] Replace `AmplifyHostingConstruct` with CloudFront + S3 (OAC). Update the Cognito callback URLs and the backend CORS settings (`fast-main-stack.ts`).
-- [ ] Create a VPC (or import one), Aurora PostgreSQL Serverless v2, a Secrets Manager DB secret and, optionally, RDS Proxy.
+- [ ] Create an Aurora DSQL cluster. No VPC, DB secret or RDS Proxy is needed: the tools reach the cluster endpoint over TLS with IAM tokens. Add a PrivateLink endpoint only if traffic must stay private.
 - [ ] Create the DynamoDB table `ledgerlens-customer-identity`.
 - [ ] Create the SNS topic `ledgerlens-human-handoff`.
-- [ ] Create 9 tool Lambdas (Python 3.13, ARM64, in the VPC), each with `gateway/tools/<tool>/tool_spec.json`.
+- [ ] Create 9 tool Lambdas (Python 3.13, ARM64), each with `gateway/tools/<tool>/tool_spec.json`. Set `DB_ENGINE=aurora_dsql`, `DSQL_CLUSTER_ENDPOINT` and `DSQL_DB_USER`. Keep the Lambda timeout well under the agent's tool timeout, because DSQL has no per-query timeout.
 - [ ] Call `gateway.addLambdaTarget(...)` once per tool, replacing `sample-tool-target`.
-- [ ] Lambda IAM: read the DB secret, connect through the VPC, publish to SNS (hand-off only).
+- [ ] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`), publish to SNS (hand-off only).
 - [ ] Pre-token Lambda: look up `customer_id` in DynamoDB and add it as a claim. Grant `dynamodb:GetItem`.
 - [ ] Cedar: split `gateway/policies/policy.cedar` into the 3 statements in section 10 (update the custom resource if needed).
 
@@ -942,7 +952,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 | Phase | Deliverable | Demo |
 |---|---|---|
-| **P0: Foundation** | Aurora + data load, identity mapping, `customer_id` claim, Cedar rules, one read tool working end to end (`list_credit_cards`) | "Show my cards" works only for the signed-in customer |
+| **P0: Foundation** | Aurora DSQL + data load, identity mapping, `customer_id` claim, Cedar rules, one read tool working end to end (`list_credit_cards`) | "Show my cards" works only for the signed-in customer |
 | **P1: A2 clarification** | `list_card_transactions`, `explain_transaction` | J2: foreign-currency charge explained with the rate |
 | **P2: A1 opening** | `get_session_context`, `classify_call_type`, session start in code, the new prompt | J1: agent opens with the declined charge |
 | **P3: A2 fraud** | `transaction_fraud_detection`, `block_credit_card`, `open_claim`, `human_agent_hand_off` + SNS | J3: full fraud flow |
@@ -957,7 +967,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | Q1 | Actual values for `transaction_status`, `response_code`, `product_status`, complaint `status`/`category`/`subcategory` and `page_title` | Every WHERE clause and the reason taxonomy |
 | Q2 | Does the AgentCore Gateway forward JWT claims to Lambda targets? If it does, the Lambdas can read `customer_id` from the token instead of trusting the input, and Cedar check 2 becomes a second layer. | Security design, section 5 |
 | Q3 | Do `forbid` statements on `context.input` affect tool visibility at `tools/list`? | Cedar, section 10 |
-| Q4 | Should `block_credit_card` write to Aurora only (demo), or call a card processor sandbox? | Scope of P3 |
+| Q4 | Should `block_credit_card` write to Aurora DSQL only (demo), or call a card processor sandbox? | Scope of P3 |
 | Q5 | Who receives the SNS hand-off: email for the demo, or a contact-center queue? | P3 |
 | Q6 | Which customer language(s) are in the demo dataset? `customers` has no language field, so it's inferred from `country`. | Style section of the prompt |
 | Q7 | Dataset time range, to choose `:as_of` for demos | All the "recent" windows |

@@ -3,6 +3,7 @@
 **Date:** 2026-09-30
 **Status:** Draft, awaiting review
 **Parent design:** [2026-09-29-list-card-transactions-lambda-design.md](2026-09-29-list-card-transactions-lambda-design.md)
+**Updated 2026-10-01:** the code now lives in `gateway/tools/list_card_transactions/list_card_transactions_lambda/`. See [2026-10-01-self-contained-tool-folders-design.md](2026-10-01-self-contained-tool-folders-design.md).
 
 ---
 

@@ -4,6 +4,7 @@
 **Status:** Approved. Implementation plan: `docs/superpowers/plans/2026-09-29-list-card-transactions-lambda.md`
 **Parent design:** [LEDGERLENS_PRODUCT_DESIGN.md](../../LEDGERLENS_PRODUCT_DESIGN.md), §7.4
 **Updated 2026-09-30:** Aurora DSQL replaces Aurora PostgreSQL. See [2026-09-30-dsql-engine-design.md](2026-09-30-dsql-engine-design.md); §2, §4, §5, §6, §7 and §8 below already describe the DSQL version.
+**Updated 2026-10-01:** the code now lives in `gateway/tools/list_card_transactions/list_card_transactions_lambda/`. See [2026-10-01-self-contained-tool-folders-design.md](2026-10-01-self-contained-tool-folders-design.md).
 
 ---
 
