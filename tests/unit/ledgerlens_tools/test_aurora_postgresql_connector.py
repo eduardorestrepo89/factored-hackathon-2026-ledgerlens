@@ -101,6 +101,7 @@ def test_opens_a_read_only_tls_connection_from_the_secret() -> None:
             "user": "ledgerlens_readonly",
             "password": "not-a-real-password",
             "sslmode": "require",
+            "client_encoding": "utf8",
             "connect_timeout": 5,
             "autocommit": True,
             "row_factory": dict_row,

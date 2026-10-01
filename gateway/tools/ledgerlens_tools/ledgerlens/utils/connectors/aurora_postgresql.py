@@ -102,6 +102,8 @@ class AuroraPostgreSQLConnector(PsycopgConnector):
                 user=credentials["username"],
                 password=credentials["password"],
                 sslmode="require",
+                # Accented merchant names and filters must reach the server intact.
+                client_encoding="utf8",
                 connect_timeout=_CONNECT_TIMEOUT_SECONDS,
                 autocommit=True,
                 row_factory=dict_row,

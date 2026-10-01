@@ -79,7 +79,7 @@ def test_non_ascii_text_is_not_escaped(
 
     response = module.handler(EVENT, make_context())
 
-    assert "Café Aroma" in response["content"][0]["text"]
+    assert "Óptica Visión" in response["content"][0]["text"]
 
 
 def test_empty_result_is_a_success(

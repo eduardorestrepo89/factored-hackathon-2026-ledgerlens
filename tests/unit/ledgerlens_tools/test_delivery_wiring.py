@@ -196,11 +196,11 @@ def make_transaction(**overrides: object) -> CardTransaction:
         "amount": Decimal("12.5"),
         "currency": "COP",
         "transaction_status": "Approved",
-        "merchant_name": "Café Aroma",
-        "merchant_category": "Restaurants",
+        "merchant_name": "Óptica Visión",
+        "merchant_category": "Health",
         "channel": "POS",
         "transaction_city": "Medellín",
-        "transaction_country": "CO",
+        "transaction_country": "Colombia",
     }
     values.update(overrides)
     return CardTransaction(**values)  # type: ignore[arg-type]
@@ -215,13 +215,13 @@ def test_presenter_shapes_the_agent_json() -> None:
                 "transaction_id": "TX-1",
                 "transaction_date": "2026-09-20T14:30:00-05:00",
                 "card_last4": "4242",
-                "merchant_name": "Café Aroma",
-                "merchant_category": "Restaurants",
+                "merchant_name": "Óptica Visión",
+                "merchant_category": "Health",
                 "amount": "12.50",
                 "currency": "COP",
                 "channel": "POS",
                 "transaction_city": "Medellín",
-                "transaction_country": "CO",
+                "transaction_country": "Colombia",
                 "transaction_status": "Approved",
             }
         ],

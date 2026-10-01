@@ -137,7 +137,7 @@ def test_card_last4_must_be_exactly_four_ascii_digits(value: object) -> None:
 
 
 def test_merchant_is_trimmed() -> None:
-    assert parse(merchant="  Café Aroma ").merchant == "Café Aroma"
+    assert parse(merchant="  Óptica Visión ").merchant == "Óptica Visión"
 
 
 def test_merchant_of_100_characters_is_allowed() -> None:
@@ -203,6 +203,7 @@ def test_equal_min_and_max_amount_is_allowed() -> None:
         ("Approved", TransactionStatus.APPROVED),
         ("declined", TransactionStatus.DECLINED),
         (" PENDING ", TransactionStatus.PENDING),
+        ("reversed", TransactionStatus.REVERSED),
     ],
 )
 def test_status_matches_case_insensitively(
@@ -211,9 +212,19 @@ def test_status_matches_case_insensitively(
     assert parse(status=value).status is expected
 
 
+def test_status_enum_matches_the_data_dictionary() -> None:
+    # transaction_status values confirmed with the dataset's categorical values.
+    assert [s.value for s in TransactionStatus] == [
+        "Approved",
+        "Declined",
+        "Pending",
+        "Reversed",
+    ]
+
+
 def test_unknown_status_lists_the_allowed_values() -> None:
     error = assert_invalid("status", status="Refunded")
-    assert error.reason == "must be one of Approved, Declined, Pending"
+    assert error.reason == "must be one of Approved, Declined, Pending, Reversed"
 
 
 def test_filters_are_immutable() -> None:

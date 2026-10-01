@@ -119,6 +119,7 @@ class TransactionStatus(str, Enum):
     APPROVED = "Approved"
     DECLINED = "Declined"
     PENDING = "Pending"
+    REVERSED = "Reversed"
 
 
 @dataclass(frozen=True)
@@ -176,7 +177,8 @@ class CardTransactionsResult:
 ```
 
 - Nullable fields (including `currency` and `transaction_status`) are `| None` because the dataset has about 5% nulls in nullable columns. A null there is returned as JSON null, not treated as a data-integrity error.
-- `transaction_status` on the entity is a `str`, not the enum. The database can hold values outside the three filter values (see Risks).
+- `transaction_status` on the entity is a `str`, not the enum, so an unexpected value in the data never fails the call. The enum holds every value in the dataset (`Approved`, `Declined`, `Pending`, `Reversed`).
+- Categorical columns are returned exactly as stored. `transaction_country` holds country names, not ISO codes, and the data mixes `Mexico` and `México`; no filter uses it, so nothing depends on normalising it.
 
 ### 3.3 Use case (`application/use_cases/list_card_transactions.py`)
 ```python
@@ -222,13 +224,15 @@ Error: `{"error": "<agent-facing message>"}`.
 - Optional filters are cast so the type is known even when the value is `NULL`, for example `(%(card_last4)s::text IS NULL OR RIGHT(p.product_number, 4) = %(card_last4)s)`.
 - Duplicate rows are removed with `DISTINCT ON (transaction_id)` inside a sub-query. The outer query orders by `transaction_date DESC` and applies `LIMIT %(limit)s`.
 - Partitions are pruned with `process_date BETWEEN %(date_from)s AND %(date_to)s`.
-- The merchant filter uses `strpos(lower(t.merchant_name), lower(%(merchant)s::text)) > 0` instead of `ILIKE`, so wildcard characters in the customer's text match literally and no `%%` escaping is needed.
+- The merchant filter uses `strpos(...) > 0` instead of `ILIKE`, so wildcard characters in the customer's text match literally and no `%%` escaping is needed.
+- The merchant filter ignores accents as well as case, because merchant names carry them (`Clínica Médica`, `Óptica Visión`, `Servicios Públicos`) and customers often type without them. Both sides go through the same `lower(translate(x, '<accented>', '<plain>'))`. `translate()` maps upper- and lower-case Spanish and Portuguese accents first, because `lower()` can leave non-ASCII letters alone under a C collation. It is core PostgreSQL, so no `unaccent` extension is needed (Aurora DSQL supports none). Unit tests check that both sides use the same mapping, that each pair only strips the accent, and that it covers every accented letter in the dataset's merchant names.
+- The connector pins `client_encoding=utf8` so accented text reaches the server intact.
 - A header comment in the file lists its parameters and the assumptions still to be checked. The file must contain no `%` outside placeholders (psycopg would read it as a placeholder); a unit test enforces this.
 
 ### 3.6 `tool_spec.json`
 One tool, `list_card_transactions`:
 - The description comes from parent design §7.4.
-- `inputSchema` properties: `customer_id` (required), `card_last4`, `date_from`, `date_to`, `merchant`, `min_amount`, `max_amount`, and `status` (an enum).
+- `inputSchema` properties: `customer_id` (required), `card_last4`, `date_from`, `date_to`, `merchant`, `min_amount`, `max_amount`, and `status` (an enum of every `TransactionStatus` value; a unit test keeps them in sync).
 
 ---
 
@@ -360,7 +364,7 @@ These are also left as `TODO(ledgerlens):` comments in the code, at the place ea
 | R1 | **Infrastructure isn't written yet.** No CDK Lambda, Gateway target, VPC or secret grant, so the tool can't be deployed or called by the agent yet. | `delivery/list_card_transactions_handler.py` module docstring, `requirements.txt` header | CDK spec (parent design §15) |
 | R2 | **Aurora doesn't exist.** `DB_SECRET_ARN` has no real secret to point to. | `utils/connectors/aurora_postgresql.py` | Aurora and data-load spec |
 | R3 | **The SQL is untested against a real database.** Column names match the ERD, but syntax and performance aren't verified. | `queries/postgresql/list_card_transactions.sql` header | Integration tests with a PostgreSQL container |
-| R4 | **`transaction_status` values are assumed** (`Approved`/`Declined`/`Pending`) and not confirmed with the data dictionary (parent design Q1). | `domain/value_objects/transaction_filters.py` (`TransactionStatus`), the SQL header | Confirm with the data dictionary; update the enum and `tool_spec.json` |
+| R4 | ~~`transaction_status` values are assumed~~ **Resolved:** confirmed against the dataset's categorical values (`Approved`, `Declined`, `Pending`, `Reversed`). | `TransactionStatus`, `tool_spec.json` | — |
 | R5 | **`customer_id` trusts the tool input.** Authorization relies on Cedar matching it to the token's `customer_id` claim. That policy and the claim don't exist yet (parent design §5 and §10). | Handler module docstring | Cedar and pre-token claim spec |
 | R6 | **Read-only DB user assumed.** `default_transaction_read_only=on` guards against writes, but the DB user itself should be read-only. | Connector | Aurora spec: create `ledgerlens_readonly` |
 | R7 | **Connection scaling.** One connection per warm container. Many concurrent containers could exhaust Aurora's connection limit. Accepted for the demo; no mitigation will be built. | Connector | If this goes beyond a demo: cap `reservedConcurrentExecutions` per tool Lambda, then RDS Proxy (no code change, only the secret's host). The Data API is an alternative as a new repository adapter. |

@@ -3,6 +3,7 @@
 import dataclasses
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,35 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 QUERIES_DIR = REPO_ROOT / "gateway/tools/ledgerlens_tools/ledgerlens/queries/postgresql"
 TOOL_SPEC = REPO_ROOT / "gateway/tools/list_card_transactions/tool_spec.json"
 PLACEHOLDER = re.compile(r"%\((\w+)\)s")
+TRANSLATE = re.compile(r"translate\(([^,]+), '([^']*)', '([^']*)'\)")
+
+# Merchant names in the dataset (transactions.merchant_name categorical values).
+KNOWN_MERCHANTS = (
+    "Boutique Moda",
+    "Cable TV",
+    "Centro Comercial",
+    "Cine Premium",
+    "Clínica Médica",
+    "Conciertos Live",
+    "Empresa Telefónica",
+    "Estación de Servicio",
+    "Farmacia Salud",
+    "Ferretería",
+    "Gasolinera Express",
+    "Internet Plus",
+    "Laboratorio Central",
+    "Mercado Central",
+    "Restaurante El Buen Sabor",
+    "Servicios Públicos",
+    "Streaming Music",
+    "Super Ahorro",
+    "Taxi Seguro",
+    "Teatro Nacional",
+    "Tienda Don José",
+    "Tienda General",
+    "Uber",
+    "Óptica Visión",
+)
 
 
 def sql() -> str:
@@ -62,6 +92,42 @@ def test_sql_orders_null_transaction_dates_last() -> None:
     assert len(order_bys) == 2
     for order_by in order_bys:
         assert "transaction_date DESC NULLS LAST" in order_by
+
+
+def strip_accents(text: str) -> str:
+    """Drop combining marks: 'Ó' -> 'O', 'ñ' -> 'n'."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def merchant_folds() -> list[tuple[str, str, str]]:
+    """Return (argument, from_chars, to_chars) of each translate() in the SQL."""
+    return [(arg.strip(), src, dst) for arg, src, dst in TRANSLATE.findall(sql())]
+
+
+def test_merchant_filter_folds_accents_on_both_sides_identically() -> None:
+    folds = merchant_folds()
+
+    assert [arg for arg, _, _ in folds] == ["t.merchant_name", "%(merchant)s::text"]
+    assert folds[0][1:] == folds[1][1:]
+    assert "strpos(lower(translate(t.merchant_name," in sql()
+
+
+def test_merchant_accent_mapping_strips_each_accent() -> None:
+    _, src, dst = merchant_folds()[0]
+
+    assert len(src) == len(dst)
+    for accented, plain in zip(src, dst, strict=True):
+        assert strip_accents(accented) == plain
+
+
+def test_merchant_accent_mapping_covers_every_known_merchant_name() -> None:
+    _, src, _ = merchant_folds()[0]
+    accented = {c for name in KNOWN_MERCHANTS for c in name if not c.isascii()}
+
+    assert accented <= set(src)
+    # Upper case too: lower() may leave non-ASCII letters alone under a C collation.
+    assert {c.upper() for c in accented} <= set(src)
 
 
 def test_sql_selects_every_column_the_use_case_maps() -> None:

@@ -64,13 +64,13 @@ def make_row(**overrides: Any) -> dict[str, Any]:
         "transaction_id": "TX-1",
         "transaction_date": datetime(2026, 9, 20, 14, 30, tzinfo=timezone.utc),
         "card_last4": "4242",
-        "merchant_name": "Café Aroma",
-        "merchant_category": "Restaurants",
+        "merchant_name": "Óptica Visión",
+        "merchant_category": "Health",
         "amount": Decimal("12.50"),
         "currency": "COP",
         "channel": "POS",
         "transaction_city": "Medellín",
-        "transaction_country": "CO",
+        "transaction_country": "Colombia",
         "transaction_status": "Approved",
     }
     row.update(overrides)

@@ -23,13 +23,14 @@ _CARD_LAST4: Final = re.compile(r"[0-9]{4}")
 class TransactionStatus(str, Enum):
     """Transaction statuses the agent can filter by.
 
-    TODO(ledgerlens): R4 - these values are assumed, not confirmed against the data
-      dictionary (product design Q1). Update this enum and tool_spec.json together.
+    These are every ``transactions.transaction_status`` value in the dataset.
+    Update this enum and tool_spec.json together.
     """
 
     APPROVED = "Approved"
     DECLINED = "Declined"
     PENDING = "Pending"
+    REVERSED = "Reversed"
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,8 @@ class TransactionFilters:
         date_from: First processing date included (inclusive).
         date_to: Last processing date included (inclusive).
         card_last4: Last four digits of one card, or None for every card.
-        merchant: Case-insensitive substring of the merchant name, or None.
+        merchant: Substring of the merchant name, matched ignoring case and
+            accents, or None.
         min_amount: Smallest amount included, or None.
         max_amount: Largest amount included, or None.
         status: Transaction status to match, or None for any status.
