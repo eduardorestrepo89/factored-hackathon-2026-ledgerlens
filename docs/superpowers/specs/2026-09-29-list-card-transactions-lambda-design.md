@@ -3,6 +3,7 @@
 **Date:** 2026-09-29
 **Status:** Approved. Implementation plan: `docs/superpowers/plans/2026-09-29-list-card-transactions-lambda.md`
 **Parent design:** [LEDGERLENS_PRODUCT_DESIGN.md](../../LEDGERLENS_PRODUCT_DESIGN.md), §7.4
+**Updated 2026-09-30:** Aurora DSQL replaces Aurora PostgreSQL. See [2026-09-30-dsql-engine-design.md](2026-09-30-dsql-engine-design.md); §2, §4, §5, §6, §7 and §8 below already describe the DSQL version.
 
 ---
 
@@ -49,15 +50,16 @@ gateway/tools/ledgerlens_tools/                     ← CDK asset root, shared b
     │   ├── ports/errors.py                         ← port errors raised by adapters
     │   └── use_cases/list_card_transactions.py     ← ListCardTransactionsUseCase
     ├── infrastructure/
-    │   ├── repositories/postgresql_repository.py   ← PostgreSQLRepository(DatabaseRepository)
+    │   ├── repositories/dsql_repository.py         ← DsqlRepository(DatabaseRepository)
     │   └── queries/file_query_provider.py          ← FileQueryProvider(QueryProvider)
     ├── utils/
-    │   ├── connectors/base.py                      ← PsycopgConnector (Protocol)
-    │   └── connectors/aurora_postgresql.py         ← AuroraPostgreSQLConnector(PsycopgConnector)
+    │   ├── connectors/base.py                      ← PsycopgConnector (ABC, connection lifecycle)
+    │   └── connectors/dsql.py                      ← DsqlConnector(PsycopgConnector)
     ├── queries/
-    │   └── postgresql/list_card_transactions.sql
+    │   └── postgresql/list_card_transactions.sql   ← PostgreSQL dialect, used by Aurora DSQL
     └── delivery/
-        ├── settings.py                             ← DatabaseSettings.from_env, ConfigurationError
+        ├── settings.py                             ← DatabaseEngine, DatabaseSettings, DsqlSettings,
+        │                                              ConfigurationError
         ├── presenters/card_transactions.py         ← result → agent JSON
         ├── dependencies/dependencies_builder.py    ← build_settings, build_connector,
         │                                              build_database_repository, build_query_provider,
@@ -97,7 +99,7 @@ class DatabaseRepository(ABC):
         """Execute a parameterised query and return the rows as dictionaries keyed by column name.
 
         Raises:
-            DataSourceConnectionError, QueryTimeoutError, QueryExecutionError
+            DataSourceConnectionError, QueryLimitExceededError, QueryExecutionError
         """
 
 
@@ -243,8 +245,8 @@ Adapters raise these errors, wrapping the original exception (`raise ... from ex
 
 | Error | Raised by | When |
 |---|---|---|
-| `DataSourceConnectionError` | Repository | The connection can't be opened or was lost (`psycopg.OperationalError`, and connector failures) |
-| `QueryTimeoutError` | Repository | Statement timeout (`psycopg.errors.QueryCanceled`) |
+| `DataSourceConnectionError` | Repository, connector | The connection can't be opened or was lost (`psycopg.OperationalError` other than the limits below, and connector failures) |
+| `QueryLimitExceededError` | Repository | The query hit a database time or resource limit: `OutOfMemory` (`53200`, 128 MiB), `ProgramLimitExceeded` (`54000`, 300 s transaction age) or `QueryCanceled` (`57014`). Never retried. |
 | `QueryExecutionError` | Repository | Any other `psycopg.Error` |
 | `QueryNotFoundError` | Query provider | No `<name>.sql` exists for the dialect |
 
@@ -257,7 +259,7 @@ The base is `DomainError(Exception)` with `message: str`. The message is agent-f
 |---|---|---|
 | `InvalidInputError(field, reason)` | `TransactionFilters` validation | "Invalid value for '{field}': {reason}. Ask the customer to confirm and retry." |
 | `DataSourceUnavailableError` | `DataSourceConnectionError` | "Transaction data is temporarily unavailable. Tell the customer and offer to retry in a moment or hand off to a human agent." |
-| `SearchTooBroadError` | `QueryTimeoutError` | "The transaction search took too long. Retry with a narrower date range or add a card or merchant filter." |
+| `SearchTooBroadError` | `QueryLimitExceededError` | "The transaction search was too broad for the database. Retry with a narrower date range or add a card or merchant filter." |
 | `TransactionLookupError` | `QueryExecutionError`, `QueryNotFoundError` | "Transactions can't be retrieved right now due to an internal error. Don't retry; offer a hand-off to a human agent." |
 | `DataIntegrityError` | Mapping a row fails | "Transaction data came back in an unexpected format. Don't retry; offer a hand-off to a human agent." |
 
@@ -276,19 +278,21 @@ An empty result is **not** an error. It returns `count: 0`.
 
 ## 5. Connection lifecycle and configuration
 
-### 5.1 Connector (`utils/connectors/aurora_postgresql.py`)
-`AuroraPostgreSQLConnector(secret_arn: str, statement_timeout_ms: int, secrets_client: SecretsClient | None = None, connect: Callable[..., psycopg.Connection] = psycopg.connect)` (`connect` is injectable for tests) explicitly subclasses the `PsycopgConnector` protocol, so type checkers verify it against the contract the repository expects:
-- `connection() -> psycopg.Connection` returns the cached connection. If it's missing or closed, it opens a new one:
-  - reads the secret (host, port, dbname, username, password)
-  - `sslmode="require"`, `connect_timeout=5`, `autocommit=True`, `row_factory=dict_row`
-  - `options="-c statement_timeout=<ms> -c default_transaction_read_only=on"`
-- `reset() -> None` closes and drops the cached connection.
-- Any failure to open raises `DataSourceConnectionError`.
+### 5.1 Connectors (`utils/connectors/`)
+Details in the DSQL spec, §4.
+- `PsycopgConnector(ABC)` in `base.py` owns the lifecycle:
+  - `connection()` returns the cached connection and opens a new one when it's missing, closed or older than `max_age`.
+  - `reset()` closes and drops it.
+  - Any failure in the abstract `_open()` is wrapped in `DataSourceConnectionError`.
+- `DsqlConnector(cluster_endpoint, region, db_user, dsql_client=None, connect=psycopg.connect)` in `dsql.py` implements `_open()`. `MAX_AGE` is 55 minutes, which recycles the connection before DSQL closes it at 60. Each open does two things:
+  - It generates a fresh IAM token with boto3's `dsql` client. `admin` uses the admin token method.
+  - It connects with `port=5432`, `dbname="postgres"`, `sslmode="require"`, `client_encoding="utf8"`, `connect_timeout=5`, `autocommit=True` and `row_factory=dict_row`. It passes **no** `options`, because DSQL rejects `statement_timeout` and `default_transaction_read_only`.
 
-### 5.2 Repository (`infrastructure/repositories/postgresql_repository.py`)
-`PostgreSQLRepository(connector: PsycopgConnector)` implements `execute_query`:
+### 5.2 Repository (`infrastructure/repositories/dsql_repository.py`)
+`DsqlRepository(connector: PsycopgConnector)` implements `execute_query`:
 - It gets `connector.connection()`, runs the query with the params and returns `fetchall()`.
-- On `psycopg.OperationalError` it calls `connector.reset()` and **retries once**. A second failure raises `DataSourceConnectionError`.
+- DSQL limit errors (`OutOfMemory`, `ProgramLimitExceeded`, `QueryCanceled`) are caught **first** and raise `QueryLimitExceededError` without a retry.
+- On any other `psycopg.OperationalError` it calls `connector.reset()` and **retries once**. A second failure raises `DataSourceConnectionError`. The retry is safe because the role can only `SELECT`.
 - Other `psycopg` errors map as shown in §4.1.
 
 ### 5.3 Wiring (`delivery/dependencies/dependencies_builder.py`)
@@ -296,17 +300,19 @@ This module owns all object construction, in labelled blocks:
 
 | Block | Function | Builds |
 |---|---|---|
-| Settings | `build_settings(env) -> DatabaseSettings` | Parses the environment variables below |
-| Connection | `build_connector(settings) -> PsycopgConnector` | `AuroraPostgreSQLConnector`, without connecting |
-| Adapters | `build_database_repository(engine, connector) -> DatabaseRepository` | `PostgreSQLRepository` |
-| Adapters | `build_query_provider(engine) -> QueryProvider` (cached) | `FileQueryProvider(<package>/queries/<engine>)` |
+| Settings | `build_settings(env) -> DatabaseSettings` | Engine and `MAX_ROWS` |
+| Settings | `build_dsql_settings(env) -> DsqlSettings` | DSQL connection settings |
+| Connection | `build_connector(settings, env) -> PsycopgConnector` | `DsqlConnector`, without connecting |
+| Adapters | `build_database_repository(engine, connector) -> DatabaseRepository` | `DsqlRepository` |
+| Adapters | `build_query_provider(engine) -> QueryProvider` (cached) | `FileQueryProvider(<package>/queries/<SQL_DIALECTS[engine]>)`; `aurora_dsql` maps to `postgresql` |
 | Use cases | `build_list_card_transactions_use_case(env) -> ListCardTransactionsUseCase \| None` | The whole graph for this tool |
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DB_ENGINE` | (required) | `postgresql` is the only supported value in this iteration |
-| `DB_SECRET_ARN` | (required) | Secrets Manager secret with the DB credentials |
-| `DB_STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout |
+| `DB_ENGINE` | `aurora_dsql` | The only supported value |
+| `DSQL_CLUSTER_ENDPOINT` | (required) | Cluster host; no scheme, no port |
+| `DSQL_DB_USER` | `ledgerlens_readonly` | Database role; `admin` switches to the admin token |
+| `AWS_REGION` | (required, set by Lambda) | Region used to sign the token |
 | `MAX_ROWS` | `25` | Row cap per call |
 
 - An unknown `DB_ENGINE` or invalid variable raises `ConfigurationError` inside the builders. The use case builder catches it, logs it and returns `None`.
@@ -328,7 +334,10 @@ This module owns all object construction, in labelled blocks:
 | `test_transaction_filters.py` | Every validation rule and default in §3.2, using a fixed `today` |
 | `test_list_card_transactions_use_case.py` | Mapping rows to entities, the exact SQL name and params sent, truncation (26 rows → 25 plus `truncated=True`), each port error → the right domain error and message, bad row → `DataIntegrityError`, empty result |
 | `test_file_query_provider.py` | Reads the file, caches it (a second call doesn't re-read), missing file → `QueryNotFoundError` (`tmp_path`) |
-| `test_postgresql_repository.py` | Each psycopg exception → the right port error, one retry on `OperationalError` followed by success, a second failure raises; rows returned (mocked connector and cursor) |
+| `test_dsql_repository.py` | Each psycopg exception → the right port error, DSQL limit errors not retried, one retry on `OperationalError` followed by success, a second failure raises; rows returned (mocked connector and cursor) |
+| `test_psycopg_connector.py` | The base connection lifecycle: lazy open, reuse, reopen when closed or older than `max_age`, `reset()`, failures wrapped in `DataSourceConnectionError` |
+| `test_dsql_connector.py` | The exact connect arguments (no `options`), a fresh token per open, admin vs normal token method, token failure → `DataSourceConnectionError` |
+| `test_settings.py` | `DatabaseSettings` and `DsqlSettings` defaults and validation |
 | `test_delivery_wiring.py` | Each builder block, the use case wired end to end over a fake connector, `MAX_ROWS` honoured, eager connection, failed cold-start connection still yields a working use case, bad configuration → `None` |
 | `test_list_card_transactions_handler.py` | Success format, `DomainError` → `{"error": msg}`, unexpected exception → generic message with no internals, wrong tool name, cold start with a failed connection still returns a clean error, missing configuration → unavailable message |
 | `conftest.py` | Adds `gateway/tools/ledgerlens_tools` to `sys.path`; shared fakes in `ledgerlens_fakes.py` (`FakeDatabaseRepository`, `FakeQueryProvider`, `FakeConnector`) |
@@ -347,10 +356,10 @@ Tests are marked `@pytest.mark.unit`, following `tests/pytest.ini`.
 - the unit tests in §6
 
 **Out of scope (later specs):**
-- CDK: a `PythonFunction` per tool (ARM64, Python 3.13), `gateway.addLambdaTarget(...)`, VPC, subnets and security groups, `secret.grantRead`, environment variables
-- Aurora PostgreSQL cluster, schema and data load, and a read-only DB user
+- CDK: a `PythonFunction` per tool (ARM64, Python 3.13), `gateway.addLambdaTarget(...)`, the `dsql:DbConnect` grant, VPC/PrivateLink if needed, environment variables
+- Aurora DSQL cluster, schema and data load, and the read-only `ledgerlens_readonly` role
 - Cedar policy for `list-card-transactions-target___list_card_transactions`
-- Integration tests of the SQL against a real PostgreSQL database
+- Integration tests of the SQL against a real DSQL cluster
 - Removing the sample tool
 
 ---
@@ -361,12 +370,16 @@ These are also left as `TODO(ledgerlens):` comments in the code, at the place ea
 
 | # | Risk or pending item | Where the comment goes | Follow-up |
 |---|---|---|---|
-| R1 | **Infrastructure isn't written yet.** No CDK Lambda, Gateway target, VPC or secret grant, so the tool can't be deployed or called by the agent yet. | `delivery/list_card_transactions_handler.py` module docstring, `requirements.txt` header | CDK spec (parent design §15) |
-| R2 | **Aurora doesn't exist.** `DB_SECRET_ARN` has no real secret to point to. | `utils/connectors/aurora_postgresql.py` | Aurora and data-load spec |
-| R3 | **The SQL is untested against a real database.** Column names match the ERD, but syntax and performance aren't verified. | `queries/postgresql/list_card_transactions.sql` header | Integration tests with a PostgreSQL container |
+| R1 | **Infrastructure isn't written yet.** No CDK Lambda, Gateway target or `dsql:DbConnect` grant (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`), so the tool can't be deployed or called by the agent yet. | `delivery/list_card_transactions_handler.py` module docstring, `requirements.txt` header | CDK spec (parent design §15) |
+| R2 | **The DSQL cluster doesn't exist yet.** `DSQL_CLUSTER_ENDPOINT` has nothing real to point to. | `utils/connectors/dsql.py` | DSQL cluster and data-load spec |
+| R3 | **The SQL is untested on DSQL.** Column names match the ERD. `DISTINCT ON`, `translate()`, `strpos()`, `NULLS LAST` and `%(name)s` binds are standard PostgreSQL, but DSQL support and the plan under the 128 MiB query limit aren't verified. | `queries/postgresql/list_card_transactions.sql` header | Smoke test against a real cluster |
 | R4 | ~~`transaction_status` values are assumed~~ **Resolved:** confirmed against the dataset's categorical values (`Approved`, `Declined`, `Pending`, `Reversed`). | `TransactionStatus`, `tool_spec.json` | — |
 | R5 | **`customer_id` trusts the tool input.** Authorization relies on Cedar matching it to the token's `customer_id` claim. That policy and the claim don't exist yet (parent design §5 and §10). | Handler module docstring | Cedar and pre-token claim spec |
-| R6 | **Read-only DB user assumed.** `default_transaction_read_only=on` guards against writes, but the DB user itself should be read-only. | Connector | Aurora spec: create `ledgerlens_readonly` |
-| R7 | **Connection scaling.** One connection per warm container. Many concurrent containers could exhaust Aurora's connection limit. Accepted for the demo; no mitigation will be built. | Connector | If this goes beyond a demo: cap `reservedConcurrentExecutions` per tool Lambda, then RDS Proxy (no code change, only the secret's host). The Data API is an alternative as a new repository adapter. |
+| R6 | **The DB role is the only write guard.** DSQL rejects `default_transaction_read_only`. `ledgerlens_readonly` must be created with `SELECT`-only grants and mapped to the Lambda's IAM role (`AWS IAM GRANT`). If it's misconfigured, nothing else stops writes. | `utils/connectors/dsql.py`, `DsqlRepository` docstring | DSQL cluster spec |
+| R7 | **Mostly resolved:** DSQL allows 10,000 connections per cluster. What's left is the 100 new connections/s rate (burst 1,000) during mass cold starts, which surfaces as "temporarily unavailable" after one retry. | `utils/connectors/dsql.py` | Cap `reservedConcurrentExecutions` per tool Lambda if it ever matters |
 | R8 | **Duplicate rows (about 2%)** are removed at query time with `DISTINCT ON`. Cleaning the data would remove the need. | SQL header | Data-load spec |
 | R9 | **`psycopg[binary]` needs an ARM64 Linux build.** Packaging requires Docker bundling (`PythonFunction`); a plain `Code.fromAsset` won't work. | `requirements.txt` header | CDK spec |
+| R10 | **No per-query timeout.** DSQL rejects `statement_timeout`. A slow query runs until the Lambda times out (DSQL caps it at 300 s), and the agent gets the platform's generic timeout instead of `SearchTooBroadError`. | `DsqlRepository` docstring | CDK spec: Lambda timeout well under the agent's tool timeout |
+| R11 | **`sslmode=require` doesn't verify the server certificate.** `verify-full` needs the Amazon root CA bundled with the Lambda. | `utils/connectors/dsql.py` | Hardening |
+| R12 | **Server-side cancel on DSQL is unverified,** so the `QueryCanceled` mapping may never fire. Harmless either way. | `DsqlRepository` | Smoke test |
+| R13 | **The DSQL token methods need a recent boto3.** The Lambda runtime's bundled boto3 may predate the `dsql` client. | `requirements.txt` header | CDK spec: check the runtime version or pin the minimum release |
