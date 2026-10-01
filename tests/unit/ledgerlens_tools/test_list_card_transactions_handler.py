@@ -7,13 +7,18 @@ from typing import Any
 
 import pytest
 from ledgerlens.application.ports.errors import DataSourceConnectionError
-from ledgerlens.delivery.settings import DatabaseSettings
+from ledgerlens.application.use_cases.list_card_transactions import (
+    ListCardTransactionsUseCase,
+)
+from ledgerlens.delivery.dependencies.dependencies_builder import (
+    build_database_repository,
+    build_query_provider,
+)
 from ledgerlens.domain.errors import DataSourceUnavailableError
 from ledgerlens_fakes import FakeConnector, make_row
 
 pytestmark = pytest.mark.unit
 
-SETTINGS = DatabaseSettings("postgresql", "arn:aws:secretsmanager:x", 5000, 25)
 EVENT = {"customer_id": "CUST-1", "date_from": "2026-09-01", "date_to": "2026-09-29"}
 
 
@@ -37,9 +42,13 @@ def module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 def wire(module: ModuleType, monkeypatch: pytest.MonkeyPatch, connector: Any) -> None:
-    """Point the handler's globals at test settings and a fake connector."""
-    monkeypatch.setattr(module, "SETTINGS", SETTINGS)
-    monkeypatch.setattr(module, "CONNECTOR", connector)
+    """Point the handler's global use case at real adapters over a fake connector."""
+    use_case = ListCardTransactionsUseCase(
+        database_repository=build_database_repository("postgresql", connector),
+        query_provider=build_query_provider("postgresql"),
+        max_rows=25,
+    )
+    monkeypatch.setattr(module, "USE_CASE", use_case)
 
 
 def body(response: dict[str, Any]) -> dict[str, Any]:
@@ -141,12 +150,10 @@ def test_tool_name_without_a_target_prefix_is_accepted(
 def test_unexpected_exception_returns_a_generic_message_without_internals(
     module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    wire(module, monkeypatch, FakeConnector())
-
     def explode(*_args: object) -> None:
         raise RuntimeError("password=hunter2 host=db.internal")
 
-    monkeypatch.setattr(module, "build_dependencies", explode)
+    monkeypatch.setattr(module, "USE_CASE", SimpleNamespace(execute=explode))
 
     response = module.handler(EVENT, make_context())
 
@@ -157,26 +164,11 @@ def test_unexpected_exception_returns_a_generic_message_without_internals(
 def test_missing_configuration_returns_data_source_unavailable(
     module: ModuleType,
 ) -> None:
-    assert module.SETTINGS is None
-    assert module.CONNECTOR is None
+    assert module.USE_CASE is None
 
     response = module.handler(EVENT, make_context())
 
     assert response == {"error": DataSourceUnavailableError.MESSAGE}
-
-
-def test_initialise_survives_a_failed_cold_start_connection(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    connector = FakeConnector(DataSourceConnectionError("no route to host"))
-    monkeypatch.setattr(module, "build_connector", lambda _settings: connector)
-
-    settings, returned = module._initialise(
-        {"DB_ENGINE": "postgresql", "DB_SECRET_ARN": "arn:aws:secretsmanager:x"}
-    )
-
-    assert settings == SETTINGS
-    assert returned is connector
 
 
 def test_cold_start_failure_then_failed_retry_returns_unavailable(
@@ -187,7 +179,3 @@ def test_cold_start_failure_then_failed_retry_returns_unavailable(
     response = module.handler(EVENT, make_context())
 
     assert response == {"error": DataSourceUnavailableError.MESSAGE}
-
-
-def test_initialise_with_bad_configuration_returns_nones(module: ModuleType) -> None:
-    assert module._initialise({"DB_ENGINE": "oracle"}) == (None, None)

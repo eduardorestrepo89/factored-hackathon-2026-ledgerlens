@@ -8,7 +8,8 @@ import psycopg
 import pytest
 from ledgerlens.application.ports.errors import DataSourceConnectionError
 from ledgerlens.utils.connectors.aurora_postgresql import AuroraPostgreSQLConnector
-from ledgerlens_fakes import FakeConnection
+from ledgerlens.utils.connectors.base import PsycopgConnector
+from ledgerlens_fakes import FakeConnection, FakeConnector
 from psycopg.rows import dict_row
 
 pytestmark = pytest.mark.unit
@@ -74,6 +75,15 @@ def make_connector(
         connect=connect,
     )
     return connector, secrets, connect
+
+
+@pytest.mark.parametrize("connector_class", [AuroraPostgreSQLConnector, FakeConnector])
+def test_connector_explicitly_implements_the_psycopg_connector_protocol(
+    connector_class: type,
+) -> None:
+    # Explicit inheritance makes type checkers verify the connector against
+    # the protocol instead of relying on matching method names.
+    assert PsycopgConnector in connector_class.__mro__
 
 
 def test_opens_a_read_only_tls_connection_from_the_secret() -> None:

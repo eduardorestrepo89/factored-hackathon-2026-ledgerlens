@@ -12,9 +12,10 @@ from ledgerlens.application.ports.errors import (
 )
 from ledgerlens.application.ports.query_provider import QueryProvider
 from ledgerlens.domain.value_objects.transaction_filters import TransactionFilters
+from ledgerlens.utils.connectors.base import PsycopgConnector
 
 
-class FakeRepository(DatabaseRepository):
+class FakeDatabaseRepository(DatabaseRepository):
     """DatabaseRepository double that records calls and returns canned rows."""
 
     def __init__(
@@ -137,7 +138,7 @@ class FakeConnection:
         self.closed = True
 
 
-class FakeConnector:
+class FakeConnector(PsycopgConnector):
     """PsycopgConnector double; each connection() serves the next outcome.
 
     The last outcome repeats. A DataSourceConnectionError outcome is raised by

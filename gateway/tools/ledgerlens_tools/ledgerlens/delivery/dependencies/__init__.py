@@ -1,1 +1,1 @@
-"""Per-tool dependency builders, each exposing build_dependencies()."""
+"""Dependency building: dependencies_builder builds every LedgerLens object."""

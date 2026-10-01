@@ -15,7 +15,7 @@ from ledgerlens.domain.value_objects.transaction_filters import (
     TransactionStatus,
 )
 from ledgerlens.infrastructure.queries.file_query_provider import FileQueryProvider
-from ledgerlens_fakes import FakeQueryProvider, FakeRepository, make_filters
+from ledgerlens_fakes import FakeDatabaseRepository, FakeQueryProvider, make_filters
 
 pytestmark = pytest.mark.unit
 
@@ -31,10 +31,12 @@ def sql() -> str:
 
 
 def sent_params() -> dict[str, object]:
-    """Return the params the use case actually sends to the repository."""
-    repository = FakeRepository()
-    ListCardTransactionsUseCase(repository, FakeQueryProvider()).execute(make_filters())
-    return repository.calls[0][1]
+    """Return the params the use case actually sends to the database repository."""
+    database_repository = FakeDatabaseRepository()
+    ListCardTransactionsUseCase(
+        database_repository=database_repository, query_provider=FakeQueryProvider()
+    ).execute(make_filters())
+    return database_repository.calls[0][1]
 
 
 def tool_spec() -> dict[str, Any]:

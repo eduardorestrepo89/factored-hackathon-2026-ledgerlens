@@ -28,24 +28,26 @@ from ledgerlens.domain.value_objects.transaction_filters import TransactionFilte
 class ListCardTransactionsUseCase:
     """Search a customer's card transactions through a database-agnostic repository.
 
-    The use case loads the SQL by name, runs it through the repository port and
-    maps rows to domain entities. Port errors are translated into domain errors
-    whose messages tell the agent what to do next.
+    The use case loads the SQL by name through the query provider, runs it
+    through the database repository port and maps rows to domain entities. Port
+    errors are translated into domain errors whose messages tell the agent what
+    to do next.
     """
 
     QUERY_NAME: Final = "list_card_transactions"
 
     def __init__(
         self,
-        repository: DatabaseRepository,
-        queries: QueryProvider,
+        database_repository: DatabaseRepository,
+        query_provider: QueryProvider,
         max_rows: int = 25,
     ) -> None:
         """Store the ports and the row cap.
 
         Args:
-            repository: Executes the query; any DatabaseRepository adapter.
-            queries: Supplies the SQL text for the configured dialect.
+            database_repository: Executes the query; any DatabaseRepository
+                adapter.
+            query_provider: Supplies the SQL text for the configured dialect.
             max_rows: Maximum transactions returned per call.
 
         Raises:
@@ -53,8 +55,8 @@ class ListCardTransactionsUseCase:
         """
         if max_rows < 1:
             raise ValueError("max_rows must be at least 1")
-        self._repository: DatabaseRepository = repository
-        self._queries: QueryProvider = queries
+        self._database_repository: DatabaseRepository = database_repository
+        self._query_provider: QueryProvider = query_provider
         self._max_rows: int = max_rows
 
     def execute(self, filters: TransactionFilters) -> CardTransactionsResult:
@@ -69,8 +71,8 @@ class ListCardTransactionsUseCase:
             DataIntegrityError: A returned row couldn't be mapped.
         """
         try:
-            query = self._queries.get(self.QUERY_NAME)
-            rows = self._repository.execute_query(query, self._params(filters))
+            query = self._query_provider.get(self.QUERY_NAME)
+            rows = self._database_repository.execute_query(query, self._params(filters))
         except DataSourceConnectionError as exc:
             raise DataSourceUnavailableError() from exc
         except QueryTimeoutError as exc:

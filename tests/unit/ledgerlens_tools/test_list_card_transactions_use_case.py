@@ -26,7 +26,12 @@ from ledgerlens.domain.errors import (
     TransactionLookupError,
 )
 from ledgerlens.domain.value_objects.transaction_filters import TransactionStatus
-from ledgerlens_fakes import FakeQueryProvider, FakeRepository, make_filters, make_row
+from ledgerlens_fakes import (
+    FakeDatabaseRepository,
+    FakeQueryProvider,
+    make_filters,
+    make_row,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -35,12 +40,16 @@ def run(
     rows: list[dict[str, Any]] | None = None,
     error: Exception | None = None,
     max_rows: int = 25,
-) -> tuple[CardTransactionsResult, FakeRepository, FakeQueryProvider]:
+) -> tuple[CardTransactionsResult, FakeDatabaseRepository, FakeQueryProvider]:
     """Execute the use case against fakes and return the result and the fakes."""
-    repository = FakeRepository(rows=rows, error=error)
-    queries = FakeQueryProvider()
-    use_case = ListCardTransactionsUseCase(repository, queries, max_rows=max_rows)
-    return use_case.execute(make_filters()), repository, queries
+    database_repository = FakeDatabaseRepository(rows=rows, error=error)
+    query_provider = FakeQueryProvider()
+    use_case = ListCardTransactionsUseCase(
+        database_repository=database_repository,
+        query_provider=query_provider,
+        max_rows=max_rows,
+    )
+    return use_case.execute(make_filters()), database_repository, query_provider
 
 
 def test_maps_a_row_to_a_card_transaction() -> None:
@@ -66,16 +75,18 @@ def test_maps_a_row_to_a_card_transaction() -> None:
     )
 
 
-def test_loads_the_named_query_and_passes_its_text_to_the_repository() -> None:
-    _, repository, queries = run()
+def test_loads_the_named_query_and_passes_its_text_to_the_database_repository() -> None:
+    _, database_repository, query_provider = run()
 
-    assert queries.requested == ["list_card_transactions"]
-    assert repository.calls[0][0] == "SELECT 'list_card_transactions'"
+    assert query_provider.requested == ["list_card_transactions"]
+    assert database_repository.calls[0][0] == "SELECT 'list_card_transactions'"
 
 
 def test_sends_every_filter_and_limit_as_params() -> None:
-    repository = FakeRepository()
-    use_case = ListCardTransactionsUseCase(repository, FakeQueryProvider())
+    database_repository = FakeDatabaseRepository()
+    use_case = ListCardTransactionsUseCase(
+        database_repository=database_repository, query_provider=FakeQueryProvider()
+    )
     filters = make_filters(
         card_last4="4242",
         merchant="aroma",
@@ -86,7 +97,7 @@ def test_sends_every_filter_and_limit_as_params() -> None:
 
     use_case.execute(filters)
 
-    assert repository.calls[0][1] == {
+    assert database_repository.calls[0][1] == {
         "customer_id": "CUST-1",
         "date_from": date(2026, 8, 30),
         "date_to": date(2026, 9, 29),
@@ -100,17 +111,17 @@ def test_sends_every_filter_and_limit_as_params() -> None:
 
 
 def test_absent_filters_are_sent_as_none() -> None:
-    _, repository, _ = run()
+    _, database_repository, _ = run()
 
-    params = repository.calls[0][1]
+    params = database_repository.calls[0][1]
     for key in ("card_last4", "merchant", "min_amount", "max_amount", "status"):
         assert params[key] is None
 
 
 def test_limit_is_max_rows_plus_one() -> None:
-    _, repository, _ = run(max_rows=3)
+    _, database_repository, _ = run(max_rows=3)
 
-    assert repository.calls[0][1]["limit"] == 4
+    assert database_repository.calls[0][1]["limit"] == 4
 
 
 def test_returns_max_rows_and_flags_truncation_when_more_exist() -> None:
@@ -194,7 +205,8 @@ def test_port_errors_become_domain_errors_without_leaking_details(
 
 def test_missing_query_becomes_transaction_lookup_error() -> None:
     use_case = ListCardTransactionsUseCase(
-        FakeRepository(), FakeQueryProvider(queries={})
+        database_repository=FakeDatabaseRepository(),
+        query_provider=FakeQueryProvider(queries={}),
     )
 
     with pytest.raises(TransactionLookupError):
@@ -222,4 +234,8 @@ def test_unmappable_rows_raise_data_integrity_error(bad_row: dict[str, Any]) -> 
 
 def test_max_rows_must_be_positive() -> None:
     with pytest.raises(ValueError, match="max_rows"):
-        ListCardTransactionsUseCase(FakeRepository(), FakeQueryProvider(), max_rows=0)
+        ListCardTransactionsUseCase(
+            database_repository=FakeDatabaseRepository(),
+            query_provider=FakeQueryProvider(),
+            max_rows=0,
+        )

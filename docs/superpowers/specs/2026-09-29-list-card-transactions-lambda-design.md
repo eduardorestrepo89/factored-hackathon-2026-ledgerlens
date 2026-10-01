@@ -26,7 +26,7 @@ This first tool also sets the pattern every later tool follows: a **shared core 
   - receives the repository **typed as the port**
   - loads the query by name
   - passes the query to the repository
-- The handler in `delivery` calls `build_dependencies()`. The connection is **global and created outside the handler**.
+- `delivery/dependencies/dependencies_builder.py` is the **only** place that builds objects (settings, connector, adapters, use case). The handler module calls it once at load time and keeps the ready use case globally, so warm invocations reuse it.
 - The use case converts infrastructure errors into **domain errors** with clear messages for the agent.
 - Responses follow the repo's Gateway tool format (see `gateway/tools/sample_tool/sample_tool_lambda.py`).
 
@@ -53,14 +53,15 @@ gateway/tools/ledgerlens_tools/                     ← CDK asset root, shared b
     │   └── queries/file_query_provider.py          ← FileQueryProvider(QueryProvider)
     ├── utils/
     │   ├── connectors/base.py                      ← PsycopgConnector (Protocol)
-    │   └── connectors/aurora_postgresql.py         ← AuroraPostgreSQLConnector
+    │   └── connectors/aurora_postgresql.py         ← AuroraPostgreSQLConnector(PsycopgConnector)
     ├── queries/
     │   └── postgresql/list_card_transactions.sql
     └── delivery/
         ├── settings.py                             ← DatabaseSettings.from_env, ConfigurationError
-        ├── database.py                             ← engine wiring shared by every tool
         ├── presenters/card_transactions.py         ← result → agent JSON
-        ├── dependencies/list_card_transactions.py  ← build_dependencies(connector, settings)
+        ├── dependencies/dependencies_builder.py    ← build_settings, build_connector,
+        │                                              build_database_repository, build_query_provider,
+        │                                              build_list_card_transactions_use_case
         └── list_card_transactions_handler.py       ← handler(event, context)
 
 gateway/tools/list_card_transactions/tool_spec.json ← agent-facing name, description, inputSchema
@@ -77,10 +78,10 @@ Each tool adds files to the same core:
 - `application/use_cases/<tool>.py`
 - `queries/postgresql/<tool>.sql`
 - `delivery/<tool>_handler.py`
-- `delivery/dependencies/<tool>.py` with its own `build_dependencies(connector, settings)`
+- a `build_<tool>_use_case(env)` function in the use cases block of `delivery/dependencies/dependencies_builder.py`
 - `gateway/tools/<tool>/tool_spec.json`
 
-The ports, repository, query provider and connector are reused. Each tool deploys as **its own Lambda**, built from the same asset with a different handler, so each gets its own IAM role, timeout and Cedar action. Each handler imports `build_dependencies` from its own tool's dependencies module, so the function name is the same everywhere.
+The ports, repository, query provider and connector are reused. Each tool deploys as **its own Lambda**, built from the same asset with a different handler, so each gets its own IAM role, timeout and Cedar action. Each handler calls only its own tool's builder, so a Lambda never builds (or fails on) another tool's dependencies. A tool with extra settings gets its own settings class, built in its block.
 
 ---
 
@@ -184,7 +185,7 @@ class ListCardTransactionsUseCase:
 
     QUERY_NAME: Final = "list_card_transactions"
 
-    def __init__(self, repository: DatabaseRepository, queries: QueryProvider, max_rows: int = 25) -> None: ...
+    def __init__(self, database_repository: DatabaseRepository, query_provider: QueryProvider, max_rows: int = 25) -> None: ...
 
     def execute(self, filters: TransactionFilters) -> CardTransactionsResult:
         """Load the query, run it with the filters and return at most max_rows transactions.
@@ -195,9 +196,9 @@ class ListCardTransactionsUseCase:
 ```
 
 Steps:
-1. Load the SQL with `self._queries.get(QUERY_NAME)`.
+1. Load the SQL with `self._query_provider.get(QUERY_NAME)`.
 2. Build the params: every filter field (the enum becomes its `.value`) plus `limit = max_rows + 1`.
-3. Call `self._repository.execute_query(sql, params)`.
+3. Call `self._database_repository.execute_query(sql, params)`.
 4. Map each row to a `CardTransaction`. A `KeyError`, `TypeError` or `ValueError` becomes `DataIntegrityError`.
 5. Return `CardTransactionsResult(transactions=rows[:max_rows], truncated=len(rows) > max_rows)`.
 
@@ -272,7 +273,7 @@ An empty result is **not** an error. It returns `count: 0`.
 ## 5. Connection lifecycle and configuration
 
 ### 5.1 Connector (`utils/connectors/aurora_postgresql.py`)
-`AuroraPostgreSQLConnector(secret_arn: str, statement_timeout_ms: int, secrets_client: SecretsClient | None = None, connect: Callable[..., psycopg.Connection] = psycopg.connect)` (`connect` is injectable for tests):
+`AuroraPostgreSQLConnector(secret_arn: str, statement_timeout_ms: int, secrets_client: SecretsClient | None = None, connect: Callable[..., psycopg.Connection] = psycopg.connect)` (`connect` is injectable for tests) explicitly subclasses the `PsycopgConnector` protocol, so type checkers verify it against the contract the repository expects:
 - `connection() -> psycopg.Connection` returns the cached connection. If it's missing or closed, it opens a new one:
   - reads the secret (host, port, dbname, username, password)
   - `sslmode="require"`, `connect_timeout=5`, `autocommit=True`, `row_factory=dict_row`
@@ -286,28 +287,33 @@ An empty result is **not** an error. It returns `count: 0`.
 - On `psycopg.OperationalError` it calls `connector.reset()` and **retries once**. A second failure raises `DataSourceConnectionError`.
 - Other `psycopg` errors map as shown in §4.1.
 
-### 5.3 Wiring (`delivery/dependencies/list_card_transactions.py`)
-- Reads the environment variables:
+### 5.3 Wiring (`delivery/dependencies/dependencies_builder.py`)
+This module owns all object construction, in labelled blocks:
 
-  | Variable | Default | Meaning |
-  |---|---|---|
-  | `DB_ENGINE` | (required) | `postgresql` is the only supported value in this iteration |
-  | `DB_SECRET_ARN` | (required) | Secrets Manager secret with the DB credentials |
-  | `DB_STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout |
-  | `MAX_ROWS` | `25` | Row cap per call |
+| Block | Function | Builds |
+|---|---|---|
+| Settings | `build_settings(env) -> DatabaseSettings` | Parses the environment variables below |
+| Connection | `build_connector(settings) -> PsycopgConnector` | `AuroraPostgreSQLConnector`, without connecting |
+| Adapters | `build_database_repository(engine, connector) -> DatabaseRepository` | `PostgreSQLRepository` |
+| Adapters | `build_query_provider(engine) -> QueryProvider` (cached) | `FileQueryProvider(<package>/queries/<engine>)` |
+| Use cases | `build_list_card_transactions_use_case(env) -> ListCardTransactionsUseCase \| None` | The whole graph for this tool |
 
-- `build_dependencies(connector: PsycopgConnector, settings: DatabaseSettings) -> ListCardTransactionsUseCase` connects the pieces (settings are parsed once, at module load, by `DatabaseSettings.from_env`):
-  - the connector
-  - `PostgreSQLRepository`
-  - `FileQueryProvider(<package>/queries/<DB_ENGINE>)`
-  - the use case
-- An unknown `DB_ENGINE` raises a configuration error at startup.
+| Variable | Default | Meaning |
+|---|---|---|
+| `DB_ENGINE` | (required) | `postgresql` is the only supported value in this iteration |
+| `DB_SECRET_ARN` | (required) | Secrets Manager secret with the DB credentials |
+| `DB_STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout |
+| `MAX_ROWS` | `25` | Row cap per call |
 
-### 5.4 Global connection (in the handler module)
-- When the module loads (outside `handler`), it creates the connector and calls `connector.connection()` **eagerly** inside `try/except`.
+- An unknown `DB_ENGINE` or invalid variable raises `ConfigurationError` inside the builders. The use case builder catches it, logs it and returns `None`.
+
+### 5.4 Cold start and warm reuse
+- The handler module runs `USE_CASE = build_list_card_transactions_use_case(os.environ)` once, at load time, and builds nothing itself.
+- The use case builder opens the connection **eagerly** inside `try/except`.
   - On failure it logs and continues, so the Lambda init doesn't crash.
   - The first query retries the connection lazily. If it fails again, the agent gets `DataSourceUnavailableError`.
-- The handler calls `build_dependencies(connector, settings)` to get the use case. Building it is cheap (plain objects, the SQL is cached by the query provider), and the expensive part, the connection, stays global.
+- `USE_CASE is None` (bad configuration) makes every request return `DataSourceUnavailableError`'s message.
+- Reusing the whole graph across warm invocations is safe because every built object is **stateless between requests**: request data travels through `execute(filters)`, never through attributes. The connection is the only shared state, and it heals itself (reconnect when closed, reset and retry once). New code must keep this rule.
 
 ---
 
@@ -319,8 +325,9 @@ An empty result is **not** an error. It returns `count: 0`.
 | `test_list_card_transactions_use_case.py` | Mapping rows to entities, the exact SQL name and params sent, truncation (26 rows → 25 plus `truncated=True`), each port error → the right domain error and message, bad row → `DataIntegrityError`, empty result |
 | `test_file_query_provider.py` | Reads the file, caches it (a second call doesn't re-read), missing file → `QueryNotFoundError` (`tmp_path`) |
 | `test_postgresql_repository.py` | Each psycopg exception → the right port error, one retry on `OperationalError` followed by success, a second failure raises; rows returned (mocked connector and cursor) |
-| `test_list_card_transactions_handler.py` | `build_dependencies` wiring (unknown `DB_ENGINE` fails), success format, `DomainError` → `{"error": msg}`, unexpected exception → generic message with no internals, wrong tool name, cold start with a failed connection still returns a clean error |
-| `conftest.py` | Adds `gateway/tools/ledgerlens_tools` to `sys.path`; shared fakes (`FakeRepository`, `FakeQueryProvider`) |
+| `test_delivery_wiring.py` | Each builder block, the use case wired end to end over a fake connector, `MAX_ROWS` honoured, eager connection, failed cold-start connection still yields a working use case, bad configuration → `None` |
+| `test_list_card_transactions_handler.py` | Success format, `DomainError` → `{"error": msg}`, unexpected exception → generic message with no internals, wrong tool name, cold start with a failed connection still returns a clean error, missing configuration → unavailable message |
+| `conftest.py` | Adds `gateway/tools/ledgerlens_tools` to `sys.path`; shared fakes in `ledgerlens_fakes.py` (`FakeDatabaseRepository`, `FakeQueryProvider`, `FakeConnector`) |
 
 Tests are marked `@pytest.mark.unit`, following `tests/pytest.ini`.
 

@@ -21,6 +21,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from ledgerlens.application.ports.errors import DataSourceConnectionError
+from ledgerlens.utils.connectors.base import PsycopgConnector
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class SecretsClient(Protocol):
         ...
 
 
-class AuroraPostgreSQLConnector:
+class AuroraPostgreSQLConnector(PsycopgConnector):
     """Open and cache a read-only psycopg connection to Aurora PostgreSQL.
 
     Credentials come from a Secrets Manager secret with the standard RDS keys

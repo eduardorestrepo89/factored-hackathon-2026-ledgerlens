@@ -5,16 +5,18 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from ledgerlens.application.ports.errors import DataSourceConnectionError
 from ledgerlens.application.use_cases.list_card_transactions import (
     ListCardTransactionsUseCase,
 )
-from ledgerlens.delivery.database import (
+from ledgerlens.delivery.dependencies import dependencies_builder
+from ledgerlens.delivery.dependencies.dependencies_builder import (
     QUERIES_ROOT,
     build_connector,
+    build_database_repository,
+    build_list_card_transactions_use_case,
     build_query_provider,
-)
-from ledgerlens.delivery.dependencies.list_card_transactions import (
-    build_dependencies,
+    build_settings,
 )
 from ledgerlens.delivery.presenters.card_transactions import (
     present_card_transactions,
@@ -23,6 +25,9 @@ from ledgerlens.delivery.settings import ConfigurationError, DatabaseSettings
 from ledgerlens.domain.entities.card_transaction import (
     CardTransaction,
     CardTransactionsResult,
+)
+from ledgerlens.infrastructure.repositories.postgresql_repository import (
+    PostgreSQLRepository,
 )
 from ledgerlens.utils.connectors.aurora_postgresql import AuroraPostgreSQLConnector
 from ledgerlens_fakes import FakeConnector, make_filters, make_row
@@ -82,6 +87,10 @@ def test_missing_variables_raise_configuration_error() -> None:
         DatabaseSettings.from_env({})
 
 
+def test_build_settings_reads_the_environment() -> None:
+    assert build_settings(ENV) == SETTINGS
+
+
 def test_build_connector_does_not_connect() -> None:
     connector = build_connector(SETTINGS)
 
@@ -96,27 +105,84 @@ def test_query_provider_is_cached_per_engine_and_finds_the_sql() -> None:
     assert (QUERIES_ROOT / "postgresql" / "list_card_transactions.sql").is_file()
 
 
-def test_build_dependencies_wires_real_adapters_end_to_end() -> None:
-    connector = FakeConnector([make_row()])
+def test_build_database_repository_wraps_the_connector_for_the_engine() -> None:
+    database_repository = build_database_repository("postgresql", FakeConnector())
 
-    use_case = build_dependencies(connector, SETTINGS)
+    assert isinstance(database_repository, PostgreSQLRepository)
+
+
+def test_build_database_repository_rejects_an_unknown_engine() -> None:
+    with pytest.raises(ConfigurationError):
+        build_database_repository("oracle", FakeConnector())
+
+
+def use_fake_connector(
+    monkeypatch: pytest.MonkeyPatch, connector: FakeConnector
+) -> None:
+    """Make the builder hand out ``connector`` instead of a real Aurora one."""
+    monkeypatch.setattr(dependencies_builder, "build_connector", lambda _s: connector)
+
+
+def test_use_case_is_wired_with_real_adapters_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeConnector([make_row()])
+    use_fake_connector(monkeypatch, connector)
+
+    use_case = build_list_card_transactions_use_case(ENV)
+    assert isinstance(use_case, ListCardTransactionsUseCase)
     result = use_case.execute(make_filters())
 
-    assert isinstance(use_case, ListCardTransactionsUseCase)
     assert result.transactions[0].transaction_id == "TX-1"
-    executed_sql, params = connector.connections[0].cursors[0].executed[0]
+    executed_sql, params = connector.connections[-1].cursors[0].executed[0]
     assert "FROM transactions" in executed_sql
     assert params["limit"] == 26
 
 
-def test_build_dependencies_uses_max_rows_from_settings() -> None:
+def test_use_case_uses_max_rows_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     connector = FakeConnector([make_row(transaction_id=str(i)) for i in range(4)])
-    settings = DatabaseSettings("postgresql", "arn", 5000, max_rows=3)
+    use_fake_connector(monkeypatch, connector)
 
-    result = build_dependencies(connector, settings).execute(make_filters())
+    use_case = build_list_card_transactions_use_case({**ENV, "MAX_ROWS": "3"})
+    assert use_case is not None
+    result = use_case.execute(make_filters())
 
     assert len(result.transactions) == 3
     assert result.truncated is True
+
+
+def test_use_case_build_opens_the_connection_eagerly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeConnector()
+    use_fake_connector(monkeypatch, connector)
+
+    build_list_card_transactions_use_case(ENV)
+
+    assert len(connector.connections) == 1
+
+
+def test_use_case_build_survives_a_failed_cold_start_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeConnector(DataSourceConnectionError("no route to host"), [])
+    use_fake_connector(monkeypatch, connector)
+
+    use_case = build_list_card_transactions_use_case(ENV)
+
+    assert use_case is not None
+    assert use_case.execute(make_filters()).transactions == ()
+
+
+@pytest.mark.parametrize(
+    "env", [{}, {"DB_ENGINE": "oracle"}, {"DB_ENGINE": "postgresql"}]
+)
+def test_use_case_build_with_bad_configuration_returns_none(
+    env: dict[str, str],
+) -> None:
+    assert build_list_card_transactions_use_case(env) is None
 
 
 def make_transaction(**overrides: object) -> CardTransaction:

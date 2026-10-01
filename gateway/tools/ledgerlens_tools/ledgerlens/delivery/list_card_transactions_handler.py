@@ -11,8 +11,9 @@ Output: ``{"content": [{"type": "text", "text": <JSON>}]}`` on success, or
 ``{"error": <agent-facing message>}``. Unlike the sample tool, raw exception text
 is never returned: it could leak SQL, hosts or driver details to the model.
 
-The connector (and its connection) is global, created when the module loads so a
-warm container reuses it; build_dependencies() is called per invocation.
+The use case and its whole graph (settings, connector, connection, adapters) are
+built once, when the module loads, by dependencies_builder; a warm container
+reuses them. The handler builds nothing itself.
 
 TODO(ledgerlens): R1 - no CDK yet: no PythonFunction, Gateway target, VPC, security
   group, secret grant or env vars (DB_ENGINE, DB_SECRET_ARN). The tool can't be
@@ -25,21 +26,17 @@ TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
 import json
 import logging
 import os
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Final
 
-from ledgerlens.delivery.database import build_connector
-from ledgerlens.delivery.dependencies.list_card_transactions import (
-    build_dependencies,
+from ledgerlens.delivery.dependencies.dependencies_builder import (
+    build_list_card_transactions_use_case,
 )
 from ledgerlens.delivery.presenters.card_transactions import (
     present_card_transactions,
 )
-from ledgerlens.delivery.settings import ConfigurationError, DatabaseSettings
 from ledgerlens.domain.errors import DataSourceUnavailableError, DomainError
 from ledgerlens.domain.value_objects.transaction_filters import TransactionFilters
-from ledgerlens.utils.connectors.base import PsycopgConnector
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -55,32 +52,7 @@ _WRONG_TOOL_MESSAGE: Final = (
 )
 
 
-def _initialise(
-    env: Mapping[str, str],
-) -> tuple[DatabaseSettings | None, PsycopgConnector | None]:
-    """Load settings and open the global connection at cold start. Never raises.
-
-    A failed connection is only logged: the first request retries it lazily, so
-    the Lambda init doesn't crash. Bad configuration yields ``(None, None)`` and
-    every request then returns DataSourceUnavailableError's message.
-    """
-    try:
-        settings = DatabaseSettings.from_env(env)
-        connector = build_connector(settings)
-    except ConfigurationError:
-        logger.exception("Invalid database configuration for %s", TOOL_NAME)
-        return None, None
-    try:
-        connector.connection()
-    except Exception:
-        logger.warning(
-            "Cold-start database connection failed; the first request will retry",
-            exc_info=True,
-        )
-    return settings, connector
-
-
-SETTINGS, CONNECTOR = _initialise(os.environ)
+USE_CASE = build_list_card_transactions_use_case(os.environ)
 
 
 def handler(event: object, context: object) -> dict[str, Any]:
@@ -99,13 +71,12 @@ def handler(event: object, context: object) -> dict[str, Any]:
         return {"error": _WRONG_TOOL_MESSAGE}
 
     try:
-        if SETTINGS is None or CONNECTOR is None:
+        if USE_CASE is None:
             raise DataSourceUnavailableError()
-        use_case = build_dependencies(CONNECTOR, SETTINGS)
         filters = TransactionFilters.from_raw(
             event, today=datetime.now(timezone.utc).date()
         )
-        body = present_card_transactions(use_case.execute(filters))
+        body = present_card_transactions(USE_CASE.execute(filters))
     except DomainError as err:
         logger.warning(
             "%s returned an error: %s", TOOL_NAME, err.message, exc_info=True
