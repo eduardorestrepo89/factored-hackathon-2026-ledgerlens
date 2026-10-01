@@ -1,5 +1,6 @@
 """Lambda configuration read from environment variables."""
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -7,6 +8,8 @@ from typing import Final
 
 DEFAULT_MAX_ROWS: Final = 25
 DEFAULT_DSQL_DB_USER: Final = "ledgerlens_readonly"
+# Public DSQL endpoints carry their region: <cluster id>.dsql.<region>.on.aws.
+_PUBLIC_ENDPOINT: Final = re.compile(r"[^.]+\.dsql\.([a-z0-9-]+)\.on\.aws")
 
 
 class ConfigurationError(Exception):
@@ -66,9 +69,12 @@ class DsqlSettings:
             ConfigurationError: A required variable is missing or a value is
                 invalid.
         """
+        cluster_endpoint = _cluster_endpoint(env)
+        region = _required(env, "AWS_REGION")
+        _check_endpoint_region(cluster_endpoint, region)
         return cls(
-            cluster_endpoint=_cluster_endpoint(env),
-            region=_required(env, "AWS_REGION"),
+            cluster_endpoint=cluster_endpoint,
+            region=region,
             db_user=env.get("DSQL_DB_USER", "").strip() or DEFAULT_DSQL_DB_USER,
         )
 
@@ -90,18 +96,36 @@ def _engine(env: Mapping[str, str]) -> DatabaseEngine:
 
 
 def _cluster_endpoint(env: Mapping[str, str]) -> str:
-    """Parse DSQL_CLUSTER_ENDPOINT as a bare host name.
+    """Parse DSQL_CLUSTER_ENDPOINT as a bare, fully qualified host name.
 
     Raises:
-        ConfigurationError: The value is missing or has a scheme, port or path.
+        ConfigurationError: The value is missing, has a scheme, port or path, or
+            has no dot (a cluster ID pasted instead of the endpoint).
     """
     endpoint = _required(env, "DSQL_CLUSTER_ENDPOINT")
-    if ":" in endpoint or "/" in endpoint:
+    if ":" in endpoint or "/" in endpoint or "." not in endpoint:
         raise ConfigurationError(
             "DSQL_CLUSTER_ENDPOINT must be a bare host name without a scheme, port "
             f"or path, such as abc123.dsql.us-east-1.on.aws; got {endpoint!r}"
         )
     return endpoint
+
+
+def _check_endpoint_region(cluster_endpoint: str, region: str) -> None:
+    """Reject a public endpoint whose region differs from the token's region.
+
+    The IAM token is signed for ``region``, so a cluster in another region would
+    reject every connection. Custom hosts (PrivateLink) aren't checked.
+
+    Raises:
+        ConfigurationError: The endpoint names a region other than ``region``.
+    """
+    match = _PUBLIC_ENDPOINT.fullmatch(cluster_endpoint)
+    if match is not None and match.group(1) != region:
+        raise ConfigurationError(
+            f"DSQL_CLUSTER_ENDPOINT is in region {match.group(1)!r} but AWS_REGION "
+            f"is {region!r}; the IAM token must be signed for the cluster's region"
+        )
 
 
 def _required(env: Mapping[str, str], name: str) -> str:

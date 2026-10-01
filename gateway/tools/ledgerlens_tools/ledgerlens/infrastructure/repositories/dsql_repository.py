@@ -29,13 +29,14 @@ from ledgerlens.utils.connectors.base import PsycopgConnector
 logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS: Final = 2
-# SQLSTATE 53200 (128 MiB per query), 54000 (300 s per transaction) and 57014
-# (cancelled). psycopg classes all three as OperationalError subclasses.
-_LIMIT_ERRORS: Final = (
-    psycopg.errors.OutOfMemory,
-    psycopg.errors.ProgramLimitExceeded,
-    psycopg.errors.QueryCanceled,
-)
+# Query limits: SQLSTATE classes 53 (insufficient resources, such as 53200 for
+# DSQL's 128 MiB per query) and 54 (program limit exceeded, such as 54000 for
+# its 300 s per transaction), plus 57014 (cancelled). psycopg makes them all
+# OperationalError subclasses, so they are told apart by SQLSTATE.
+_LIMIT_SQLSTATE_CLASSES: Final = ("53", "54")
+_CANCELED_SQLSTATE: Final = "57014"
+# Too many connections and connection rate exceeded: the connection may recover.
+_CONNECTION_LIMIT_SQLSTATES: Final = frozenset({"53300", "53400"})
 
 
 class DsqlRepository(DatabaseRepository):
@@ -59,19 +60,20 @@ class DsqlRepository(DatabaseRepository):
         Raises:
             DataSourceConnectionError: The connection failed twice, or couldn't be
                 opened.
-            QueryLimitExceededError: The query exceeded a DSQL memory or time
-                limit, or the server cancelled it.
+            QueryLimitExceededError: The query exceeded a database resource or
+                program limit (SQLSTATE class 53 or 54, except the connection
+                limits), or the server cancelled it.
             QueryExecutionError: Any other database error.
         """
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             try:
                 return self._run(query, params)
-            except _LIMIT_ERRORS as exc:
-                # OperationalError subclasses: must be caught first, never retried.
-                raise QueryLimitExceededError(
-                    "The query exceeded a database limit"
-                ) from exc
             except psycopg.OperationalError as exc:
+                if _is_query_limit(exc):
+                    # Never retried: the same query would fail the same way.
+                    raise QueryLimitExceededError(
+                        "The query exceeded a database limit"
+                    ) from exc
                 self._connector.reset()
                 if attempt == _MAX_ATTEMPTS:
                     raise DataSourceConnectionError(
@@ -93,3 +95,11 @@ class DsqlRepository(DatabaseRepository):
         with connection.cursor() as cursor:
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
+
+
+def _is_query_limit(exc: psycopg.Error) -> bool:
+    """Return True when ``exc`` is a query limit rather than a connection fault."""
+    sqlstate = exc.sqlstate or ""
+    if sqlstate in _CONNECTION_LIMIT_SQLSTATES:
+        return False
+    return sqlstate == _CANCELED_SQLSTATE or sqlstate[:2] in _LIMIT_SQLSTATE_CLASSES

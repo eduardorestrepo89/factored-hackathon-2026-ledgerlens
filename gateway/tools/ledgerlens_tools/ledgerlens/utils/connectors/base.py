@@ -55,7 +55,8 @@ class PsycopgConnector(ABC):
             try:
                 connection = self._open()
             except Exception as exc:
-                # Fixed message: hosts, users and tokens never reach logs or agents.
+                # Fixed message: hosts, users and tokens never reach the agent; the
+                # chained cause (which may name the host) is only logged.
                 raise DataSourceConnectionError(
                     "Could not open a database connection"
                 ) from exc

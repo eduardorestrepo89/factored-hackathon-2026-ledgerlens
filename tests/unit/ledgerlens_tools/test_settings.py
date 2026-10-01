@@ -75,6 +75,7 @@ def test_a_blank_db_user_falls_back_to_the_read_only_role() -> None:
         f"https://{ENDPOINT}",
         f"{ENDPOINT}:5432",
         f"{ENDPOINT}/",
+        "abc123",
     ],
 )
 def test_invalid_cluster_endpoint_is_rejected(endpoint: str) -> None:
@@ -93,3 +94,17 @@ def test_missing_cluster_endpoint_is_rejected() -> None:
 def test_missing_region_is_rejected(env: dict[str, str]) -> None:
     with pytest.raises(ConfigurationError, match="AWS_REGION"):
         DsqlSettings.from_env(env)
+
+
+def test_an_endpoint_in_another_region_than_aws_region_is_rejected() -> None:
+    env = {**DSQL_ENV, "AWS_REGION": "us-west-2"}
+
+    with pytest.raises(ConfigurationError, match="DSQL_CLUSTER_ENDPOINT.*AWS_REGION"):
+        DsqlSettings.from_env(env)
+
+
+def test_a_custom_endpoint_host_skips_the_region_check() -> None:
+    # PrivateLink and other custom hosts don't carry the region in their name.
+    env = {"DSQL_CLUSTER_ENDPOINT": "dsql.internal.example", "AWS_REGION": "us-west-2"}
+
+    assert DsqlSettings.from_env(env).cluster_endpoint == "dsql.internal.example"

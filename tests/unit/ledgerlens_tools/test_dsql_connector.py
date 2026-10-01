@@ -6,7 +6,7 @@ from typing import Any
 import ledgerlens.utils.connectors.dsql as dsql_module
 import psycopg
 import pytest
-from botocore.exceptions import NoCredentialsError
+from botocore.exceptions import NoCredentialsError, UnknownServiceError
 from ledgerlens.application.ports.errors import DataSourceConnectionError
 from ledgerlens.utils.connectors.dsql import DsqlConnector
 from ledgerlens_fakes import FakeClock, FakeConnection, FakeDsqlTokenClient
@@ -175,7 +175,7 @@ def test_creates_one_boto3_dsql_client_for_the_region_on_first_open(
 @pytest.mark.parametrize(
     ("tokens", "connect"),
     [
-        (FakeDsqlTokenClient(error=RuntimeError("NoCredentialsError")), None),
+        (FakeDsqlTokenClient(error=NoCredentialsError()), None),
         (
             None,
             RecordingConnect(
@@ -199,12 +199,16 @@ def test_token_or_connect_failure_raises_data_source_connection_error(
     assert "token" not in str(caught.value)
 
 
+def unknown_dsql_service() -> UnknownServiceError:
+    """The error an old Lambda runtime boto3 raises for the "dsql" client."""
+    return UnknownServiceError(service_name="dsql", known_service_names="s3, sts")
+
+
 def test_a_boto3_without_the_dsql_client_raises_data_source_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # An old Lambda runtime boto3 raises UnknownServiceError for "dsql".
     def old_boto3_client(*args: object, **kwargs: object) -> object:
-        raise RuntimeError("Unknown service: 'dsql'")
+        raise unknown_dsql_service()
 
     monkeypatch.setattr(dsql_module.boto3, "client", old_boto3_client)
     connector = DsqlConnector(
@@ -250,3 +254,31 @@ def test_an_injected_client_is_kept_after_a_failed_token() -> None:
             connector.connection()
 
     assert len(tokens.calls) == 2
+
+
+def test_a_failed_boto3_client_creation_is_retried_on_the_next_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcomes: list[object] = [unknown_dsql_service(), FakeDsqlTokenClient()]
+
+    def flaky_boto3_client(*args: object, **kwargs: object) -> object:
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(dsql_module.boto3, "client", flaky_boto3_client)
+    connect = RecordingConnect()
+    connector = DsqlConnector(
+        cluster_endpoint=ENDPOINT,
+        region=REGION,
+        db_user=READONLY_USER,
+        connect=connect,
+    )
+
+    with pytest.raises(DataSourceConnectionError):
+        connector.connection()
+    connector.connection()
+
+    assert outcomes == []
+    assert connect.calls[-1]["password"] == "token-1"

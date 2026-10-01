@@ -7,8 +7,8 @@ TODO(ledgerlens): R6 - the DB role is the only write guard: DSQL rejects
   SELECT-only grants and mapped to the Lambda's IAM role (AWS IAM GRANT).
 TODO(ledgerlens): R7 - mostly resolved: a cluster accepts 10,000 connections.
   What is left is the rate of 100 new connections/s (burst 1,000) during mass
-  cold starts, which surfaces as "temporarily unavailable" after one retry. Cap
-  reservedConcurrentExecutions if it ever matters.
+  cold starts, which surfaces as "temporarily unavailable" (a failed connect isn't
+  retried within the request). Cap reservedConcurrentExecutions if it ever matters.
 TODO(ledgerlens): R11 - sslmode=require doesn't verify the server certificate;
   verify-full needs the Amazon root CA bundled with the Lambda.
 """

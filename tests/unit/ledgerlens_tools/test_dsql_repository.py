@@ -31,6 +31,10 @@ def test_returns_rows_as_dicts_and_passes_query_and_params() -> None:
         psycopg.errors.OutOfMemory("query exceeded the 128 MiB limit (53200)"),
         psycopg.errors.ProgramLimitExceeded("transaction age limit of 300s (54000)"),
         psycopg.errors.QueryCanceled("canceling statement (57014)"),
+        psycopg.errors.StatementTooComplex("statement too complex (54001)"),
+        psycopg.errors.TooManyColumns("too many columns (54011)"),
+        psycopg.errors.InsufficientResources("insufficient resources (53000)"),
+        psycopg.errors.DiskFull("disk full (53100)"),
     ],
 )
 def test_dsql_limit_errors_raise_query_limit_exceeded_without_retry(
@@ -79,6 +83,25 @@ def test_operational_error_resets_and_retries_once_then_succeeds() -> None:
     assert rows == [make_row()]
     assert connector.reset_calls == 1
     assert len(connector.connections) == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        psycopg.errors.TooManyConnections("too many connections (53300)"),
+        psycopg.errors.ConfigurationLimitExceeded("rate exceeded (53400)"),
+    ],
+)
+def test_connection_limit_errors_reset_and_retry_like_a_lost_connection(
+    error: psycopg.Error,
+) -> None:
+    # Classes 53 and 54 are query limits, except these two connection limits.
+    connector = FakeConnector(error, [make_row()])
+
+    rows = DsqlRepository(connector).execute_query(QUERY, PARAMS)
+
+    assert rows == [make_row()]
+    assert connector.reset_calls == 1
 
 
 def test_second_operational_error_raises_data_source_connection_error() -> None:
