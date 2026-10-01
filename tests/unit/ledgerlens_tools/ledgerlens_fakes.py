@@ -1,7 +1,8 @@
 """Test doubles and builders shared by the LedgerLens tool tests."""
 
-from collections.abc import Mapping
-from datetime import date, datetime, timezone
+import time
+from collections.abc import Callable, Mapping
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -139,19 +140,32 @@ class FakeConnection:
 
 
 class FakeConnector(PsycopgConnector):
-    """PsycopgConnector double; each connection() serves the next outcome.
+    """PsycopgConnector double whose _open() serves the next queued outcome.
 
-    The last outcome repeats. A DataSourceConnectionError outcome is raised by
-    connection() itself; any other exception is raised by cursor.execute().
+    The base class caches the connection, so the next outcome is only used after
+    a reset, a closed connection or max_age. The last outcome repeats. A
+    DataSourceConnectionError outcome is raised by _open() (connection() wraps
+    it); any other exception is raised by cursor.execute().
     """
 
-    def __init__(self, *outcomes: Outcome) -> None:
+    def __init__(
+        self,
+        *outcomes: Outcome,
+        max_age: timedelta | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         """Queue the outcomes; with none, every query returns no rows."""
+        super().__init__(max_age=max_age, clock=clock)
         self._outcomes: list[Outcome] = list(outcomes) or [[]]
         self.connections: list[FakeConnection] = []
         self.reset_calls = 0
 
-    def connection(self) -> Any:
+    def reset(self) -> None:
+        """Count the reset, then let the base class close the connection."""
+        self.reset_calls += 1
+        super().reset()
+
+    def _open(self) -> Any:
         """Return a connection double for the next outcome."""
         outcome = (
             self._outcomes.pop(0) if len(self._outcomes) > 1 else self._outcomes[0]
@@ -162,6 +176,50 @@ class FakeConnector(PsycopgConnector):
         self.connections.append(connection)
         return connection
 
-    def reset(self) -> None:
-        """Count resets."""
-        self.reset_calls += 1
+
+class FakeClock:
+    """Monotonic clock double that only moves when told to."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        """Start at ``start`` seconds."""
+        self.now = start
+
+    def __call__(self) -> float:
+        """Return the current time in seconds."""
+        return self.now
+
+    def advance(self, delta: timedelta) -> None:
+        """Move the clock forward by ``delta``."""
+        self.now += delta.total_seconds()
+
+
+class FakeDsqlTokenClient:
+    """boto3 DSQL client double; returns token-1, token-2, ... and records calls."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        """Raise ``error`` from every token method if given."""
+        self.error = error
+        self.calls: list[tuple[str, str, str]] = []
+
+    def generate_db_connect_auth_token(
+        self,
+        Hostname: str,  # noqa: N803
+        Region: str,  # noqa: N803
+    ) -> str:
+        """Return the next token for a custom database role."""
+        return self._token("generate_db_connect_auth_token", Hostname, Region)
+
+    def generate_db_connect_admin_auth_token(
+        self,
+        Hostname: str,  # noqa: N803
+        Region: str,  # noqa: N803
+    ) -> str:
+        """Return the next token for the admin role."""
+        return self._token("generate_db_connect_admin_auth_token", Hostname, Region)
+
+    def _token(self, method: str, hostname: str, region: str) -> str:
+        """Record the call, then raise the configured error or return a token."""
+        self.calls.append((method, hostname, region))
+        if self.error is not None:
+            raise self.error
+        return f"token-{len(self.calls)}"

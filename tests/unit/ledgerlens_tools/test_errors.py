@@ -5,8 +5,8 @@ from ledgerlens.application.ports.errors import (
     DataAccessError,
     DataSourceConnectionError,
     QueryExecutionError,
+    QueryLimitExceededError,
     QueryNotFoundError,
-    QueryTimeoutError,
 )
 from ledgerlens.domain.errors import (
     DataIntegrityError,
@@ -42,8 +42,8 @@ def test_invalid_input_error_formats_field_and_reason() -> None:
         ),
         (
             SearchTooBroadError,
-            "The transaction search took too long. Retry with a narrower date "
-            "range or add a card or merchant filter.",
+            "The transaction search was too broad for the database. Retry with a "
+            "narrower date range or add a card or merchant filter.",
         ),
         (
             TransactionLookupError,
@@ -71,7 +71,7 @@ def test_fixed_domain_errors_carry_agent_facing_messages(
     "error_type",
     [
         DataSourceConnectionError,
-        QueryTimeoutError,
+        QueryLimitExceededError,
         QueryExecutionError,
         QueryNotFoundError,
     ],

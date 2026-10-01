@@ -1,4 +1,4 @@
--- list_card_transactions (PostgreSQL)
+-- list_card_transactions (PostgreSQL dialect, runs on Aurora DSQL)
 --
 -- A customer's card transactions, newest first, one row per transaction_id.
 -- Used by ListCardTransactionsUseCase.
@@ -22,8 +22,10 @@
 -- letters alone under a C collation), then lower() handles ASCII. translate() is
 -- core PostgreSQL, so no unaccent extension is needed (Aurora DSQL has none).
 --
--- TODO(ledgerlens): R3 - not yet run against a real PostgreSQL database. Column
---   names follow docs/LATAM_Bank_ERD.md; add integration tests with a container.
+-- TODO(ledgerlens): R3 - not yet run against a real Aurora DSQL cluster. DISTINCT ON,
+--   translate(), strpos(), NULLS LAST and the binds are standard PostgreSQL, but
+--   DSQL support and the plan under the 128 MiB per-query limit are unverified.
+--   Column names follow docs/LATAM_Bank_ERD.md; smoke-test against a real cluster.
 -- TODO(ledgerlens): R8 - about 2 in 100 rows are duplicated; DISTINCT ON removes
 --   them at query time. Drop it once the data load deduplicates.
 SELECT deduplicated.*

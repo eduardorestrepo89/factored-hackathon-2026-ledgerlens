@@ -14,6 +14,7 @@ from ledgerlens.delivery.dependencies.dependencies_builder import (
     build_database_repository,
     build_query_provider,
 )
+from ledgerlens.delivery.settings import DatabaseEngine
 from ledgerlens.domain.errors import DataSourceUnavailableError
 from ledgerlens_fakes import FakeConnector, make_row
 
@@ -34,7 +35,13 @@ def make_context(
 @pytest.fixture
 def module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     """Import the handler module fresh, with no DB env vars (no AWS calls)."""
-    for name in ("DB_ENGINE", "DB_SECRET_ARN", "DB_STATEMENT_TIMEOUT_MS", "MAX_ROWS"):
+    for name in (
+        "DB_ENGINE",
+        "MAX_ROWS",
+        "DSQL_CLUSTER_ENDPOINT",
+        "DSQL_DB_USER",
+        "AWS_REGION",
+    ):
         monkeypatch.delenv(name, raising=False)
     import ledgerlens.delivery.list_card_transactions_handler as handler_module
 
@@ -44,8 +51,10 @@ def module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 def wire(module: ModuleType, monkeypatch: pytest.MonkeyPatch, connector: Any) -> None:
     """Point the handler's global use case at real adapters over a fake connector."""
     use_case = ListCardTransactionsUseCase(
-        database_repository=build_database_repository("postgresql", connector),
-        query_provider=build_query_provider("postgresql"),
+        database_repository=build_database_repository(
+            DatabaseEngine.AURORA_DSQL, connector
+        ),
+        query_provider=build_query_provider(DatabaseEngine.AURORA_DSQL),
         max_rows=25,
     )
     monkeypatch.setattr(module, "USE_CASE", use_case)

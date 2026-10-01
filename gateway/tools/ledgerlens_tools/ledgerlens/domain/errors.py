@@ -58,11 +58,11 @@ class DataSourceUnavailableError(_FixedMessageError):
 
 
 class SearchTooBroadError(_FixedMessageError):
-    """The query hit the statement timeout; a narrower search may succeed."""
+    """The query exceeded a database limit; a narrower search may succeed."""
 
     MESSAGE: ClassVar[str] = (
-        "The transaction search took too long. Retry with a narrower date "
-        "range or add a card or merchant filter."
+        "The transaction search was too broad for the database. Retry with a "
+        "narrower date range or add a card or merchant filter."
     )
 
 

@@ -9,7 +9,7 @@ from ledgerlens.application.ports.database_repository import DatabaseRepository
 from ledgerlens.application.ports.errors import (
     DataAccessError,
     DataSourceConnectionError,
-    QueryTimeoutError,
+    QueryLimitExceededError,
 )
 from ledgerlens.application.ports.query_provider import QueryProvider
 from ledgerlens.domain.entities.card_transaction import (
@@ -66,7 +66,8 @@ class ListCardTransactionsUseCase:
 
         Raises:
             DataSourceUnavailableError: The database can't be reached.
-            SearchTooBroadError: The query hit the statement timeout.
+            SearchTooBroadError: The query exceeded a database time or resource
+                limit.
             TransactionLookupError: The query is missing or failed to run.
             DataIntegrityError: A returned row couldn't be mapped.
         """
@@ -75,7 +76,7 @@ class ListCardTransactionsUseCase:
             rows = self._database_repository.execute_query(query, self._params(filters))
         except DataSourceConnectionError as exc:
             raise DataSourceUnavailableError() from exc
-        except QueryTimeoutError as exc:
+        except QueryLimitExceededError as exc:
             raise SearchTooBroadError() from exc
         except DataAccessError as exc:
             raise TransactionLookupError() from exc

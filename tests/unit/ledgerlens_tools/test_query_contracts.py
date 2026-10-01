@@ -25,6 +25,7 @@ QUERIES_DIR = REPO_ROOT / "gateway/tools/ledgerlens_tools/ledgerlens/queries/pos
 TOOL_SPEC = REPO_ROOT / "gateway/tools/list_card_transactions/tool_spec.json"
 PLACEHOLDER = re.compile(r"%\((\w+)\)s")
 TRANSLATE = re.compile(r"translate\(([^,]+), '([^']*)', '([^']*)'\)")
+SESSION_STATEMENT = re.compile(r"^\s*SET\b", re.IGNORECASE | re.MULTILINE)
 
 # Merchant names in the dataset (transactions.merchant_name categorical values).
 KNOWN_MERCHANTS = (
@@ -83,6 +84,20 @@ def test_sql_placeholders_match_the_use_case_params_exactly() -> None:
 def test_sql_has_no_stray_percent_signs() -> None:
     # psycopg treats every '%' as a placeholder marker once params are passed.
     assert "%" not in PLACEHOLDER.sub("", sql())
+
+
+def test_sql_sets_no_session_parameters() -> None:
+    # DSQL rejects most session parameters (statement_timeout among them). The
+    # regex is anchored at line start so "OFFSET" or "SET" in a comment don't count.
+    text = sql()
+
+    assert SESSION_STATEMENT.search(text) is None
+    assert "statement_timeout" not in text.lower()
+
+
+def test_session_statement_check_ignores_offset() -> None:
+    assert SESSION_STATEMENT.search("SELECT 1\nOFFSET 0\n") is None
+    assert SESSION_STATEMENT.search("SELECT 1;\n  set statement_timeout = 0;\n")
 
 
 def test_sql_orders_null_transaction_dates_last() -> None:

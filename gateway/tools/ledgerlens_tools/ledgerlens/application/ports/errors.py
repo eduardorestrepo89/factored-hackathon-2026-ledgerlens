@@ -14,8 +14,8 @@ class DataSourceConnectionError(DataAccessError):
     """The database connection couldn't be opened or was lost."""
 
 
-class QueryTimeoutError(DataAccessError):
-    """The statement was cancelled by the database statement timeout."""
+class QueryLimitExceededError(DataAccessError):
+    """The query exceeded a database time or resource limit."""
 
 
 class QueryExecutionError(DataAccessError):

@@ -1,15 +1,13 @@
-"""Tests for PostgreSQLRepository: rows, error mapping and the single retry."""
+"""Tests for DsqlRepository: rows, error mapping and the single retry."""
 
 import psycopg
 import pytest
 from ledgerlens.application.ports.errors import (
     DataSourceConnectionError,
     QueryExecutionError,
-    QueryTimeoutError,
+    QueryLimitExceededError,
 )
-from ledgerlens.infrastructure.repositories.postgresql_repository import (
-    PostgreSQLRepository,
-)
+from ledgerlens.infrastructure.repositories.dsql_repository import DsqlRepository
 from ledgerlens_fakes import FakeConnector, make_row
 
 pytestmark = pytest.mark.unit
@@ -21,22 +19,34 @@ PARAMS = {"customer_id": "CUST-1"}
 def test_returns_rows_as_dicts_and_passes_query_and_params() -> None:
     connector = FakeConnector([make_row()])
 
-    rows = PostgreSQLRepository(connector).execute_query(QUERY, PARAMS)
+    rows = DsqlRepository(connector).execute_query(QUERY, PARAMS)
 
     assert rows == [make_row()]
     assert connector.connections[0].cursors[0].executed == [(QUERY, PARAMS)]
 
 
-def test_statement_timeout_raises_query_timeout_without_retry() -> None:
-    cancelled = psycopg.errors.QueryCanceled("canceling statement due to timeout")
-    connector = FakeConnector(cancelled)
+@pytest.mark.parametrize(
+    "error",
+    [
+        psycopg.errors.OutOfMemory("query exceeded the 128 MiB limit (53200)"),
+        psycopg.errors.ProgramLimitExceeded("transaction age limit of 300s (54000)"),
+        psycopg.errors.QueryCanceled("canceling statement (57014)"),
+    ],
+)
+def test_dsql_limit_errors_raise_query_limit_exceeded_without_retry(
+    error: psycopg.Error,
+) -> None:
+    # Each one is an OperationalError subclass: it must not hit the retry branch.
+    assert isinstance(error, psycopg.OperationalError)
+    connector = FakeConnector(error)
 
-    with pytest.raises(QueryTimeoutError) as caught:
-        PostgreSQLRepository(connector).execute_query(QUERY, PARAMS)
+    with pytest.raises(QueryLimitExceededError) as caught:
+        DsqlRepository(connector).execute_query(QUERY, PARAMS)
 
-    assert caught.value.__cause__ is cancelled
+    assert caught.value.__cause__ is error
     assert connector.reset_calls == 0
     assert len(connector.connections) == 1
+    assert len(connector.connections[0].cursors) == 1
 
 
 @pytest.mark.parametrize(
@@ -53,7 +63,7 @@ def test_other_psycopg_errors_raise_query_execution_error(
     connector = FakeConnector(error)
 
     with pytest.raises(QueryExecutionError) as caught:
-        PostgreSQLRepository(connector).execute_query(QUERY, PARAMS)
+        DsqlRepository(connector).execute_query(QUERY, PARAMS)
 
     assert caught.value.__cause__ is error
     assert connector.reset_calls == 0
@@ -64,7 +74,7 @@ def test_operational_error_resets_and_retries_once_then_succeeds() -> None:
         psycopg.OperationalError("server closed the connection"), [make_row()]
     )
 
-    rows = PostgreSQLRepository(connector).execute_query(QUERY, PARAMS)
+    rows = DsqlRepository(connector).execute_query(QUERY, PARAMS)
 
     assert rows == [make_row()]
     assert connector.reset_calls == 1
@@ -76,18 +86,19 @@ def test_second_operational_error_raises_data_source_connection_error() -> None:
     connector = FakeConnector(lost)
 
     with pytest.raises(DataSourceConnectionError) as caught:
-        PostgreSQLRepository(connector).execute_query(QUERY, PARAMS)
+        DsqlRepository(connector).execute_query(QUERY, PARAMS)
 
     assert caught.value.__cause__ is lost
     assert connector.reset_calls == 2
     assert len(connector.connections) == 2
 
 
-def test_connector_failure_propagates_unchanged() -> None:
-    failure = DataSourceConnectionError("secret unreadable")
+def test_connector_failure_propagates_as_data_source_connection_error() -> None:
+    failure = DataSourceConnectionError("no route to host")
     connector = FakeConnector(failure)
 
     with pytest.raises(DataSourceConnectionError) as caught:
-        PostgreSQLRepository(connector).execute_query(QUERY, PARAMS)
+        DsqlRepository(connector).execute_query(QUERY, PARAMS)
 
-    assert caught.value is failure
+    assert caught.value.__cause__ is failure
+    assert connector.reset_calls == 0

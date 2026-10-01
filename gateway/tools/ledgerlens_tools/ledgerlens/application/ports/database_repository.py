@@ -27,6 +27,7 @@ class DatabaseRepository(ABC):
 
         Raises:
             DataSourceConnectionError: The connection couldn't be opened or was lost.
-            QueryTimeoutError: The statement timeout cancelled the query.
+            QueryLimitExceededError: The query exceeded a database time or resource
+                limit.
             QueryExecutionError: The database failed to run the query.
         """

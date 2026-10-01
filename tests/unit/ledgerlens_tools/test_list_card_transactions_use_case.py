@@ -9,7 +9,7 @@ from ledgerlens.application.ports.errors import (
     DataAccessError,
     DataSourceConnectionError,
     QueryExecutionError,
-    QueryTimeoutError,
+    QueryLimitExceededError,
 )
 from ledgerlens.application.use_cases.list_card_transactions import (
     ListCardTransactionsUseCase,
@@ -183,7 +183,7 @@ def test_numeric_ids_and_float_amounts_are_normalised() -> None:
             DataSourceUnavailableError,
         ),
         (
-            QueryTimeoutError("canceling statement due to statement timeout"),
+            QueryLimitExceededError("query exceeded the 128 MiB memory limit"),
             SearchTooBroadError,
         ),
         (

@@ -15,8 +15,9 @@ The use case and its whole graph (settings, connector, connection, adapters) are
 built once, when the module loads, by dependencies_builder; a warm container
 reuses them. The handler builds nothing itself.
 
-TODO(ledgerlens): R1 - no CDK yet: no PythonFunction, Gateway target, VPC, security
-  group, secret grant or env vars (DB_ENGINE, DB_SECRET_ARN). The tool can't be
+TODO(ledgerlens): R1 - no CDK yet: no PythonFunction, Gateway target, env vars
+  (DB_ENGINE, DSQL_CLUSTER_ENDPOINT, DSQL_DB_USER) or dsql:DbConnect grant on the
+  cluster ARN (dsql:DbConnectAdmin only if DSQL_DB_USER=admin). The tool can't be
   deployed or called by the agent until the CDK spec lands.
 TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
   depends on a Cedar policy matching it to the token's customer_id claim; neither
