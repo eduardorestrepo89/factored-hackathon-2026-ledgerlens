@@ -2,20 +2,19 @@
 
 import subprocess
 from contextlib import contextmanager
-from datetime import date, datetime
 
 import pytest
 
 from data_load.ddl import load_plan
 from data_load.dsql import (
-    ManifestRow,
     apply_schema,
     build_indexes,
     load_all,
     loader_cmd,
-    record_manifest,
     schema_statements,
 )
+
+TOOLS_ROLE = "arn:aws:iam::111111111111:role/ledgerlens-tools"
 
 
 class FakeCursor:
@@ -41,74 +40,76 @@ class FakeCursor:
 
 class FakeConn:
     def __init__(self, respond=lambda sql: []):
-        self.executed, self.respond, self.transactions = [], respond, 0
+        self.executed, self.respond = [], respond
 
     def cursor(self):
         return FakeCursor(self)
 
     @contextmanager
     def transaction(self):
-        self.transactions += 1
         yield
 
     def sql(self):
         return [s for s, _ in self.executed]
 
 
-def manifest_row(table="bank.transactions", rows=10):
-    return ManifestRow(
-        table,
-        datetime(2026, 6, 17, 23, 59, 59),
-        date(2024, 6, 18),
-        date(2026, 6, 17),
-        "s3://org/data/transactions/",
-        1097,
-        "d" * 64,
-        "s3://team/staging/t.parquet",
-        "s" * 64,
-        rows,
-    )
-
-
-@pytest.mark.unit
-def test_schema_statements_recreate_organizer_tables_and_keep_app():
-    plan = load_plan()
-    stmts = schema_statements(plan)
-    first = stmts.index
-    assert first("DROP VIEW IF EXISTS bank.customer_profile") < first(
-        "DROP TABLE IF EXISTS pii.customers"
-    )
-    assert first("DROP TABLE IF EXISTS pii.customers") < first(
-        plan.data_tables["pii.customers"]
-    )
-    assert first(plan.data_tables["pii.customers"]) < first(
-        plan.views["bank.customer_profile"]
-    )
-    assert not any(s.startswith("DROP TABLE IF EXISTS app.") for s in stmts)
-    assert all(s in stmts for s in plan.app_tables)
-
-
-@pytest.mark.unit
-def test_apply_schema_is_rerunnable():
+def existing(roles=(), mappings=()):
     def respond(sql):
         if sql.startswith("SELECT rolname"):
-            return [("ll_read",), ("ll_write",)]
-        if sql.startswith("SELECT indexname"):
-            return [("idx_cases_customer_date",)]
-        if sql.startswith("CREATE INDEX ASYNC"):
-            return [("job-1",)]
-        if "FROM sys.jobs" in sql:
-            return [("completed", None)]
+            return [(r,) for r in roles]
+        if "sys.iam_pg_role_mappings" in sql:
+            return [(arn,) for arn in mappings]
         return []
 
-    plan, conn = load_plan(), FakeConn(respond)
-    apply_schema(conn, plan)
+    return respond
+
+
+@pytest.mark.unit
+def test_schema_statements_drop_then_create_every_table():
+    plan = load_plan()
+    stmts = schema_statements(plan)
+    assert len(stmts) == 26
+    for table, ddl in plan.data_tables.items():
+        assert stmts.index(f"DROP TABLE IF EXISTS {table}") < stmts.index(ddl)
+
+
+@pytest.mark.unit
+def test_first_load_creates_the_role_maps_it_and_grants():
+    plan, conn = load_plan(), FakeConn(existing())
+    apply_schema(conn, plan, TOOLS_ROLE)
     sql = conn.sql()
-    assert "CREATE ROLE ll_read WITH LOGIN" not in sql
-    assert "CREATE ROLE ll_approvals WITH LOGIN" in sql
-    assert all(g in sql for g in plan.grants)
-    created = [s for s in sql if s.startswith("CREATE INDEX ASYNC")]
-    assert created == [plan.app_indexes["idx_claims_customer_date"]]
+    assert "CREATE ROLE ll_read WITH LOGIN" in sql
+    assert f"AWS IAM GRANT ll_read TO '{TOOLS_ROLE}'" in sql
+    assert sql.index(f"AWS IAM GRANT ll_read TO '{TOOLS_ROLE}'") < sql.index(
+        plan.grants[0]
+    )
+    assert sql[-2:] == plan.grants  # grants last: they must see the new tables
+
+
+@pytest.mark.unit
+def test_reload_keeps_the_role_and_mapping_but_regrants():
+    plan = load_plan()
+    conn = FakeConn(existing(roles=["ll_read"], mappings=[TOOLS_ROLE]))
+    apply_schema(conn, plan, TOOLS_ROLE)
+    sql = conn.sql()
+    assert not any(s.startswith(("CREATE ROLE", "AWS IAM GRANT")) for s in sql)
+    assert sql[-2:] == plan.grants
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "arn",
+    [
+        "",
+        "ledgerlens-tools",
+        "arn:aws:iam::111111111111:role/x'; DROP TABLE customers; --",
+    ],
+)
+def test_a_bad_role_arn_is_refused_before_any_sql(arn):
+    conn = FakeConn(existing())
+    with pytest.raises(ValueError, match="not an IAM role ARN"):
+        apply_schema(conn, load_plan(), arn)
+    assert conn.sql() == []
 
 
 @pytest.mark.unit
@@ -121,7 +122,7 @@ def test_build_indexes_fails_when_a_job_fails():
     with pytest.raises(RuntimeError, match="job-9, failed: Found duplicate key"):
         build_indexes(
             FakeConn(respond),
-            ["CREATE INDEX ASYNC i ON bank.products (customer_id)"],
+            ["CREATE INDEX ASYNC i ON products (customer_id)"],
             sleep=lambda seconds: None,
         )
 
@@ -135,9 +136,7 @@ def test_build_indexes_polls_sys_jobs_until_complete():
 
     conn, sleeps = FakeConn(respond), []
     build_indexes(
-        conn,
-        ["CREATE INDEX ASYNC i ON bank.products (customer_id)"],
-        sleep=sleeps.append,
+        conn, ["CREATE INDEX ASYNC i ON products (customer_id)"], sleep=sleeps.append
     )
     assert sleeps == [10]
     # short polls only: a long sys.wait_for_job could outlive DSQL's 5-min transaction limit
@@ -145,20 +144,18 @@ def test_build_indexes_polls_sys_jobs_until_complete():
 
 
 @pytest.mark.unit
-def test_loader_cmd():
+def test_loader_cmd_targets_public():
     assert loader_cmd(
-        "c.dsql.us-east-1.on.aws",
-        "s3://t/staging/x/transactions.parquet",
-        "bank.transactions",
+        "c.dsql.us-east-1.on.aws", "s3://t/clean/r/transactions.parquet", "transactions"
     ) == [
         "aurora-dsql-loader",
         "load",
         "--endpoint",
         "c.dsql.us-east-1.on.aws",
         "--source-uri",
-        "s3://t/staging/x/transactions.parquet",
+        "s3://t/clean/r/transactions.parquet",
         "--schema",
-        "bank",
+        "public",
         "--table",
         "transactions",
         "--on-conflict",
@@ -166,6 +163,13 @@ def test_loader_cmd():
         "--verify",
         "count",
     ]
+
+
+@pytest.mark.unit
+def test_loader_dry_run_cmd_validates_without_loading():
+    assert loader_cmd(
+        "c.dsql.us-east-1.on.aws", "s3://t/x.parquet", "branches", dry_run=True
+    )[-5:] == ["--schema", "public", "--table", "branches", "--dry-run"]
 
 
 @pytest.mark.unit
@@ -179,59 +183,14 @@ def test_load_all_fails_after_every_table_was_attempted():
             raise subprocess.CalledProcessError(2, cmd)
 
     uris = {
-        "bank.digital_events": "s3://t/a",
-        "bank.transactions": "s3://t/b",
-        "pii.customers": "s3://t/c",
+        "digital_events": "s3://t/a",
+        "transactions": "s3://t/b",
+        "customers": "s3://t/c",
     }
-    with pytest.raises(RuntimeError, match=r"bank\.transactions \(exit 2\)") as err:
+    with pytest.raises(RuntimeError, match=r"transactions \(exit 2\)") as err:
         load_all("c.dsql.us-east-1.on.aws", uris, run=fake_run)
     assert sorted(attempted) == ["customers", "digital_events", "transactions"]
     assert "digital_events" not in str(err.value)
-
-
-@pytest.mark.unit
-def test_record_manifest_refuses_a_count_mismatch():
-    conn = FakeConn(lambda sql: [(9,)])
-    with pytest.raises(RuntimeError, match="9 rows in DSQL, 10 staged"):
-        record_manifest(conn, [manifest_row(rows=10)])
-    assert not any(s.startswith(("DELETE", "INSERT")) for s in conn.sql())
-
-
-@pytest.mark.unit
-def test_record_manifest_replaces_one_row_per_table():
-    conn = FakeConn(lambda sql: [(10,)])
-    record_manifest(
-        conn, [manifest_row("bank.transactions"), manifest_row("bank.products")]
-    )
-    writes = [
-        (s.split()[0], p)
-        for s, p in conn.executed
-        if s.startswith(("DELETE", "INSERT"))
-    ]
-    assert [w[0] for w in writes] == ["DELETE", "INSERT", "DELETE", "INSERT"]
-    assert (
-        writes[1][1][0] == "bank.transactions" and writes[1][1][-1] == 10
-    )  # rows_loaded
-    assert conn.transactions == 2
-
-
-@pytest.mark.unit
-def test_loader_dry_run_cmd_validates_without_loading():
-    assert loader_cmd(
-        "c.dsql.us-east-1.on.aws", "s3://t/x.parquet", "bank.branches", dry_run=True
-    ) == [
-        "aurora-dsql-loader",
-        "load",
-        "--endpoint",
-        "c.dsql.us-east-1.on.aws",
-        "--source-uri",
-        "s3://t/x.parquet",
-        "--schema",
-        "bank",
-        "--table",
-        "branches",
-        "--dry-run",
-    ]
 
 
 @pytest.mark.unit

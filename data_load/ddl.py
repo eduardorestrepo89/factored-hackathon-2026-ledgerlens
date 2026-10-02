@@ -1,4 +1,4 @@
-"""Split schema.sql into the groups the load runs at different moments."""
+"""Split schema.sql into the groups the pipeline runs at different moments."""
 
 import re
 from dataclasses import dataclass, field
@@ -9,14 +9,10 @@ SCHEMA_SQL = Path(__file__).with_name("schema.sql")
 
 @dataclass
 class SchemaPlan:
-    schemas: list[str] = field(default_factory=list)
-    data_tables: dict[str, str] = field(default_factory=dict)  # "bank.x" -> DDL
-    views: dict[str, str] = field(default_factory=dict)  # "bank.v" -> DDL
-    app_tables: list[str] = field(default_factory=list)
+    data_tables: dict[str, str] = field(default_factory=dict)  # "transactions" -> DDL
     roles: dict[str, str] = field(default_factory=dict)  # "ll_read" -> CREATE ROLE
-    grants: list[str] = field(default_factory=list)
-    data_indexes: list[str] = field(default_factory=list)  # rebuilt every load
-    app_indexes: dict[str, str] = field(default_factory=dict)  # name -> DDL, once
+    grants: list[str] = field(default_factory=list)  # re-applied after every load
+    indexes: list[str] = field(default_factory=list)  # rebuilt after every load
 
 
 def split_statements(sql: str) -> list[str]:
@@ -30,23 +26,19 @@ def load_plan(sql: str | None = None) -> SchemaPlan:
         sql = SCHEMA_SQL.read_text(encoding="utf-8")
     plan = SchemaPlan()
     for stmt in split_statements(sql):
-        if re.fullmatch(r"CREATE SCHEMA IF NOT EXISTS \w+", stmt):
-            plan.schemas.append(stmt)
-        elif m := re.match(r"CREATE TABLE ((?:bank|pii)\.\w+) \(", stmt):
+        if m := re.match(r"CREATE TABLE (\w+) \(", stmt):
             plan.data_tables[m[1]] = stmt
-        elif m := re.match(r"CREATE VIEW (\w+\.\w+) AS ", stmt):
-            plan.views[m[1]] = stmt
-        elif re.match(r"CREATE TABLE IF NOT EXISTS app\.\w+ \(", stmt):
-            plan.app_tables.append(stmt)
         elif m := re.fullmatch(r"CREATE ROLE (\w+) WITH LOGIN", stmt):
             plan.roles[m[1]] = stmt
         elif stmt.startswith("GRANT "):
             plan.grants.append(stmt)
-        elif m := re.match(r"CREATE INDEX ASYNC (\w+) ON (bank|pii|app)\.", stmt):
-            if m[2] == "app":
-                plan.app_indexes[m[1]] = stmt
-            else:
-                plan.data_indexes.append(stmt)
+        elif re.match(r"CREATE INDEX ASYNC \w+ ON \w+ \(", stmt):
+            plan.indexes.append(stmt)
         else:
             raise ValueError(f"schema.sql: unclassified statement: {stmt[:80]}")
     return plan
+
+
+def varchar_limits(ddl: str) -> dict[str, int]:
+    """column -> n for every varchar(n) column of one CREATE TABLE statement."""
+    return {m[1]: int(m[2]) for m in re.finditer(r"(\w+) varchar\((\d+)\)", ddl)}

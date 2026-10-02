@@ -1,35 +1,16 @@
-"""Everything that touches Aurora DSQL: schema, roles, grants, bulk load, indexes, lineage."""
+"""Everything that touches Aurora DSQL: tables, the read role and its IAM mapping, bulk load, indexes."""
 
+import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import astuple, dataclass
-from datetime import date, datetime
 
 from data_load.ddl import SchemaPlan
 
 LOADER = "aurora-dsql-loader"
 POLL_SECONDS = 10
-
-INSERT_MANIFEST = (
-    "INSERT INTO app.load_manifest (table_name, as_of, window_start, window_end, "
-    "source_uri, source_files, source_etag_digest, staged_uri, staged_sha256, "
-    "rows_staged, rows_loaded) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-)
-
-
-@dataclass(frozen=True)
-class ManifestRow:
-    table_name: str
-    as_of: datetime
-    window_start: date
-    window_end: date
-    source_uri: str
-    source_files: int
-    source_etag_digest: str
-    staged_uri: str
-    staged_sha256: str
-    rows_staged: int
+READ_ROLE = "ll_read"
+ROLE_ARN = re.compile(r"arn:aws:iam::\d{12}:role/[\w+=,.@/-]+")
 
 
 def connect(endpoint: str, profile: str | None = None):
@@ -45,18 +26,17 @@ def connect(endpoint: str, profile: str | None = None):
 
 
 def schema_statements(plan: SchemaPlan) -> list[str]:
-    """Step 3 DDL in order: bank/pii are recreated, app is created only if missing."""
+    """Every load recreates the 13 tables: DSQL has no TRUNCATE (spec section 5.4)."""
     return [
-        *plan.schemas,
-        *(f"DROP VIEW IF EXISTS {view}" for view in plan.views),
         *(f"DROP TABLE IF EXISTS {table}" for table in plan.data_tables),
         *plan.data_tables.values(),
-        *plan.views.values(),
-        *plan.app_tables,
     ]
 
 
-def apply_schema(conn, plan: SchemaPlan) -> None:
+def apply_schema(conn, plan: SchemaPlan, tools_role_arn: str) -> None:
+    """Tables, then ll_read and its IAM mapping (if missing), then the grants."""
+    if not ROLE_ARN.fullmatch(tools_role_arn):  # it is spliced into AWS IAM GRANT below
+        raise ValueError(f"not an IAM role ARN: {tools_role_arn!r}")
     with conn.cursor() as cur:
         for stmt in schema_statements(plan):
             cur.execute(stmt)
@@ -65,14 +45,14 @@ def apply_schema(conn, plan: SchemaPlan) -> None:
         for role, stmt in plan.roles.items():
             if role not in existing_roles:
                 cur.execute(stmt)
+        cur.execute(
+            "SELECT arn FROM sys.iam_pg_role_mappings WHERE pg_role_name = %s",
+            (READ_ROLE,),
+        )
+        if tools_role_arn not in {row[0] for row in cur.fetchall()}:
+            cur.execute(f"AWS IAM GRANT {READ_ROLE} TO '{tools_role_arn}'")
         for stmt in plan.grants:  # recreated tables lose their grants
             cur.execute(stmt)
-        cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'app'")
-        existing_indexes = {row[0] for row in cur.fetchall()}
-    missing = [
-        s for name, s in plan.app_indexes.items() if name not in existing_indexes
-    ]
-    build_indexes(conn, missing)
 
 
 def build_indexes(conn, statements: list[str], sleep=time.sleep) -> None:
@@ -103,9 +83,8 @@ def _wait_for_job(cur, job_id: str, stmt: str, sleep) -> None:
 
 
 def loader_cmd(endpoint: str, uri: str, table: str, dry_run: bool = False) -> list[str]:
-    schema, name = table.split(".")
     cmd = [LOADER, "load", "--endpoint", endpoint, "--source-uri", uri]
-    cmd += ["--schema", schema, "--table", name]
+    cmd += ["--schema", "public", "--table", table]
     if (
         dry_run
     ):  # checks the file against the table without loading: seconds, not an hour
@@ -120,7 +99,7 @@ def load_all(
     parallel: int = 4,
     dry_run: bool = False,
 ) -> None:
-    """Load (or dry-run) every staged file; once all finish, fail if any table failed."""
+    """Load (or dry-run) every Parquet file; once all finish, fail if any table failed."""
 
     def load_one(table: str) -> str | None:
         try:
@@ -136,32 +115,3 @@ def load_all(
         raise RuntimeError(
             f"aurora-dsql-loader {step} failed for: " + ", ".join(failed)
         )
-
-
-def record_manifest(conn, rows: list[ManifestRow]) -> None:
-    """Check every table's count first; record lineage only if all of them match."""
-    with conn.cursor() as cur:
-        for row in rows:
-            cur.execute(f"SELECT count(*) FROM {row.table_name}")
-            loaded = cur.fetchone()[0]
-            if loaded != row.rows_staged:
-                raise RuntimeError(
-                    f"{row.table_name}: {loaded:,} rows in DSQL, {row.rows_staged:,} staged"
-                )
-        for row in rows:
-            with conn.transaction():
-                cur.execute(
-                    "DELETE FROM app.load_manifest WHERE table_name = %s AND as_of = %s",
-                    (row.table_name, row.as_of),
-                )
-                cur.execute(INSERT_MANIFEST, (*astuple(row), row.rows_staged))
-
-
-def recorded_digests(conn) -> dict[str, str]:
-    """table -> source ETag digest, for the most recent as_of."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT table_name, source_etag_digest FROM app.load_manifest "
-            "WHERE as_of = (SELECT max(as_of) FROM app.load_manifest)"
-        )
-        return dict(cur.fetchall())
