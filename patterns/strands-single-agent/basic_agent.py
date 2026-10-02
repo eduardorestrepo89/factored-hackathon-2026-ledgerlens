@@ -14,20 +14,21 @@ from bedrock_agentcore.memory.integrations.strands.session_manager import (
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, RequestContext
 from strands import Agent
 from strands.models import BedrockModel
+from tools.customer_id_hook import CustomerIdHook
 from tools.gateway import create_gateway_mcp_client
 from tools.mcp_registry import build_registry_mcp_clients, is_discovery_enabled
-from utils.auth import extract_user_id_from_context
+from tools.system_prompt import build_system_prompt
+from utils.auth import (
+    extract_customer_id_from_token,
+    extract_user_id_from_context,
+    get_gateway_access_token,
+)
 
 from tools.code_interpreter import StrandsCodeInterpreterTools
 
 logger = logging.getLogger(__name__)
 
 app = BedrockAgentCoreApp()
-
-SYSTEM_PROMPT = (
-    "You are a helpful assistant with access to tools via the Gateway and Code Interpreter. "
-    "When asked about your tools, list them and explain what they do."
-)
 
 
 def _create_session_manager(
@@ -82,8 +83,18 @@ def _create_session_manager(
     )
 
 
-def create_strands_agent(user_id: str, session_id: str) -> Agent:
-    """Create a Strands agent with Gateway tools, memory, and Code Interpreter."""
+def create_strands_agent(
+    user_id: str, session_id: str, access_token: str, customer_id: str
+) -> Agent:
+    """Create a Strands agent with Gateway tools, memory, and Code Interpreter.
+
+    Args:
+        user_id: The authenticated user's ID (JWT sub claim).
+        session_id: The current conversation session ID.
+        access_token: The Gateway access token for this request.
+        customer_id: The customer_id claim from access_token, or "" when the
+            user has no linked customer.
+    """
 
     bedrock_model = BedrockModel(
         model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0", temperature=0.1
@@ -94,7 +105,7 @@ def create_strands_agent(user_id: str, session_id: str) -> Agent:
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
     code_tools = StrandsCodeInterpreterTools(region)
 
-    gateway_client = create_gateway_mcp_client(user_id)
+    gateway_client = create_gateway_mcp_client(access_token)
 
     # Base tools: Gateway MCP client + secure Code Interpreter.
     tools: list = [gateway_client, code_tools.execute_python_securely]
@@ -116,10 +127,12 @@ def create_strands_agent(user_id: str, session_id: str) -> Agent:
 
     return Agent(
         name="strands_agent",
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=build_system_prompt(customer_id),
         tools=tools,
         model=bedrock_model,
         session_manager=session_manager,
+        # Overwrites customer_id on every tool call with the token's value.
+        hooks=[CustomerIdHook(customer_id)],
         trace_attributes={"user.id": user_id, "session.id": session_id},
     )
 
@@ -143,7 +156,11 @@ async def invocations(payload, context: RequestContext):
 
     try:
         user_id = extract_user_id_from_context(context)
-        agent = create_strands_agent(user_id, session_id)
+        # One token per request: the agent reads customer_id from the same token
+        # the Gateway checks with Cedar.
+        access_token = get_gateway_access_token(user_id)
+        customer_id = extract_customer_id_from_token(access_token)
+        agent = create_strands_agent(user_id, session_id, access_token, customer_id)
 
         async for event in agent.stream_async(user_query):
             yield json.loads(json.dumps(dict(event), default=str))

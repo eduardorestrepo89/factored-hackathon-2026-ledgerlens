@@ -87,6 +87,44 @@ def extract_user_id_from_context(context: RequestContext) -> str:
     return user_id
 
 
+def extract_customer_id_from_token(access_token: str) -> str:
+    """
+    Read the customer_id claim from the Gateway machine access token.
+
+    The Cognito V3 Pre-Token Lambda adds customer_id to the token from its
+    USER_CUSTOMER_IDS_MAP. The token comes straight from Cognito over HTTPS
+    (get_gateway_access_token) and the Gateway validates it on every call, so
+    the signature isn't checked here. The value is returned exactly as written
+    in the token, because Cedar compares it with the tool input as a raw string.
+
+    Args:
+        access_token (str): The access token from get_gateway_access_token.
+
+    Returns:
+        str: The customer_id claim, or "" when the token can't be decoded or
+            the claim is missing, blank or not a string. Like the Pre-Token
+            Lambda, this never fails.
+    """
+    try:
+        claims = jwt.decode(  # nosec B105
+            jwt=access_token,
+            # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode — signature verification intentionally skipped; the token comes directly from Cognito and the Gateway validates it
+            options={"verify_signature": False},
+            algorithms=["RS256"],
+        )
+    except jwt.PyJWTError:
+        logger.warning("Gateway access token could not be decoded - customer_id blank")
+        return ""
+
+    customer_id = claims.get("customer_id", "")
+    if not isinstance(customer_id, str) or not customer_id.strip():
+        logger.info("No customer_id claim in the Gateway access token")
+        return ""
+
+    logger.info("customer_id claim found in the Gateway access token")
+    return customer_id
+
+
 def get_secret(secret_name: str) -> str:
     """
     Fetch a secret value from AWS Secrets Manager.
