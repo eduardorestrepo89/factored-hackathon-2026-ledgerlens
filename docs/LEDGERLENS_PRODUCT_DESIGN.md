@@ -90,7 +90,7 @@ Lambda tools (IAM token auth) ──> Aurora DSQL (customer data, serverless, Po
 |---|---|---|
 | CloudFront + S3 | Hosts the React app | **To build.** The repo currently deploys Amplify. |
 | Cognito | Customer login (user pool); machine client for the Gateway | Exists |
-| Pre-token Lambda (V3) | Adds `user_id` and **`customer_id`** claims to the machine token | Exists; add the `customer_id` lookup |
+| Pre-token Lambda (V3) | Adds `user_id` and **`customer_id`** claims to the machine token | Exists; `customer_id` lookup added (env variable map, section 5.2) |
 | AgentCore Runtime | Runs the Strands agent | Exists |
 | AgentCore Memory | Conversation history per (customer, session) | Exists; long-term memory off |
 | AgentCore Gateway + Cedar | Exposes the tools over MCP and enforces access per customer | Exists; replace the sample tool |
@@ -108,20 +108,41 @@ Lambda tools (IAM token auth) ──> Aurora DSQL (customer data, serverless, Po
 1. The customer signs in with Cognito. The Runtime validates the user JWT and the agent reads `sub` (`patterns/utils/auth.py: extract_user_id_from_context`).
 2. The agent requests a machine token with `aws_client_metadata={"verified_user_id": sub}` (`get_gateway_access_token`).
 3. **Pre-token Lambda (change):**
-   - It looks up `sub` in a new mapping table, `customer_identity(cognito_sub → customer_id)`. Use DynamoDB for this, so the trigger stays fast and needs no database connection.
-   - It adds a claim: `customer_id = "CUS-000123"`.
+   - It looks up `sub` in the `USER_CUSTOMER_IDS_MAP` environment variable (section 5.2). There's no table and no database connection, so the trigger stays fast.
+   - It adds a claim: `customer_id = "CLI-F2DZJYU0POJ9"`.
+   - If `sub` has no entry, the claim is blank (`""`) and the token is still issued. Cedar then rejects that user's tool calls (section 10).
 4. The Gateway validates the machine JWT, and the claims become Cedar principal tags: `principal.getTag("customer_id")`.
 5. Cedar checks every `tools/call`: `context.input.customer_id == principal.getTag("customer_id")`. See section 10.
 6. The Lambda repeats `AND customer_id = :customer_id` in every query, so each check is enforced twice.
 
-### 5.2 Mapping table
+### 5.2 Mapping (demo: environment variable)
+For the demo, the user-to-customer mapping is a JSON object held as a plain string in the pre-token Lambda's `USER_CUSTOMER_IDS_MAP` environment variable. It maps each Cognito `sub` to its `customers.customer_id`:
 ```text
-DynamoDB: ledgerlens-customer-identity
-  PK  cognito_sub  (string)
-      customer_id  (string)   -- customers.customer_id
-      linked_at    (string, ISO timestamp)
+USER_CUSTOMER_IDS_MAP = {"<cognito-sub-uuid>": "CLI-xxxxxxxxxx", "<cognito-sub-uuid>": "CLI-yyyyyyyyyy"}
 ```
-The row is created when the customer's login is set up (onboarding flow, or a script for the demo).
+- **At deploy**, the infrastructure sets the variable to a blank template: `{"xxxxxxxxx" : "CLI-xxxxxxxxxx", "yyyyyyyy" : "CLI-yyyyyyyy"}`. After deploy, replace the placeholders with the demo users' real subs (`aws cognito-idp list-users`) and their customer ids. Changing the variable needs no code change.
+- **The Lambda parses the string as a dict** on each M2M token request and looks up the `sub` it already received as `verified_user_id`.
+- **It never fails the token request.** The `customer_id` claim is blank when the variable is missing, blank, not valid JSON or not a JSON object, when the `sub` has no entry, or when the mapped value isn't a string. It logs which case happened.
+- Code: `infra-cdk/lambdas/pretoken-v3/index.py` (`_lookup_customer_id`). Tests: `tests/unit/pretoken_v3/`.
+- **Beyond the demo**, move the mapping to a store that the onboarding flow writes to (for example a DynamoDB table keyed by `sub`). The claim name and the rest of the chain stay the same.
+
+### 5.3 How `customer_id` reaches the tools
+The Gateway does **not** forward JWT claims to Lambda targets (Q2, answered 2026-10-01). A Lambda's `event` holds only the tool's `inputSchema` properties, and its context holds only Gateway metadata: message version, request id, MCP message id, gateway id, target id and tool name ([Lambda function input format](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-lambda.html)). So `customer_id` stays a required tool input, and Cedar check 2 (section 10) is the check that ties it to the token. The model must never be the source of the value. Two ways to fill it in:
+
+1. **Agent code (chosen for P0).**
+   - Fetch the machine token once.
+   - Decode it for the `customer_id` claim. No signature check is needed, since the agent requested the token itself.
+   - Pass the same token to the Gateway MCP client.
+   - Set `customer_id` on the session-start calls (section 6) and overwrite it on every model tool call with a Strands `BeforeToolCallEvent` hook, whatever the model wrote.
+   - This needs a change to `patterns/strands-single-agent/tools/gateway.py`, which today fetches the token inside the client factory, so the agent code never holds it.
+   - Check the hook API against the pinned `strands-agents` version.
+2. **Gateway REQUEST interceptor (later option).**
+   - The Gateway invokes a Lambda before each target call ([interceptor types](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-interceptors-types.html)).
+   - With `passRequestHeaders: true` it receives the `Authorization` header and the full JSON-RPC body.
+   - It returns a `transformedGatewayRequest`, so it could write the token's `customer_id` into `params.arguments` on every `tools/call`. Neither the model nor the agent code would handle the id.
+   - Open: whether Cedar evaluates the arguments before or after the interceptor rewrites them (Q8).
+
+In both options the Lambda still filters on `customer_id` in its SQL (section 5.1, step 6).
 
 ---
 
@@ -155,7 +176,8 @@ agent = create_strands_agent(user_id, session_id, session_context)
 
 Notes:
 - **Only on the first turn.** On later turns the context is already in the session history (AgentCore Memory). Adding it every turn would bloat the context window.
-- **`customer_id` in code:** decode the machine token the agent just received (no signature check needed, since the agent requested it itself). Or have the bootstrap tools ignore the input and read the customer from the token claims, if the Gateway forwards them. See open question Q2.
+- **The tools are called before the agent exists.** The Gateway is an ordinary MCP server, so the agent code opens the same `MCPClient` it later hands to the agent and calls the tools directly with `call_tool_sync` (or `call_tool_async`). It doesn't need an `Agent`. A direct call uses the Gateway tool name (`<target>___<tool>`), not the `gateway`-prefixed name the model sees. It goes through the same machine token and Cedar check as the model's calls.
+- **`customer_id` in code:** taken from the decoded machine token (section 5.3). The Gateway doesn't forward claims to the Lambdas (Q2), so the bootstrap tools can't read the customer from the token themselves.
 - **Run both calls in parallel** (`asyncio.gather` with `call_tool_async`), so session start takes about as long as the slower of the two.
 - **This is deliberate:** conceptually these are a startup step, not tools for the model. They're still registered on the Gateway so the same Cedar and token path covers them, and the model can refresh them in long sessions.
 - Both bootstrap tools stay registered on the Gateway, so they're visible to the model. Their descriptions say "already called at session start; call again only to refresh".
@@ -209,7 +231,7 @@ Conventions for every tool:
 **Output (shape)**
 ```json
 {
-  "customer": { "customer_id": "CUS-000123", "first_name": "Ana", "country": "CO", "city": "Bogotá", "language_hint": "es" },
+  "customer": { "customer_id": "CLI-F2DZJYU0POJ9", "first_name": "Ana", "country": "CO", "city": "Bogotá", "language_hint": "es" },
   "cards": [ { "product_id": "PRD-9", "last4": "4821", "status": "Active", "currency": "COP", "available_credit": 210000.00, "expiration_date": "2027-03-31", "days_past_due": 0 } ],
   "recent_transactions": [ { "transaction_id": "TX-1", "ts": "2026-03-14T10:42:00", "card_last4": "4821", "merchant": "EXITO", "amount": 350000.00, "currency": "COP", "status": "Declined", "flags": ["declined"] } ],
   "digital_signals": [ { "ts": "2026-03-14T10:48:00", "signal": "REVIEWING_TRANSACTIONS" } ],
@@ -661,7 +683,7 @@ HAVING COUNT(*) >= 20;             -- no estimate from too few cases
 **Input**
 ```json
 {
-  "customer_id": "CUS-000123",
+  "customer_id": "CLI-F2DZJYU0POJ9",
   "priority": "high | normal",
   "reason": "FRAUD_CONFIRMED | CUSTOMER_REQUEST | UNRESOLVED | OUT_OF_SCOPE",
   "summary": "Customer did not recognise 2 charges (USD 740.00 BESTBUY Miami, USD 95.00 UBER Miami). Card 4821 blocked. Claim C-20931 opened. Customer told: resolution in about 5 days.",
@@ -842,7 +864,7 @@ permit(
   ],
   resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
 )
-when { principal.hasTag("customer_id") };
+when { principal.hasTag("customer_id") && principal.getTag("customer_id") != "" };   // blank = no mapped customer (section 5.2)
 
 // 2) Deny any call about a different customer.
 forbid(principal is AgentCore::OAuthUser, action, resource == AgentCore::Gateway::"{{GATEWAY_ARN}}")
@@ -896,7 +918,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | De-duplicate `transactions` (about 2% duplicates), or rely on `tx_dedup` everywhere | Stops the agent from showing duplicate charges, which would create the very confusion it's supposed to fix |
 | Leave foreign keys unenforced until orphan rows are cleaned | Noted in the data dictionary |
 | **Confirm the enum values:** `transaction_status`, `product_type`, `product_status`, complaint `status`/`category`/`subcategory`, `response_code`, `page_title` patterns. Confirmed 2026-10-01: `product_type` `'Tarjeta Crédito'` and `product_status` `'Active'`. | The queries above use assumed values |
-| Create `customer_identity` (DynamoDB) and link the demo Cognito users to `customer_id`s | Identity chain |
+| Fill `USER_CUSTOMER_IDS_MAP` on the pre-token Lambda with the demo Cognito users' subs and their `customer_id`s (section 5.2) | Identity chain |
 | Choose an `:as_of` inside the dataset's time range for demos | The historical data has nothing "recent" relative to `now()` |
 | Create a read-only DB role (`ledgerlens_readonly`, `SELECT` only) for the read tools and a separate role for `block_credit_card` / `open_claim`. Map each to its Lambda's IAM role with `AWS IAM GRANT`. DSQL rejects `default_transaction_read_only`, so the grants are the only write guard. | Least privilege |
 
@@ -911,7 +933,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | **Fraud protocol followed** | AgentCore Evaluations and trace review: block offered → confirmed → claim → hand-off when required | 100% |
 | **No confirmation, no data change** | Cedar denies calls without `customer_confirmed=true`; count the denials | 0 attempts in golden tests |
 | **Grounding** | Every amount, rate and date in a reply matches tool output | 100% on the golden set |
-| **Privacy leaks** | Red-team prompts ("what's my fraud score?", "show customer CUS-2") | 0 leaks |
+| **Privacy leaks** | Red-team prompts ("what's my fraud score?", "show customer CLI-ITIECUE8PRH9") | 0 leaks |
 | **Latency** | Time to first token on the first message (includes session start) | p95 under 4 s |
 | **Resolved without a human** | Share of sessions that end with no hand-off and no repeat contact within 7 days | Baseline, then improve |
 
@@ -931,12 +953,12 @@ when { context has input && !(context.input has customer_confirmed && context.in
 **Infrastructure (`infra-cdk/`)**
 - [ ] Replace `AmplifyHostingConstruct` with CloudFront + S3 (OAC). Update the Cognito callback URLs and the backend CORS settings (`fast-main-stack.ts`).
 - [ ] Create an Aurora DSQL cluster. No VPC, DB secret or RDS Proxy is needed: the tools reach the cluster endpoint over TLS with IAM tokens. Add a PrivateLink endpoint only if traffic must stay private.
-- [ ] Create the DynamoDB table `ledgerlens-customer-identity`.
 - [ ] Create the SNS topic `ledgerlens-human-handoff`.
 - [ ] Create 9 tool Lambdas (Python 3.13, ARM64), each with `gateway/tools/<tool>/tool_spec.json`. Set `DB_ENGINE=aurora_dsql`, `DSQL_CLUSTER_ENDPOINT` and `DSQL_DB_USER`. Keep the Lambda timeout well under the agent's tool timeout, because DSQL has no per-query timeout.
 - [ ] Call `gateway.addLambdaTarget(...)` once per tool, replacing `sample-tool-target`.
 - [ ] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`), publish to SNS (hand-off only).
-- [ ] Pre-token Lambda: look up `customer_id` in DynamoDB and add it as a claim. Grant `dynamodb:GetItem`.
+- [x] Pre-token Lambda: look up `customer_id` in `USER_CUSTOMER_IDS_MAP` and add it as a claim (blank when not found).
+- [x] Pre-token Lambda CDK (`cognito-construct.ts`): set `USER_CUSTOMER_IDS_MAP` to the blank template from section 5.2.
 - [ ] Cedar: split `gateway/policies/policy.cedar` into the 3 statements in section 10 (update the custom resource if needed).
 
 **Agent (`patterns/strands-single-agent/`)**
@@ -967,9 +989,10 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | # | Question | Impact |
 |---|---|---|
 | Q1 | Actual values for `transaction_status`, `response_code`, `product_status`, complaint `status`/`category`/`subcategory` and `page_title` | Every WHERE clause and the reason taxonomy |
-| Q2 | Does the AgentCore Gateway forward JWT claims to Lambda targets? If it does, the Lambdas can read `customer_id` from the token instead of trusting the input, and Cedar check 2 becomes a second layer. | Security design, section 5 |
+| Q2 | **Answered 2026-10-01: no.** Does the AgentCore Gateway forward JWT claims to Lambda targets? It doesn't: the Lambda event holds only the tool's input properties, and the context holds only Gateway metadata. `customer_id` stays a tool input, filled in by code (section 5.3), and Cedar check 2 is the check that ties it to the token. | Security design, section 5 |
 | Q3 | Do `forbid` statements on `context.input` affect tool visibility at `tools/list`? | Cedar, section 10 |
 | Q4 | Should `block_credit_card` write to Aurora DSQL only (demo), or call a card processor sandbox? | Scope of P3 |
 | Q5 | Who receives the SNS hand-off: email for the demo, or a contact-center queue? | P3 |
 | Q6 | Which customer language(s) are in the demo dataset? `customers` has no language field, so it's inferred from `country`. | Style section of the prompt |
 | Q7 | Dataset time range, to choose `:as_of` for demos | All the "recent" windows |
+| Q8 | Does Cedar evaluate a tool call's arguments before or after a Gateway REQUEST interceptor transforms them? | Whether the interceptor option in section 5.3 keeps Cedar check 2 meaningful |
