@@ -23,7 +23,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-02-data-pipeline-design.md`. Read it first: section 6 (repairs) and section 7 (access) are the authority for every rule below.
 
-**Starting point:** branch `feat/data-pipeline`, which holds everything `feat/database` built (through `7d18c41`) plus the spec.
+**Starting point:** branch `feat/data-pipeline`, which holds everything `feat/database` built (through `d74e75d`) plus the spec.
 
 **How this plan was checked:**
 - **Code:** every file below ran in a scratch copy of the repo, task by task: tests first (RED), then the code (GREEN).

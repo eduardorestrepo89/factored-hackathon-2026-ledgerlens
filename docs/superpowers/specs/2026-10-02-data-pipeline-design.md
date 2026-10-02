@@ -1,7 +1,7 @@
 # LedgerLens data pipeline: design
 
 - **Date:** 2026-10-02
-- **Branch:** `feat/data-pipeline` (from `feat/database` at `7d18c41`)
+- **Branch:** `feat/database-pipeline` (pushed; built as `feat/data-pipeline`, from `feat/database` at `d74e75d`)
 - **Status:** approved in brainstorming; written spec awaiting review
 - **Supersedes:** `docs/superpowers/specs/2026-09-29-data-loading-design.md` in full. In `docs/LEDGERLENS_PRODUCT_DESIGN.md` (v3) it replaces "Lambda tools (no VPC)", the `bank`/`pii`/`app` schemas, section 8 and Appendix A. Those documents are updated in the last task of the plan.
 
@@ -350,7 +350,7 @@ The load is about 4× faster than estimated. A rerun of the load stage costs abo
 ## 13. To confirm on the first run
 
 1. The loader authenticates as `admin` from CodeBuild (outside the VPC) with the cluster policy attached, through the `aws:PrincipalArn` exception. **Passed.**
-2. `aurora-dsql-loader --dry-run` accepts the typed Parquet against the recreated tables. **Failed at first, now fixed.** The dry run passed, but the real load of `branches` failed: loader v3.3.0 can't read Parquet TIME columns (`Time64`). The transform now writes TIME columns as `HH:MM:SS` text (commit `8a91b9c`). A second problem surfaced in the same stage: DSQL refuses `GRANT USAGE ON SCHEMA public` ("feature not supported on system entity"), and every role already has USAGE through `PUBLIC`, so the grant was removed (commit `bd96fb8`).
+2. `aurora-dsql-loader --dry-run` accepts the typed Parquet against the recreated tables. **Failed at first, now fixed.** The dry run passed, but the real load of `branches` failed: loader v3.3.0 can't read Parquet TIME columns (`Time64`). The transform now writes TIME columns as `HH:MM:SS` text (commit `d6f3370`). A second problem surfaced in the same stage: DSQL refuses `GRANT USAGE ON SCHEMA public` ("feature not supported on system entity"), and every role already has USAGE through `PUBLIC`, so the grant was removed (commit `f4e4c21`).
 3. The read check connects through the private hostname. If DSQL rejects a token signed for that hostname, the Lambda signs the token for the public endpoint and connects to the private host, and the plan records this. **Passed without the fallback:** the output was `{"tables_read": 13, "insert_denied": true}`.
 4. Connecting from a laptop with admin credentials (the `ledgerlens` profile) is refused. **Passed:** "FATAL: unable to accept connection, access denied". Any principal allowed `dsql:PutClusterPolicy` can still lift this layer (final review, minor 9).
 5. Load throughput against the 90-minute estimate. **23.8 minutes** (section 11.4).
