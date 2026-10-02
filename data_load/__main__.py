@@ -1,217 +1,191 @@
-"""python -m data_load {stage,run,check}.
+"""python -m data_load {ingest,transform,load,check}: the data pipeline's stages.
 
-Design: docs/superpowers/specs/2026-09-29-data-loading-design.md
+CodeBuild runs `python -m data_load $STAGE` for stages 1-3; Step Functions sets STAGE
+and RUN_ID. Design: docs/superpowers/specs/2026-10-02-data-pipeline-design.md
 """
 
 import argparse
-import json
 import os
+import shutil
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
-import yaml
-
 from data_load.ddl import load_plan
-from data_load.stage import load_window, stage
 
-CONFIG = Path(__file__).resolve().parents[1] / "infra-cdk" / "config.yaml"
-SECRET_KEYS = (
-    "aws_access_key_id",
-    "aws_secret_access_key",
-    "bucket",
-    "region",
-    "prefix",
-)
-RUN_ENV = ("AS_OF", "WINDOW_YEARS", "DSQL_ENDPOINT", "TEAM_BUCKET", "HACKATHON_S3")
+WORK = Path(tempfile.gettempdir()) / "ledgerlens-pipeline"
 
 
-def config_defaults() -> dict:
-    """The `data:` block of infra-cdk/config.yaml, when running from a repo checkout."""
-    if not CONFIG.exists():
-        return {}
-    return (yaml.safe_load(CONFIG.read_text(encoding="utf-8")) or {}).get("data") or {}
-
-
-def parse_hackathon_secret(raw: str) -> dict:
-    """Parse HACKATHON_S3. Errors name missing keys and never echo values."""
-    try:
-        secret = json.loads(raw)
-    except json.JSONDecodeError:
-        raise SystemExit("HACKATHON_S3 is not valid JSON") from None
-    if not isinstance(secret, dict):
-        raise SystemExit("HACKATHON_S3 must be a JSON object")
-    missing = [key for key in SECRET_KEYS if not secret.get(key)]
-    if missing:
-        raise SystemExit(f"HACKATHON_S3 is missing: {', '.join(missing)}")
-    return secret
-
-
-def cmd_stage(args) -> int:
-    if args.as_of is None or args.window_years is None:
-        raise SystemExit(
-            "--as-of and --window-years are required (no data block in config.yaml)"
-        )
-    tables = args.tables.split(",") if args.tables else None
-    staged = stage(
-        args.source, Path(args.out), args.as_of, args.window_years, tables=tables
-    )
-    print(f"total {sum(s.rows for s in staged):,} rows in {len(staged)} tables")
-    return 0
-
-
-def cmd_run(args) -> int:
-    missing = [name for name in RUN_ENV if not os.environ.get(name)]
+def require_env(*names: str) -> list[str]:
+    missing = [name for name in names if not os.environ.get(name)]
     if missing:
         raise SystemExit(f"missing environment variables: {', '.join(missing)}")
+    return [os.environ[name] for name in names]
+
+
+def cmd_ingest(args) -> int:
+    run_id, bucket, secret_id = require_env(
+        "RUN_ID", "TEAM_BUCKET", "HACKATHON_SECRET_ID"
+    )
     import boto3
 
-    from data_load import dsql, source
+    from data_load import ingest, runrecord
 
-    secret = parse_hackathon_secret(os.environ["HACKATHON_S3"])
-    as_of = datetime.fromisoformat(os.environ["AS_OF"])
-    years = int(os.environ["WINDOW_YEARS"])
-    endpoint, team_bucket = os.environ["DSQL_ENDPOINT"], os.environ["TEAM_BUCKET"]
-    plan = load_plan()
-
-    # 1. Stage from the hackathon bucket; nothing in AWS is written yet
-    origin = f"s3://{secret['bucket']}/{secret['prefix']}"
-    staged = stage(origin, Path(args.out), as_of, years, s3=secret, plan=plan)
+    secret = ingest.load_secret(boto3.client("secretsmanager"), secret_id)
     org_s3 = boto3.client(
         "s3",
         region_name=secret["region"],
         aws_access_key_id=secret["aws_access_key_id"],
         aws_secret_access_key=secret["aws_secret_access_key"],
     )
-    prints = source.fingerprint(
-        org_s3, secret["bucket"], secret["prefix"], [s.table for s in staged]
-    )
-
-    empty = [table for table, (files, _) in prints.items() if files == 0]
-    if (
-        empty
-    ):  # recording lineage for 0 files would be wrong; usually a bad bucket/prefix
-        raise SystemExit(
-            f"no source files: {', '.join(empty)} (check bucket/prefix in HACKATHON_S3)"
-        )
-
-    # 2. Upload, largest first so the longest load starts first
     team_s3 = boto3.client("s3")
-    key_base = f"staging/{as_of:%Y%m%dT%H%M%S}"
-    uris = {}
-    for s in sorted(staged, key=lambda s: s.rows, reverse=True):
-        key = f"{key_base}/{s.path.name}"
-        team_s3.upload_file(str(s.path), team_bucket, key)
-        team_s3.put_object(
-            Bucket=team_bucket, Key=f"{key}.sha256", Body=s.sha256.encode()
-        )
-        uris[s.table] = f"s3://{team_bucket}/{key}"
-
-    # 3. Schema, roles, grants. A DSQL connection lives at most 60 min: reconnect after the load.
-    conn = dsql.connect(endpoint)
-    try:
-        dsql.apply_schema(conn, plan)
-    finally:
-        conn.close()
-
-    # 4. Dry-run every table (seconds), then the bulk load (about an hour)
-    dsql.load_all(endpoint, uris, dry_run=True)
-    dsql.load_all(endpoint, uris)
-
-    # 5-6. Indexes, then verify counts and record lineage
-    start, end = load_window(as_of, years)
-    rows = [
-        dsql.ManifestRow(
-            table_name=s.table,
-            as_of=as_of,
-            window_start=start,
-            window_end=end,
-            source_uri=f"s3://{secret['bucket']}/{source.source_prefix(secret['prefix'], s.table)}",
-            source_files=prints[s.table][0],
-            source_etag_digest=prints[s.table][1],
-            staged_uri=uris[s.table],
-            staged_sha256=s.sha256,
-            rows_staged=s.rows,
-        )
-        for s in staged
-    ]
-    conn = dsql.connect(endpoint)
-    try:
-        dsql.build_indexes(conn, plan.data_indexes)
-        dsql.record_manifest(conn, rows)
-    finally:
-        conn.close()
+    tables = list(load_plan().data_tables)
+    record = ingest.ingest(org_s3, team_s3, secret, bucket, run_id, tables)
+    uri = runrecord.write(team_s3, bucket, run_id, "ingest", record)
+    files = sum(t["files"] for t in record["tables"].values())
     print(
-        f"data_load: done, {sum(s.rows for s in staged):,} rows in {len(staged)} tables",
+        f"ingest: {files:,} files copied to {record['raw_prefix']}, record {uri}",
         flush=True,
     )
+    return 0
+
+
+def cmd_transform(args) -> int:
+    from data_load.transform import download_raw, load_expected, transform
+
+    if args.tables and not args.source:
+        raise SystemExit("--tables is only for local runs with --source")
+    tables = args.tables.split(",") if args.tables else None
+    expected = None if tables else load_expected()
+    if args.source:  # local rehearsal: nothing in AWS is read or written
+        written, counts = transform(
+            args.source, Path(args.out), tables=tables, expected=expected
+        )
+        print(f"total {sum(t.rows for t in written):,} rows in {len(written)} tables")
+        print(f"repairs {counts}")
+        return 0
+
+    run_id, bucket = require_env("RUN_ID", "TEAM_BUCKET")
+    import boto3
+
+    from data_load import runrecord
+
+    s3 = boto3.client("s3")
+    raw = Path(args.out) / "raw"
+    shutil.rmtree(raw, ignore_errors=True)  # a stale file would join the CSV globs
+    download_raw(s3, bucket, run_id, raw)
+    written, counts = transform(
+        raw.as_posix(), Path(args.out) / "clean", expected=expected
+    )
+    record = {"run_id": run_id, "repairs": counts, "tables": {}}
+    for table in written:
+        key = f"clean/{run_id}/{table.path.name}"
+        s3.upload_file(str(table.path), bucket, key)
+        s3.put_object(Bucket=bucket, Key=f"{key}.sha256", Body=table.sha256.encode())
+        record["tables"][table.name] = {
+            "rows": table.rows,
+            "uri": f"s3://{bucket}/{key}",
+            "sha256": table.sha256,
+        }
+    uri = runrecord.write(s3, bucket, run_id, "transform", record)
+    print(f"transform: {sum(t.rows for t in written):,} rows, record {uri}", flush=True)
+    return 0
+
+
+def cmd_load(args) -> int:
+    run_id, bucket, endpoint, tools_role = require_env(
+        "RUN_ID", "TEAM_BUCKET", "DSQL_ENDPOINT", "TOOLS_ROLE_ARN"
+    )
+    import boto3
+
+    from data_load import dsql, runrecord
+
+    s3 = boto3.client("s3")
+    staged = runrecord.read(s3, bucket, run_id, "transform")["tables"]
+    plan = load_plan()
+    if set(staged) != set(plan.data_tables):
+        missing = sorted(set(plan.data_tables) - set(staged))
+        raise SystemExit(f"transform.json lacks tables: {', '.join(missing)}")
+    # largest first, so the longest load starts first
+    order = sorted(staged, key=lambda t: staged[t]["rows"], reverse=True)
+    uris = {table: staged[table]["uri"] for table in order}
+
+    conn = dsql.connect(endpoint)
+    try:
+        dsql.apply_schema(conn, plan, tools_role)
+    finally:
+        conn.close()
+    dsql.load_all(
+        endpoint, uris, dry_run=True
+    )  # seconds: catches type mismatches early
+    dsql.load_all(endpoint, uris)  # --verify count fails the stage on any shortfall
+    conn = dsql.connect(endpoint)  # a DSQL connection lives at most 60 minutes
+    try:
+        dsql.build_indexes(conn, plan.indexes)
+    finally:
+        conn.close()
+    record = {
+        "run_id": run_id,
+        "tables": {t: {"rows_loaded": staged[t]["rows"]} for t in order},
+    }
+    uri = runrecord.write(s3, bucket, run_id, "load", record)
+    total = sum(staged[t]["rows"] for t in order)
+    print(f"load: {total:,} rows in {len(order)} tables, record {uri}", flush=True)
     return 0
 
 
 def cmd_check(args) -> int:
     import boto3
 
-    from data_load import dsql, source
+    from data_load import runrecord, source
 
-    conn = dsql.connect(args.endpoint, profile=args.dsql_profile)
-    try:
-        recorded = dsql.recorded_digests(conn)
-    finally:
-        conn.close()
-    if not recorded:
-        print("no load recorded in app.load_manifest")
-        return 1
+    team_s3 = boto3.Session(profile_name=args.team_profile).client("s3")
+    record = runrecord.read(team_s3, args.team_bucket, args.run, "ingest")
+    origin = record["source"]
     org_s3 = boto3.Session(profile_name=args.bucket_profile).client(
-        "s3", region_name=args.region
+        "s3", region_name=origin["region"]
     )
-    prints = source.fingerprint(org_s3, args.bucket, args.prefix, list(recorded))
-    changed = source.drift(recorded, {t: digest for t, (_, digest) in prints.items()})
+    current = source.fingerprint(
+        org_s3, origin["bucket"], origin["prefix"], list(record["tables"])
+    )
+    changed = source.drift(
+        {t: v["etag_digest"] for t, v in record["tables"].items()},
+        {t: digest for t, (_, digest) in current.items()},
+    )
     if changed:
-        print("changed since the last load: " + ", ".join(changed))
+        print("changed since the ingest: " + ", ".join(changed))
         return 1
-    print("no drift: the bucket matches the last load")
+    print(f"no drift: the bucket matches run {args.run}")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    defaults = config_defaults()
     parser = argparse.ArgumentParser(prog="python -m data_load")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser(
-        "stage", help="validate CSVs and write Parquet locally (no AWS writes)"
+        "ingest", help="stage 1: copy the organizer's CSVs to raw/<run-id>/"
     )
+    p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("transform", help="stage 2: check, repair and write Parquet")
     p.add_argument(
-        "--source",
-        required=True,
-        help="directory or s3:// URI in the organizer data/ layout",
+        "--source", help="local directory in the organizer layout (skips S3)"
     )
-    p.add_argument("--out", required=True)
-    p.add_argument(
-        "--as-of", type=datetime.fromisoformat, default=defaults.get("as_of")
-    )
-    p.add_argument("--window-years", type=int, default=defaults.get("window_years"))
-    p.add_argument("--tables", help="comma-separated subset, e.g. bank.transactions")
-    p.set_defaults(func=cmd_stage)
+    p.add_argument("--out", default=str(WORK))
+    p.add_argument("--tables", help="comma-separated subset; local runs only")
+    p.set_defaults(func=cmd_transform)
+
+    p = sub.add_parser("load", help="stage 3: recreate the tables and bulk-load DSQL")
+    p.set_defaults(func=cmd_load)
 
     p = sub.add_parser(
-        "run", help="stage from the hackathon bucket and load Aurora DSQL (CodeBuild)"
+        "check", help="compare the organizer bucket with a run's ingest record"
     )
-    p.add_argument(
-        "--out", default=str(Path(tempfile.gettempdir()) / "ledgerlens-stage")
-    )
-    p.set_defaults(func=cmd_run)
-
-    p = sub.add_parser(
-        "check", help="compare the bucket's ETags with app.load_manifest"
-    )
-    p.add_argument("--bucket", required=True)
-    p.add_argument("--endpoint", required=True, help="stack output DsqlEndpoint")
-    p.add_argument("--prefix", default="data/")
-    p.add_argument("--region", default="us-east-2")
+    p.add_argument("--run", required=True, help="Step Functions execution name")
+    p.add_argument("--team-bucket", required=True)
+    p.add_argument("--team-profile", default="ledgerlens")
     p.add_argument("--bucket-profile", default="hackathon")
-    p.add_argument("--dsql-profile", default="ledgerlens")
     p.set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)
