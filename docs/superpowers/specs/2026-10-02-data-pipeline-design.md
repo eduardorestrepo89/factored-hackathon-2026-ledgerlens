@@ -253,19 +253,65 @@ The first statement is the AWS-documented "block public internet" pattern: a req
 - **Local rehearsal:** `python -m data_load transform --source datathon/data --out <tmp>` produces the per-table counts in section 5.2 and the repair counts in section 6.1.
 - **First cloud run:** section 13.
 
-## 11. Cost and duration (list prices, us-east-1)
+## 11. Cost and duration
 
-| Item | Estimate |
+### 11.1 Unit prices (verified 2026-10-02, AWS Price List API, us-east-1)
+
+| Item | Price |
 |---|---|
-| Ingest | About 10 minutes for 7,671 objects (5.3 GB) cross-region |
-| Transform | About 10 minutes in CodeBuild, including the download (a laptop staged the 2-year window in about 4 minutes) |
-| Load | About 90 minutes. `digital_events` (15.6M rows) at about 3,000 rows/s; to be measured on the first run |
-| CodeBuild | `arm1.large`, $0.015/min × about 110 min ≈ **$1.65 per run** |
-| DSQL writes | About 1.5 × the 2-year estimate (design doc §16, $1.76) ≈ **$2.60**; to be measured |
-| DSQL storage | About 6 GB ≈ $2 per month |
-| S3 | `raw/` 5.3 GB + `clean/` Parquet ≈ $0.15 per month |
-| DSQL interface endpoint | 1 AZ × $0.01/h ≈ **$7.30 per month**, plus $0.01/GB |
-| Step Functions, Lambda, VPC, security groups | Negligible or free |
+| Aurora DSQL | $8.00 per 1M DPU; storage $0.33/GB-month. Free tier: 100,000 DPU and 1 GB-month per month |
+| DSQL write metering | Each row written to a table or index is billed at max(row size, 128 B), at 0.00004883 DPU per byte (about 1 DPU per 20 KiB). Writes also read the primary key to check uniqueness, at 0.00000183105 DPU per byte. Compute DPU (CPU-seconds) comes on top ([billing doc](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/billing-metering.html)) |
+| CodeBuild `arm1.large` | $0.015 per build-minute. The free tier covers only `arm1.small`/`general1.small` |
+| PrivateLink interface endpoint | $0.01 per endpoint per AZ per hour, plus $0.01/GB processed |
+| S3 Standard | $0.023/GB-month; PUT $0.005 per 1,000; GET $0.0004 per 1,000 |
+| Data transfer us-east-2 → us-east-1 | $0.01/GB. The bucket owner (the organizer) pays, because the bucket isn't Requester Pays |
+| Step Functions Standard | $0.025 per 1,000 transitions; 4,000 a month free |
+| Lambda arm64 | $0.0000133334/GB-s and $0.20 per 1M requests; 400,000 GB-s and 1M requests a month free |
+| Secrets Manager | $0.40 per secret per month |
+| CloudWatch Logs | $0.50/GB ingested; $0.03/GB-month stored |
+| VPC, subnets, security groups | Free (no NAT gateway, internet gateway or public IP) |
+
+### 11.2 Inputs (measured on the local copy, 2026-10-02)
+
+- **Source:** 5,349,322,481 bytes of CSV in 7,671 files, 23,495,188 rows.
+- **Parquet from the transform:** 1,217 MB. The full rehearsal of the transform, with all repairs and checks, took 429 s on a laptop.
+- **Index rows:** 4,892,103, all under 128 B, so each is billed as 128 B. That's 4,425,008 transactions, 400,000 products and 67,095 complaints.
+
+### 11.3 Approximation
+
+**One pipeline run:**
+
+| Item | Basis | Estimate |
+|---|---|---|
+| CodeBuild | Ingest about 10 min, transform about 12 min, load about 90 min, plus about 1.5 min of install per stage ≈ 115 min (range 90–150) | **$1.73** ($1.35–2.25) |
+| DSQL write DPU | Table rows: 3.2–5.4 GB. The upper bound is the CSV size; the lower assumes binary columns are about 60% of their text form. Plus 0.63 GB of index rows. Total 3.8–6.0 GB × 0.00004883 | 187,000–292,000 DPU |
+| DSQL read DPU | Uniqueness checks: 23.5M rows × 128 B × 0.00000183105 | about 5,500 DPU |
+| DSQL compute DPU | About 13% of write DPU, the ratio in AWS's bulk-insert example | 24,000–37,000 DPU |
+| DSQL total | 217,000–335,000 DPU | **$1.74–2.68**, or $0.94–1.88 after the 100,000 free DPU |
+| S3 requests | About 7,700 PUTs (ingest), 7,700 GETs (transform), Parquet uploads and loader reads | **$0.06** |
+| Step Functions, Lambda | 6 transitions; one invocation of a few seconds | $0 (free tier) |
+| Cross-region copy | 5.35 GB × $0.01, billed to the organizer | $0 to us |
+| **Per run** | | **≈ $3.50–4.50** |
+
+**Every month the stack exists:**
+
+| Item | Basis | Estimate |
+|---|---|---|
+| DSQL interface endpoint | 1 AZ × 730 h × $0.01 | **$7.30** |
+| DSQL storage | 3.5–6 GB, minus the 1 GB free tier | **$0.83–1.65** |
+| S3 storage | `raw/` 5.35 GB + `clean/` 1.22 GB | $0.15 |
+| Secrets Manager | 1 secret | $0.40 |
+| Tool reads during judging | Indexed point reads, a few DPU each | Inside the 100,000 free DPU |
+| **Per month** | | **≈ $8.70–9.50** |
+
+**Hackathon window (deploy 2026-10-03, judging ends 2026-10-15; 13 days ≈ 0.43 month):** one run plus 0.43 month of fixed costs ≈ **$7–9**. Each extra full run adds $3.50–4.50. Keeping the stack to the end of October costs about $12–14.
+
+**What drives the cost:**
+- **The endpoint (layer 3):** 80% of the monthly cost. Deleting the endpoint and the VPC after judging, or dropping layer 3, saves $7.30 a month.
+- **A rerun of the `load` stage:** costs the DSQL DPU and about 95 CodeBuild minutes again. A rerun of `transform` costs about 12 minutes.
+- **The previous design** (2-year window, no VPC) cost about $1.38 for the hackathon window (design doc §16). The difference is all rows (+49%) and the endpoint.
+
+The first run replaces these estimates with measured stage durations and the cluster's CloudWatch `TotalDPU` (plan, Task 9).
 
 ## 12. Security
 
