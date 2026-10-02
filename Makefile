@@ -58,11 +58,12 @@ lint-cicd:
 	@echo -e "$(GREEN)All code quality checks passed!$(NC)"
 
 
-# Load the organizer snapshot into Aurora DSQL with the CodeBuild job from
-# infra-cdk/lib/data-construct.ts. Run as: AWS_PROFILE=ledgerlens make load-data
-# Waits for the build's log, then follows it; press Ctrl-C after "data_load: done".
-# The project allows one build at a time, so a second run cannot race the first.
+# Run the data pipeline once: ingest, transform, load, read check
+# (docs/superpowers/specs/2026-10-02-data-pipeline-design.md, section 4.2).
+# Run as: AWS_PROFILE=ledgerlens make load-data. Without make, run the two aws commands by hand.
+# Follow a stage's log with: aws logs tail /aws/codebuild/ledgerlens-data-load --follow
 load-data:
-	aws codebuild start-build --project-name ledgerlens-data-load --query build.id --output text
-	@until aws logs describe-log-streams --log-group-name /aws/codebuild/ledgerlens-data-load --max-items 1 --query 'logStreams[0].logStreamName' --output text 2>/dev/null | grep -qv None; do echo "waiting for the build log..."; sleep 5; done
-	aws logs tail /aws/codebuild/ledgerlens-data-load --follow --since 1m
+	@arn=$$(aws stepfunctions list-state-machines --query "stateMachines[?name=='ledgerlens-data-pipeline'].stateMachineArn" --output text) && \
+	exe=$$(aws stepfunctions start-execution --state-machine-arn "$$arn" --query executionArn --output text) && \
+	echo "started $$exe" && \
+	echo "https://console.aws.amazon.com/states/home#/v2/executions/details/$$exe"

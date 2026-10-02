@@ -96,7 +96,17 @@ export class FastMainStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "DataLoadProject", {
       value: this.data.loadProjectName,
-      description: "CodeBuild project that loads the organizer snapshot (make load-data)",
+      description: "CodeBuild project that runs pipeline stages 1-3 (STAGE=ingest|transform|load)",
+    })
+
+    new cdk.CfnOutput(this, "DataPipelineStateMachine", {
+      value: this.data.stateMachineArn,
+      description: "Step Functions data pipeline: ingest, transform, load, read check (make load-data)",
+    })
+
+    new cdk.CfnOutput(this, "DsqlPrivateHost", {
+      value: this.data.privateHost,
+      description: "Aurora DSQL host inside the VPC (DSQL_HOST for the tool Lambdas)",
     })
 
     new cdk.CfnOutput(this, "AmplifyConsoleUrl", {

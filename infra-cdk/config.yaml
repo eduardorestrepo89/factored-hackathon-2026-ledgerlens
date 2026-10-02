@@ -45,8 +45,7 @@ backend:
   #     - sg-0abc1234def56789a
 
 
-# Organizer snapshot load (docs/superpowers/specs/2026-09-29-data-loading-design.md).
-# Change, then deploy and run `make load-data`. Reloads recreate bank/pii: never during a demo.
+# Bank "today" for the tools (docs/superpowers/specs/2026-10-02-data-pipeline-design.md, 5.3).
+# The pipeline loads every row; tools read process_date BETWEEN <from> AND as_of.
 data:
-  as_of: "2026-06-17T23:59:59"   # bank "today" for the load and for every tool
-  window_years: 2                # event tables: process_date in [as_of::date - (365 * window_years - 1), as_of::date]
+  as_of: "2026-06-17T23:59:59"
