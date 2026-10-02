@@ -156,6 +156,20 @@ def _compare(expected: dict, rows: dict[str, int], counts: dict) -> None:
 
 def _write(con, out_dir: Path, name: str, rows: int) -> Table:
     path = out_dir / f"{name}.parquet"
-    con.execute(f"COPY {name} TO '{path.as_posix()}' (FORMAT parquet)")
+    # aurora-dsql-loader v3.3.0 can't read Parquet TIME (Time64); written as
+    # 'HH:MM:SS' text, DSQL casts it into the table's time column on insert
+    times = [
+        column
+        for (column,) in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ? AND data_type = 'TIME' ORDER BY ordinal_position",
+            [name],
+        ).fetchall()
+    ]
+    source = name
+    if times:
+        as_text = ", ".join(f"{c}::VARCHAR AS {c}" for c in times)
+        source = f"(SELECT * REPLACE ({as_text}) FROM {name})"
+    con.execute(f"COPY {source} TO '{path.as_posix()}' (FORMAT parquet)")
     print(f"wrote {path.name}: {rows:,} rows", flush=True)
     return Table(name, path, rows, sha256_file(path))

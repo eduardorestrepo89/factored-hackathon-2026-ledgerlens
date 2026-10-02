@@ -144,6 +144,39 @@ def test_a_broken_link_stops_the_transform(tmp_path):
 
 
 @pytest.mark.unit
+def test_time_columns_reach_parquet_as_text(tmp_path):
+    # aurora-dsql-loader v3.3.0 can't read Parquet TIME (Time64): branches failed on
+    # the first cloud run. As 'HH:MM:SS' text, DSQL casts it into the time column.
+    header = [
+        "branch_id",
+        "branch_code",
+        "branch_name",
+        "branch_type",
+        "address",
+        "city",
+        "state",
+        "country",
+        "geographic_zone",
+        "phone",
+        "opening_time",
+        "closing_time",
+        "has_atms",
+        "has_teller_windows",
+        "branch_opening_date",
+        "branch_status",
+    ]
+    row = ["SUC-1", "B001", "Centro", "Main", "Calle 1", "Bogota", "DC", "Colombia"]
+    row += ["Centro", "555", "08:00:00", "17:30:00", "True", "True", "2020-01-01"]
+    write_csv(tmp_path / "src" / "branches.csv", header, [row + ["Active"]])
+    [table], _ = run(tmp_path, tables=["branches"])
+    described = duckdb.sql(f"DESCRIBE SELECT * FROM '{table.path.as_posix()}'")
+    types = {name: kind for name, kind, *_ in described.fetchall()}
+    assert types["opening_time"] == "VARCHAR" and types["closing_time"] == "VARCHAR"
+    assert types["branch_opening_date"] == "DATE"  # only TIME columns change
+    assert read(table.path, "opening_time, closing_time") == [("08:00:00", "17:30:00")]
+
+
+@pytest.mark.unit
 def test_counts_must_match_expected(tmp_path):
     write_transactions(
         tmp_path / "src", [tx("T1", "2026-06-17 10:00:00", "2026-06-17")]
