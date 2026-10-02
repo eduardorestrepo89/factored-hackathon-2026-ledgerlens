@@ -1,5 +1,7 @@
 # LedgerLens data loading: design
 
+> **Superseded** by [2026-10-02-data-pipeline-design.md](2026-10-02-data-pipeline-design.md) on 2026-10-02. Kept as the record of what `feat/database` built.
+
 - **Date:** 2026-09-29
 - **Branch:** `feat/database`
 - **Status:** approved in brainstorming; written spec awaiting review
