@@ -31,6 +31,8 @@ def cmd_ingest(args) -> int:
 
     from data_load import ingest, runrecord
 
+    team_s3 = boto3.client("s3")
+    runrecord.clear(team_s3, bucket, run_id, "ingest")
     secret = ingest.load_secret(boto3.client("secretsmanager"), secret_id)
     org_s3 = boto3.client(
         "s3",
@@ -38,7 +40,6 @@ def cmd_ingest(args) -> int:
         aws_access_key_id=secret["aws_access_key_id"],
         aws_secret_access_key=secret["aws_secret_access_key"],
     )
-    team_s3 = boto3.client("s3")
     tables = list(load_plan().data_tables)
     record = ingest.ingest(org_s3, team_s3, secret, bucket, run_id, tables)
     uri = runrecord.write(team_s3, bucket, run_id, "ingest", record)
@@ -71,6 +72,7 @@ def cmd_transform(args) -> int:
     from data_load import runrecord
 
     s3 = boto3.client("s3")
+    runrecord.clear(s3, bucket, run_id, "transform")
     raw = Path(args.out) / "raw"
     shutil.rmtree(raw, ignore_errors=True)  # a stale file would join the CSV globs
     download_raw(s3, bucket, run_id, raw)
@@ -101,6 +103,7 @@ def cmd_load(args) -> int:
     from data_load import dsql, runrecord
 
     s3 = boto3.client("s3")
+    runrecord.clear(s3, bucket, run_id, "load")
     staged = runrecord.read(s3, bucket, run_id, "transform")["tables"]
     plan = load_plan()
     if set(staged) != set(plan.data_tables):

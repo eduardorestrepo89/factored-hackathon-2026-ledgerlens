@@ -77,6 +77,7 @@ test("state machine runs ingest, transform, load, then the read check", () => {
   expect(machine.Properties.StateMachineName).toBe("ledgerlens-data-pipeline")
   const definition = JSON.stringify(machine.Properties.DefinitionString)
   for (const fragment of [
+    '\\"TimeoutSeconds\\":36000', // 10 h: above the CodeBuild timeout, so CodeBuild fails first
     '\\"StartAt\\":\\"Ingest\\"',
     '\\"Next\\":\\"Transform\\"',
     '\\"Next\\":\\"Load\\"',
@@ -91,7 +92,7 @@ test("state machine runs ingest, transform, load, then the read check", () => {
 test("CodeBuild gets the secret's name, never its value; one build at a time", () => {
   t.hasResourceProperties("AWS::CodeBuild::Project", {
     Name: "ledgerlens-data-load",
-    TimeoutInMinutes: 180,
+    TimeoutInMinutes: 480, // headroom over the unmeasured ~90-min load (spec 13, check 5)
     ConcurrentBuildLimit: 1,
     Environment: Match.objectLike({
       Type: "ARM_CONTAINER",

@@ -147,7 +147,8 @@ export class DataConstruct extends Construct {
         buildImage: codebuild.LinuxArmBuildImage.AMAZON_LINUX_2_STANDARD_3_0,
         computeType: codebuild.ComputeType.LARGE,
       },
-      timeout: cdk.Duration.minutes(180),
+      // the ~90-min load is unmeasured (spec 13, check 5); a killed load costs a full rerun
+      timeout: cdk.Duration.minutes(480),
       concurrentBuildLimit: 1, // two loads would race on drop/create/load
       environmentVariables: {
         TEAM_BUCKET: { value: teamBucket.bucketName },
@@ -228,7 +229,7 @@ export class DataConstruct extends Construct {
           .next(stage("Load"))
           .next(new tasks.LambdaInvoke(this, "ReadCheck", { lambdaFunction: readCheck, payloadResponseOnly: true }))
       ),
-      timeout: cdk.Duration.hours(5),
+      timeout: cdk.Duration.hours(10), // above the CodeBuild timeout, so CodeBuild fails first
     })
     this.stateMachineArn = pipeline.stateMachineArn
   }

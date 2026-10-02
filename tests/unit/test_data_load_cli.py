@@ -155,6 +155,35 @@ def test_ingest_takes_the_organizer_keys_from_secrets_manager(monkeypatch, capsy
     assert "fake-secret-value" not in capsys.readouterr().out
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("stage", ["ingest", "transform", "load"])
+def test_a_failed_rerun_removes_the_stages_old_record(monkeypatch, stage):
+    env = {
+        "RUN_ID": "run-1",
+        "TEAM_BUCKET": "team",
+        "HACKATHON_SECRET_ID": "ledgerlens/hackathon-s3",
+        "DSQL_ENDPOINT": "c.dsql.us-east-1.on.aws",
+        "TOOLS_ROLE_ARN": "arn:aws:iam::111111111111:role/ledgerlens-tools",
+    }
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    s3 = FakeS3()
+    runrecord.write(s3, "team", "run-1", stage, {"from": "an earlier success"})
+    monkeypatch.setattr("boto3.client", lambda *a, **k: s3)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("stage failed")
+
+    # each stage's first real step fails
+    monkeypatch.setattr("data_load.ingest.load_secret", fail)
+    monkeypatch.setattr("data_load.transform.download_raw", fail)
+    monkeypatch.setattr("data_load.runrecord.read", fail)
+    with pytest.raises(RuntimeError, match="stage failed"):
+        main([stage])
+    # a record means the stage finished: the stale success must not outlive the rerun
+    assert ("team", f"runs/run-1/{stage}.json") not in s3.objects
+
+
 def fake_check_env(monkeypatch, org_files):
     """cmd_check reads ingest.json with one profile and the organizer bucket with another."""
     team, org = FakeS3(), FakeS3(org_files)

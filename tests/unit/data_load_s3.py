@@ -39,6 +39,9 @@ class FakeS3:
     def download_file(self, Bucket, Key, Filename):
         Path(Filename).write_bytes(self.objects[(Bucket, Key)])
 
+    def delete_object(self, Bucket, Key):
+        self.objects.pop((Bucket, Key), None)  # S3 deletes of a missing key succeed
+
     def head_object(self, Bucket, Key):
         return {"ContentLength": len(self.objects[(Bucket, Key)])}
 

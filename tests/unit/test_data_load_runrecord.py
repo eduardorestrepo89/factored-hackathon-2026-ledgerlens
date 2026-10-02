@@ -23,6 +23,15 @@ def test_run_ids_cannot_escape_the_runs_prefix(run_id):
 
 
 @pytest.mark.unit
+def test_clear_removes_a_stage_record_and_tolerates_a_missing_one():
+    s3 = FakeS3()
+    runrecord.write(s3, "team", "run-1", "load", {"tables": {}})
+    runrecord.clear(s3, "team", "run-1", "load")
+    runrecord.clear(s3, "team", "run-1", "load")  # already gone: no error
+    assert s3.keys("team") == []
+
+
+@pytest.mark.unit
 def test_unknown_stage_is_rejected():
     with pytest.raises(ValueError, match="unknown stage"):
         runrecord.record_key("run-1", "stage")

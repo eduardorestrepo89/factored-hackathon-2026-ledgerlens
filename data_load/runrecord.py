@@ -21,6 +21,12 @@ def write(s3, bucket: str, run_id: str, stage: str, record: dict) -> str:
     return f"s3://{bucket}/{key}"
 
 
+def clear(s3, bucket: str, run_id: str, stage: str) -> None:
+    """Called when a stage starts: a record means the stage finished, so a failed
+    rerun must not leave the previous success behind."""
+    s3.delete_object(Bucket=bucket, Key=record_key(run_id, stage))
+
+
 def read(s3, bucket: str, run_id: str, stage: str) -> dict:
     body = s3.get_object(Bucket=bucket, Key=record_key(run_id, stage))["Body"].read()
     return json.loads(body)
