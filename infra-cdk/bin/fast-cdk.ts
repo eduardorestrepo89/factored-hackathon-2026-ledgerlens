@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as cdk from "aws-cdk-lib"
+import { DataStack } from "../lib/data-stack"
 import { FastMainStack } from "../lib/fast-main-stack"
 import { ConfigManager } from "../lib/utils/config-manager"
 
@@ -17,6 +18,16 @@ const amplifyStack = new FastMainStack(app, props.stack_name_base, {
   env: { 
     account: process.env.CDK_DEFAULT_ACCOUNT, 
     region: process.env.CDK_DEFAULT_REGION 
+  },
+})
+
+// Aurora DSQL and its load pipeline, deployable on their own:
+//   cdk deploy <stack_name_base>-data
+new DataStack(app, `${props.stack_name_base}-data`, {
+  config: props,
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION,
   },
 })
 
