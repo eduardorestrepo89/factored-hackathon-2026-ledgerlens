@@ -1,28 +1,46 @@
-"""Fingerprint the organizer's source files so a later re-upload is detectable."""
+"""List the organizer's source files and fingerprint them, so a re-upload is detectable."""
 
 import hashlib
 
-from data_load.stage import EVENT_TABLES
+EVENT_TABLES = frozenset(
+    {
+        "call_center_interactions",
+        "call_transcripts",
+        "campaign_sends",
+        "complaints",
+        "digital_events",
+        "satisfaction_surveys",
+        "transactions",
+    }
+)
+
+
+def normalize_prefix(prefix: str) -> str:
+    """'data', 'data/' and '/data/' all become 'data/'; an empty prefix stays empty."""
+    return prefix.strip("/") + "/" if prefix.strip("/") else ""
 
 
 def source_prefix(prefix: str, table: str) -> str:
-    """S3 key prefix of one table's source files; `table` may be schema-qualified."""
-    name = table.split(".")[-1]
-    base = prefix.rstrip("/") + "/" if prefix.strip("/") else ""
-    return f"{base}{name}/" if name in EVENT_TABLES else f"{base}{name}.csv"
+    """S3 key prefix of one table's source files."""
+    base = normalize_prefix(prefix)
+    return f"{base}{table}/" if table in EVENT_TABLES else f"{base}{table}.csv"
 
 
-def list_objects(s3, bucket: str, key_prefix: str) -> list[tuple[str, str]]:
+def list_objects(s3, bucket: str, key_prefix: str) -> list[tuple[str, str, int]]:
+    """(key, etag, size) of every object under key_prefix."""
     objects = []
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=key_prefix):
-        objects += [(o["Key"], o["ETag"].strip('"')) for o in page.get("Contents", [])]
+        objects += [
+            (o["Key"], o["ETag"].strip('"'), o["Size"])
+            for o in page.get("Contents", [])
+        ]
     return objects
 
 
-def etag_digest(objects: list[tuple[str, str]]) -> str:
+def etag_digest(objects: list[tuple[str, str, int]]) -> str:
     """SHA-256 over sorted 'key etag' lines: any added, removed or rewritten file changes it."""
-    lines = "\n".join(f"{key} {etag}" for key, etag in sorted(objects))
+    lines = "\n".join(f"{key} {etag}" for key, etag, *_ in sorted(objects))
     return hashlib.sha256(lines.encode()).hexdigest()
 
 

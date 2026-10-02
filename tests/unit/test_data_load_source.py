@@ -1,8 +1,7 @@
-"""Source fingerprints: detect a re-upload of the organizer's files."""
-
-from unittest import mock
+"""Source listing and fingerprints: detect a re-upload of the organizer's files."""
 
 import pytest
+from data_load_s3 import FakeS3
 
 from data_load.source import (
     drift,
@@ -13,69 +12,53 @@ from data_load.source import (
 )
 
 
-def fake_s3(objects_by_prefix):
-    s3 = mock.MagicMock()
-
-    def paginate(Bucket, Prefix):
-        return [
-            {
-                "Contents": [
-                    {"Key": k, "ETag": f'"{e}"'}
-                    for k, e in objects_by_prefix.get(Prefix, [])
-                ]
-            },
-            {},
-        ]
-
-    s3.get_paginator.return_value.paginate.side_effect = paginate
-    return s3
-
-
 @pytest.mark.unit
 def test_source_prefix_for_event_and_reference_tables():
-    assert source_prefix("data/", "bank.transactions") == "data/transactions/"
-    assert source_prefix("data/", "pii.customers") == "data/customers.csv"
+    assert source_prefix("data/", "transactions") == "data/transactions/"
+    assert source_prefix("data/", "customers") == "data/customers.csv"
 
 
 @pytest.mark.unit
-def test_list_objects_reads_every_page_and_strips_quotes():
-    s3 = fake_s3({"data/transactions/": [("data/transactions/a.csv", "e1")]})
+def test_source_prefix_tolerates_missing_or_extra_slashes():
+    assert source_prefix("data", "transactions") == "data/transactions/"
+    assert source_prefix("/data/", "customers") == "data/customers.csv"
+
+
+@pytest.mark.unit
+def test_list_objects_returns_key_etag_and_size():
+    s3 = FakeS3({("b", "data/transactions/a.csv"): b"abc"})
     assert list_objects(s3, "b", "data/transactions/") == [
-        ("data/transactions/a.csv", "e1")
+        ("data/transactions/a.csv", "etag-data/transactions/a.csv", 3)
     ]
 
 
 @pytest.mark.unit
-def test_digest_ignores_order_and_catches_rewrites():
-    a, b = ("k1", "e1"), ("k2", "e2")
+def test_digest_ignores_order_and_size_and_catches_rewrites():
+    a, b = ("k1", "e1", 1), ("k2", "e2", 2)
     assert etag_digest([a, b]) == etag_digest([b, a])
-    assert etag_digest([a, b]) != etag_digest([a, ("k2", "e3")])
+    assert etag_digest([a, b]) == etag_digest([a, ("k2", "e2", 99)])
+    assert etag_digest([a, b]) != etag_digest([a, ("k2", "e3", 2)])
     assert etag_digest([a, b]) != etag_digest([a])
 
 
 @pytest.mark.unit
 def test_fingerprint_counts_files_per_table():
-    s3 = fake_s3(
+    s3 = FakeS3(
         {
-            "data/transactions/": [
-                ("data/transactions/1.csv", "e1"),
-                ("data/transactions/2.csv", "e2"),
-            ],
-            "data/customers.csv": [("data/customers.csv", "e3")],
+            ("b", "data/transactions/1.csv"): b"1",
+            ("b", "data/transactions/2.csv"): b"2",
+            ("b", "data/customers.csv"): b"3",
         }
     )
-    prints = fingerprint(s3, "b", "data/", ["bank.transactions", "pii.customers"])
-    assert prints["bank.transactions"][0] == 2
-    assert prints["pii.customers"] == (1, etag_digest([("data/customers.csv", "e3")]))
+    prints = fingerprint(s3, "b", "data/", ["transactions", "customers"])
+    assert prints["transactions"][0] == 2
+    assert prints["customers"] == (
+        1,
+        etag_digest([("data/customers.csv", "etag-data/customers.csv", 1)]),
+    )
 
 
 @pytest.mark.unit
 def test_drift_lists_changed_and_one_sided_tables():
     assert drift({"a": "1", "b": "2"}, {"a": "1", "b": "2"}) == []
     assert drift({"a": "1", "b": "2"}, {"a": "1", "b": "X", "c": "3"}) == ["b", "c"]
-
-
-@pytest.mark.unit
-def test_source_prefix_tolerates_a_missing_trailing_slash():
-    assert source_prefix("data", "bank.transactions") == "data/transactions/"
-    assert source_prefix("data", "pii.customers") == "data/customers.csv"
