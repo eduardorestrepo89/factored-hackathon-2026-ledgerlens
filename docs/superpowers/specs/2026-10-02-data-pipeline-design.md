@@ -311,7 +311,29 @@ The first statement is the AWS-documented "block public internet" pattern: a req
 - **A rerun of the `load` stage:** costs the DSQL DPU and about 95 CodeBuild minutes again. A rerun of `transform` costs about 12 minutes.
 - **The previous design** (2-year window, no VPC) cost about $1.38 for the hackathon window (design doc §16). The difference is all rows (+49%) and the endpoint.
 
-The first run replaces these estimates with measured stage durations and the cluster's CloudWatch `TotalDPU` (plan, Task 9).
+### 11.4 Measured on the first run (2026-10-02)
+
+The clean run is `fc74b48e-6c0a-4a54-9645-255cdfe72bef`, started 15:00 UTC. The figures come from Step Functions history, CodeBuild, and the cluster's CloudWatch metrics (namespace `AWS/AuroraDSQL`, dimension `ClusterId`).
+
+| Item | Estimate (11.3) | Measured |
+|---|---|---|
+| Ingest | about 10 min | **1.7 min** (7,671 files, 5.35 GB) |
+| Transform | about 12 min | **4.7 min** |
+| Load | about 90 min | **23.8 min**. `transactions` took 237 s (about 18,700 rows/s); `digital_events` finished last |
+| Read check | — | 0.1 min |
+| Whole run | about 2 h | **30.3 min** |
+| CodeBuild per run | about 115 min, $1.73 | about 30 min, **about $0.45** |
+| DSQL DPU per run | 217,000–335,000 ($1.74–2.68) | **371,356** (write 329,262; read 29,389; compute 12,705) = **$2.97** |
+| DSQL storage | 3.5–6 GB | **6.63 GB** at 15:30 UTC. That may still include the first attempt's dropped tables until DSQL reclaims them. About $1.86/month after the free GB |
+| OCC conflicts | — | 7 during the load, absorbed by the loader's retries |
+
+- **Corrected per-run cost:** about $3.50 ($2.97 DSQL, $0.45 CodeBuild, about $0.06 S3).
+- **Monthly while the stack exists:** about $9.70 (the endpoint $7.30, storage about $1.86, S3 $0.15, the secret $0.40).
+- **Total spent on 2026-10-02:** about $6.
+  - DSQL 667,231 DPU, which is $5.34, or about $4.54 after the 100,000 free DPU. That includes 295,875 DPU from the first attempt, whose load failed and was stopped.
+  - CodeBuild: 54 pipeline minutes ($0.81), plus three short deploy builds.
+
+The load is about 4× faster than estimated. A rerun of the load stage costs about 25 minutes and $3, not 95 minutes.
 
 ## 12. Security
 
@@ -327,12 +349,12 @@ The first run replaces these estimates with measured stage durations and the clu
 
 ## 13. To confirm on the first run
 
-1. The loader authenticates as `admin` from CodeBuild (outside the VPC) with the cluster policy attached, through the `aws:PrincipalArn` exception.
-2. `aurora-dsql-loader --dry-run` accepts the typed Parquet against the recreated tables.
-3. The read check connects through the private hostname. If DSQL rejects a token signed for that hostname, the Lambda signs the token for the public endpoint and connects to the private host, and the plan records this.
-4. Connecting from a laptop with admin credentials (the `ledgerlens` profile) is refused.
-5. Load throughput against the 90-minute estimate.
-6. `transform.json` shows the section 6.1 counts.
+1. The loader authenticates as `admin` from CodeBuild (outside the VPC) with the cluster policy attached, through the `aws:PrincipalArn` exception. **Passed.**
+2. `aurora-dsql-loader --dry-run` accepts the typed Parquet against the recreated tables. **Failed at first, now fixed.** The dry run passed, but the real load of `branches` failed: loader v3.3.0 can't read Parquet TIME columns (`Time64`). The transform now writes TIME columns as `HH:MM:SS` text (commit `8a91b9c`). A second problem surfaced in the same stage: DSQL refuses `GRANT USAGE ON SCHEMA public` ("feature not supported on system entity"), and every role already has USAGE through `PUBLIC`, so the grant was removed (commit `bd96fb8`).
+3. The read check connects through the private hostname. If DSQL rejects a token signed for that hostname, the Lambda signs the token for the public endpoint and connects to the private host, and the plan records this. **Passed without the fallback:** the output was `{"tables_read": 13, "insert_denied": true}`.
+4. Connecting from a laptop with admin credentials (the `ledgerlens` profile) is refused. **Passed:** "FATAL: unable to accept connection, access denied". Any principal allowed `dsql:PutClusterPolicy` can still lift this layer (final review, minor 9).
+5. Load throughput against the 90-minute estimate. **23.8 minutes** (section 11.4).
+6. `transform.json` shows the section 6.1 counts. **Passed on both runs.** `python -m data_load check` reports no drift against the organizer's bucket.
 
 ## 14. Out of scope
 
