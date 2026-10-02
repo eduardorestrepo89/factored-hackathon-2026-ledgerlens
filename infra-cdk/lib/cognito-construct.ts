@@ -139,6 +139,12 @@ export class CognitoConstruct extends Construct {
       code: lambda.Code.fromAsset(path.join(__dirname, "..", "lambdas", "pretoken-v3")), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       timeout: cdk.Duration.seconds(30),
       description: "V3 Pre-Token Lambda for M2M user identity propagation",
+      environment: {
+        // Cognito sub -> LedgerLens customer_id, as a JSON string. Deployed as a
+        // blank template; replace the placeholders with the demo users' real subs
+        // and customer ids after deploy. See docs/LEDGERLENS_PRODUCT_DESIGN.md §5.2.
+        USER_CUSTOMER_IDS_MAP: '{"xxxxxxxxx" : "CLI-xxxxxxxxxx", "yyyyyyyy" : "CLI-yyyyyyyy"}',
+      },
       logGroup: new logs.LogGroup(this, "PreTokenLambdaLogGroup", {
         logGroupName: `/aws/lambda/${config.stack_name_base}-pretoken-v3`,
         retention: logs.RetentionDays.ONE_WEEK,

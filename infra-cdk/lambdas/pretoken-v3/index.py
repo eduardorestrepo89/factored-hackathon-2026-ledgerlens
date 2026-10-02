@@ -10,6 +10,9 @@ Custom claims injected (application-defined, not standard JWT/OIDC claims):
   - user_id:    The authenticated user's Cognito sub (a UUID)
   - department: The user's department (e.g., "finance")
   - role:       The user's role (e.g., "admin")
+  - customer_id: The LedgerLens customer linked to the user (e.g.,
+                 "CLI-F2DZJYU0POJ9"), looked up in USER_CUSTOMER_IDS_MAP.
+                 Blank when the user has no entry; the token is still issued.
 
 These claim names are arbitrary — you can define any names you need.
 Just ensure the names match between this Lambda's output and the Cedar
@@ -37,6 +40,9 @@ To use dynamic group assignment, replace the hardcoded mapping below with a
 DynamoDB table keyed by the user's sub (UUID). See docs/IDENTITY_POLICY.md.
 """
 
+import json
+import os
+
 # ============================================================================
 # USER-TO-GROUP MAPPING
 # ============================================================================
@@ -57,6 +63,42 @@ USER_ROLE_MAP = {
 # With Cedar policy V1: guest is permitted.
 # With Cedar policy V2: guest is denied (gateway target tool hidden from agent).
 DEFAULT_GROUP = {"department": "guest", "role": "viewer"}
+
+# ============================================================================
+# USER-TO-CUSTOMER MAPPING (demo)
+# ============================================================================
+# The environment variable USER_CUSTOMER_IDS_MAP holds a JSON object as a plain
+# string, mapping each Cognito sub to its customer_id:
+#   {"<cognito-sub-uuid>": "CLI-xxxxxxxxxx", ...}
+# A missing, blank or invalid variable, or a sub with no entry, gives a blank
+# customer_id claim. Cedar then rejects the customer's tool calls; the token
+# itself is still issued.
+# ============================================================================
+
+
+def _lookup_customer_id(user_id: str) -> str:
+    """Return the customer_id mapped to user_id, or "" when there is none."""
+    raw_map = os.environ.get("USER_CUSTOMER_IDS_MAP", "")
+    if not raw_map.strip():
+        print("[PRE-TOKEN] USER_CUSTOMER_IDS_MAP is not set - customer_id blank")
+        return ""
+    try:
+        customer_ids = json.loads(raw_map)
+    except json.JSONDecodeError:
+        print("[PRE-TOKEN] USER_CUSTOMER_IDS_MAP is not valid JSON - customer_id blank")
+        return ""
+    if not isinstance(customer_ids, dict):
+        print(
+            "[PRE-TOKEN] USER_CUSTOMER_IDS_MAP is not a JSON object - customer_id blank"
+        )
+        return ""
+    customer_id = customer_ids.get(user_id, "")
+    if not isinstance(customer_id, str):
+        print("[PRE-TOKEN] Mapped customer_id is not a string - customer_id blank")
+        return ""
+    if not customer_id:
+        print("[PRE-TOKEN] No customer_id mapped for this user - customer_id blank")
+    return customer_id
 
 
 def lambda_handler(event: dict, context: dict) -> dict:
@@ -97,12 +139,15 @@ def lambda_handler(event: dict, context: dict) -> dict:
     role = group["role"]
     print(f"[PRE-TOKEN] Assigned: department={department}, role={role}")
 
+    customer_id = _lookup_customer_id(user_id)
+
     # Inject CUSTOM claims into the M2M Access Token.
     # At the AgentCore Gateway, the JWT Authorizer maps ALL token claims
     # (both standard and custom) to Cedar principal tags:
     #   Custom claim "user_id"    → principal.getTag("user_id")
     #   Custom claim "department" → principal.getTag("department")
     #   Custom claim "role"       → principal.getTag("role")
+    #   Custom claim "customer_id" → principal.getTag("customer_id")
     #
     # Standard claims (sub, iss, client_id, exp, etc.) are also available as tags
     # but are managed automatically by Cognito and cannot be overridden here.
@@ -112,6 +157,7 @@ def lambda_handler(event: dict, context: dict) -> dict:
                 "user_id": user_id,
                 "department": department,
                 "role": role,
+                "customer_id": customer_id,
             }
         }
     }
