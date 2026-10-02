@@ -239,7 +239,7 @@ SELECT c.customer_id,
 FROM customers c
 JOIN products p ON p.customer_id = c.customer_id
 WHERE c.customer_id = :customer_id
-  AND p.product_type ILIKE '%card%';
+  AND p.product_type = 'Tarjeta Crédito';
 ```
 
 *Q2: recent transactions with flags.* Uses the shared CTEs from section 8.1.
@@ -403,6 +403,8 @@ LIMIT 3;
 **Input:** `customer_id`
 
 **Query:** Q1 (section 7.1), without the customer columns.
+
+Credit cards only (`product_type = 'Tarjeta Crédito'`), in every status, active first. Spec: [2026-10-01-list-credit-cards-lambda-design.md](superpowers/specs/2026-10-01-list-credit-cards-lambda-design.md).
 
 ---
 
@@ -592,7 +594,7 @@ SET product_status = 'Blocked',
     last_updated   = now()
 WHERE customer_id = :customer_id
   AND RIGHT(product_number, 4) = :card_last4
-  AND product_type ILIKE '%card%'
+  AND product_type = 'Tarjeta Crédito'
   AND product_status <> 'Blocked'
 RETURNING product_id, RIGHT(product_number, 4) AS last4, product_status;
 -- 0 rows → already blocked, or not the customer's card: return a clear error.
@@ -893,7 +895,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | Load the 13 ERD tables into Aurora DSQL. DSQL partitions and distributes data itself, so the fact tables get no manual `process_date` partitions; they rely on the section 8.2 indexes. Load in batches of at most 3,000 rows per transaction (the DSQL limit). | Performance |
 | De-duplicate `transactions` (about 2% duplicates), or rely on `tx_dedup` everywhere | Stops the agent from showing duplicate charges, which would create the very confusion it's supposed to fix |
 | Leave foreign keys unenforced until orphan rows are cleaned | Noted in the data dictionary |
-| **Confirm the enum values:** `transaction_status`, `product_type`, `product_status`, complaint `status`/`category`/`subcategory`, `response_code`, `page_title` patterns | The queries above use assumed values |
+| **Confirm the enum values:** `transaction_status`, `product_type`, `product_status`, complaint `status`/`category`/`subcategory`, `response_code`, `page_title` patterns. Confirmed 2026-10-01: `product_type` `'Tarjeta Crédito'` and `product_status` `'Active'`. | The queries above use assumed values |
 | Create `customer_identity` (DynamoDB) and link the demo Cognito users to `customer_id`s | Identity chain |
 | Choose an `:as_of` inside the dataset's time range for demos | The historical data has nothing "recent" relative to `now()` |
 | Create a read-only DB role (`ledgerlens_readonly`, `SELECT` only) for the read tools and a separate role for `block_credit_card` / `open_claim`. Map each to its Lambda's IAM role with `AWS IAM GRANT`. DSQL rejects `default_transaction_read_only`, so the grants are the only write guard. | Least privilege |
