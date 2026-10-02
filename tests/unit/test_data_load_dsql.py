@@ -83,7 +83,7 @@ def test_first_load_creates_the_role_maps_it_and_grants():
     assert sql.index(f"AWS IAM GRANT ll_read TO '{TOOLS_ROLE}'") < sql.index(
         plan.grants[0]
     )
-    assert sql[-2:] == plan.grants  # grants last: they must see the new tables
+    assert sql[-len(plan.grants) :] == plan.grants  # last: they must see the new tables
 
 
 @pytest.mark.unit
@@ -93,7 +93,7 @@ def test_reload_keeps_the_role_and_mapping_but_regrants():
     apply_schema(conn, plan, TOOLS_ROLE)
     sql = conn.sql()
     assert not any(s.startswith(("CREATE ROLE", "AWS IAM GRANT")) for s in sql)
-    assert sql[-2:] == plan.grants
+    assert sql[-len(plan.grants) :] == plan.grants
 
 
 @pytest.mark.unit

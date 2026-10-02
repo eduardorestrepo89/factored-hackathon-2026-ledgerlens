@@ -95,7 +95,7 @@ Each CodeBuild task overrides `STAGE` and sets `RUN_ID` from `$$.Execution.Name`
 
 1. The 13 `CREATE TABLE` statements in `public`. These are the definitions validated on 2026-09-29, unqualified, with `call_transcripts.duration_seconds` nullable and the observed `reception_channel` values in the complaints `CHECK`.
 2. `CREATE ROLE ll_read WITH LOGIN;`
-3. `GRANT USAGE ON SCHEMA public TO ll_read;` and `GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read;`. The grants run after every load, because recreated tables lose them.
+3. `GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read;`. It runs after every load, because recreated tables lose their grants. There's no USAGE grant on `public`: DSQL refuses grants on that system schema ("feature not supported on system entity", first cloud run), and every role already has USAGE on it through `PUBLIC`.
 4. Three secondary indexes, built with `CREATE INDEX ASYNC` after every load, only for queries the read tools run:
    - `transactions (customer_id, transaction_date)`
    - `products (customer_id)`
@@ -167,7 +167,7 @@ All of these must hold; otherwise the transform fails and names the check:
 | Layer | Mechanism | Effect |
 |---|---|---|
 | 1. IAM | Only the tools role has `dsql:DbConnect` on the cluster; only the loader (CodeBuild role) has `dsql:DbConnectAdmin`. The AgentCore runtime role has no DSQL permission | Nobody else can get a connection token |
-| 2. Database role | `ll_read` (SELECT on the 13 tables, USAGE on `public`) is mapped to the tools role with `AWS IAM GRANT` | A tools connection can only read, even with a leaked token |
+| 2. Database role | `ll_read` (SELECT on the 13 tables; USAGE on `public` comes from the default `PUBLIC` grant) is mapped to the tools role with `AWS IAM GRANT` | A tools connection can only read, even with a leaked token |
 | 3. Network | A cluster resource policy (`CfnCluster.policyDocument`) denies `dsql:DbConnect` and `dsql:DbConnectAdmin` unless the request comes through our VPC, with an exception for the loader role (`aws:PrincipalArn`) | Connections from outside our VPC are refused, including admin credentials on a laptop. Only the AWS account root user bypasses resource policies |
 
 The policy (CDK resolves the tokens with `Stack.toJsonString`):

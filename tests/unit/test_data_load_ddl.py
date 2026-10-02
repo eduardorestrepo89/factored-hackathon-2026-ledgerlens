@@ -29,15 +29,19 @@ def test_plan_groups_every_statement():
     plan = load_plan()
     assert set(plan.data_tables) == TABLES
     assert plan.roles == {"ll_read": "CREATE ROLE ll_read WITH LOGIN"}
-    assert plan.grants == [
-        "GRANT USAGE ON SCHEMA public TO ll_read",
-        "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read",
-    ]
+    assert plan.grants == ["GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read"]
     assert [re.search(r"ON (\w+)", s)[1] for s in plan.indexes] == [
         "transactions",
         "products",
         "complaints",
     ]
+
+
+@pytest.mark.unit
+def test_no_grant_on_the_public_schema_itself():
+    # DSQL refuses it ("feature not supported on system entity", first cloud run
+    # 2026-10-02), and every role already has USAGE on public through PUBLIC.
+    assert not any("ON SCHEMA public" in grant for grant in load_plan().grants)
 
 
 @pytest.mark.unit

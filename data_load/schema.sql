@@ -113,8 +113,8 @@ CREATE TABLE campaign_sends (
 
 -- The tools' read-only role. Created if missing; mapped to the tools IAM role by the load.
 CREATE ROLE ll_read WITH LOGIN;
--- Re-applied after every load: recreated tables lose their grants.
-GRANT USAGE ON SCHEMA public TO ll_read;
+-- Re-applied after every load: recreated tables lose their grants. No USAGE grant on
+-- public: DSQL refuses grants on that system schema, and every role already has USAGE.
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read;
 
 -- Secondary indexes, only for queries the read tools run. Rebuilt after every load.
