@@ -134,8 +134,8 @@ The Gateway does **not** forward JWT claims to Lambda targets (Q2, answered 2026
    - Decode it for the `customer_id` claim. No signature check is needed, since the agent requested the token itself.
    - Pass the same token to the Gateway MCP client.
    - Set `customer_id` on the session-start calls (section 6) and overwrite it on every model tool call with a Strands `BeforeToolCallEvent` hook, whatever the model wrote.
-   - This needs a change to `patterns/strands-single-agent/tools/gateway.py`, which today fetches the token inside the client factory, so the agent code never holds it.
-   - Check the hook API against the pinned `strands-agents` version.
+   - Done: `invocations()` fetches the token once, reads the claim with `extract_customer_id_from_token` (`patterns/utils/auth.py`) and passes the token to `create_gateway_mcp_client(access_token)`. A blank claim gives a system prompt that says the account isn't linked, never asks for an id and offers a hand-off (`tools/system_prompt.py`).
+   - Done: `CustomerIdHook` (`tools/customer_id_hook.py`) runs on `BeforeToolCallEvent`. For every tool whose input schema has a `customer_id` property, it overwrites the value with the token's; with a blank claim it cancels the call, and the model gets an error result saying the account isn't linked. Checked against `strands-agents==1.32.0`: the executor runs the `tool_use` and `cancel_tool` the hooks leave on the event.
 2. **Gateway REQUEST interceptor (later option).**
    - The Gateway invokes a Lambda before each target call ([interceptor types](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-interceptors-types.html)).
    - With `passRequestHeaders: true` it receives the `Authorization` header and the full JSON-RPC body.
@@ -888,7 +888,8 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 > **Check at deploy time:**
 > - The engine is in ENFORCE mode, so tools denied at `tools/list` are hidden from the agent. Confirm that the `forbid` statements that depend on `context.input` don't hide tools at list time.
-> - The current `cedar-policy` custom resource creates **one statement per policy**, so this file needs splitting into 3 policies, or the Lambda needs to support several.
+> - Done: CreatePolicy takes one statement per policy, so the `cedar-policy` custom resource now splits `policy.cedar` into statements and creates one policy each. It ignores semicolons in strings and drops `//` comments, including trailing ones. Policy names are `{engine_name[:31]}_cp{n}_{timestamp}`, which keeps them within the 48-character API limit (the old `{engine_name}_cp_{timestamp}` was 53 characters for this stack).
+> - **Only list deployed tools.** CreatePolicy validates each statement against the Cedar schema of every Gateway attached to the engine. An action whose target isn't deployed makes the policy `CREATE_FAILED`, and that fails the deploy. Add each tool's actions to `policy.cedar` in the same change that adds its Gateway target.
 > - Validate the exact Cedar schema for `context.input` against `docs/CEDAR_POLICY_GUIDE.md`.
 
 ---
@@ -959,9 +960,12 @@ when { context has input && !(context.input has customer_confirmed && context.in
 - [ ] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`), publish to SNS (hand-off only).
 - [x] Pre-token Lambda: look up `customer_id` in `USER_CUSTOMER_IDS_MAP` and add it as a claim (blank when not found).
 - [x] Pre-token Lambda CDK (`cognito-construct.ts`): set `USER_CUSTOMER_IDS_MAP` to the blank template from section 5.2.
-- [ ] Cedar: split `gateway/policies/policy.cedar` into the 3 statements in section 10 (update the custom resource if needed).
+- [x] Cedar custom resource: create one policy per statement in `gateway/policies/policy.cedar`.
+- [ ] Cedar: replace the sample policy with the 3 statements in section 10, listing only the tools whose Gateway targets are deployed.
 
 **Agent (`patterns/strands-single-agent/`)**
+- [x] Read `customer_id` from the machine token once per request and pass it to the system prompt (section 5.3, option 1).
+- [x] `BeforeToolCallEvent` hook that overwrites `customer_id` on every tool call (section 5.3, option 1).
 - [ ] Session start in `invocations()` (section 6): first turn only, two parallel tool calls.
 - [ ] Replace `SYSTEM_PROMPT` with section 9 and inject `SESSION CONTEXT`.
 - [ ] Set `conversation_manager` explicitly.
