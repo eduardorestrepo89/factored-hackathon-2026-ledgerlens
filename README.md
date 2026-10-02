@@ -46,6 +46,75 @@ See the [deployment guide](docs/DEPLOYMENT.md) for detailed instructions on how 
 
 What comes next? That's up to you, the developer. With your requirements in mind, open up your coding assistant, describe what you'd like to do, and begin. The steering docs in this repository help guide coding assistants with best practices, and encourage them to always refer to the documentation built-in to the repository to make sure you end up building something great.
 
+## LedgerLens Database (Aurora DSQL)
+
+The organizer's LATAM Bank dataset (13 tables, 23,495,188 rows) lives in Aurora DSQL, in its own stack, `ledgerlens-bank-assistant-data`. It deploys without the agent backend or the frontend.
+- **Design:** [docs/superpowers/specs/2026-10-02-data-pipeline-design.md](docs/superpowers/specs/2026-10-02-data-pipeline-design.md).
+- **Code:** `data_load/`, `infra-cdk/lib/data-stack.ts` and `infra-cdk/lib/data-construct.ts`.
+
+**What's in it:**
+- **One schema:** `public`, holding the 13 tables as delivered, with the documented repairs R1–R6 applied in the transform (spec section 6).
+- **Read-only access:** only the IAM role `ledgerlens-tools` can read the data, as the database role `ll_read`, and only from inside the stack's VPC, through the private host `DsqlPrivateHost`.
+- **The loader's exception:** the loader (CodeBuild) is the only identity allowed in from outside the VPC.
+- **No laptop access:** laptops are refused, admin credentials included. Ad-hoc queries need a temporary exception in the cluster policy (spec section 7.3).
+
+**Deploy only the database:**
+
+```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant-data
+```
+
+The script deploys from an ARM CodeBuild machine, because local Docker can't bundle the ARM64 Lambdas without emulation. Without stack names, it deploys every stack, as before.
+
+**Set the organizer's S3 keys (once):** write a JSON file outside the repo with `aws_access_key_id`, `aws_secret_access_key`, `bucket`, `region` (`us-east-2`) and `prefix` (`data/`), then:
+
+```bash
+aws secretsmanager put-secret-value --profile ledgerlens --secret-id ledgerlens/hackathon-s3 --secret-string file://<file-outside-the-repo>.json
+```
+
+Delete the file afterwards and never commit it.
+
+**Load the data (about 30 minutes, about $3.50):**
+
+```bash
+AWS_PROFILE=ledgerlens make load-data
+# without make:
+arn=$(aws stepfunctions list-state-machines --profile ledgerlens --query "stateMachines[?name=='ledgerlens-data-pipeline'].stateMachineArn" --output text)
+aws stepfunctions start-execution --profile ledgerlens --state-machine-arn "$arn"
+```
+
+- **Stages:** the pipeline runs ingest → transform → load → read check. Each stage writes `runs/<run-id>/<stage>.json` in the team bucket.
+- **Downtime:** a load drops and recreates the 13 tables, so the tools see missing tables for about 25 minutes. Never reload during a demo.
+- **Rerunning one stage** of an existing run:
+
+  ```bash
+  aws codebuild start-build --profile ledgerlens --project-name ledgerlens-data-load \
+    --environment-variables-override name=STAGE,value=<stage>,type=PLAINTEXT name=RUN_ID,value=<run-id>,type=PLAINTEXT
+  ```
+
+- **After a manual rerun,** run the read check yourself:
+
+  ```bash
+  aws lambda invoke --profile ledgerlens --function-name ledgerlens-dsql-read-check out.json
+  ```
+
+**Check for an organizer re-upload:** this uses the `hackathon` profile for the organizer's bucket and the `ledgerlens` profile for the team bucket.
+
+```bash
+uv run --no-project --with-requirements data_load/requirements.txt python -m data_load check --run <run-id> --team-bucket <team-bucket>
+```
+
+**Cost:**
+- **While the stack exists:** about $9.70 a month, mostly the private endpoint ($7.30).
+- **Deleting the stack keeps the cluster** (deletion protection). To get to zero, also run:
+
+  ```bash
+  aws dsql update-cluster --profile ledgerlens --identifier <cluster-id> --no-deletion-protection-enabled
+  aws dsql delete-cluster --profile ledgerlens --identifier <cluster-id>
+  ```
+
+- **Redeploying after a delete:** redeploying the data stack after deleting it creates a new, empty cluster.
+
 ## Architecture
 
 ![Architecture Diagram](docs/architecture-diagram/FAST-architecture-20260403.png)
