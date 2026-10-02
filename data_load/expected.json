@@ -1,0 +1,25 @@
+{
+  "rows": {
+    "branches": 350,
+    "call_center_interactions": 686296,
+    "call_transcripts": 171321,
+    "campaign_sends": 1746801,
+    "complaints": 67095,
+    "customers": 150000,
+    "daily_exchange_rates": 13164,
+    "digital_events": 15620994,
+    "marketing_campaigns": 200,
+    "products": 400000,
+    "satisfaction_surveys": 212759,
+    "service_agents": 1200,
+    "transactions": 4425008
+  },
+  "repairs": {
+    "R6a": {"changed": 117640},
+    "R1": {"resolved": 139573, "set_null": 10422},
+    "R6b": {"changed": 99633},
+    "R2": {"set_null": 831},
+    "R3": {"resolved": 13808, "set_null": 30762},
+    "R4": {"resolved": 337760, "set_null": 1102562}
+  }
+}

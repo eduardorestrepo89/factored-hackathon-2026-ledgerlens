@@ -3,10 +3,7 @@
 Files are written the way the organizer's are: UTF-8 with a BOM and CRLF endings.
 """
 
-from datetime import datetime
 from pathlib import Path
-
-AS_OF = datetime(2026, 6, 17, 23, 59, 59)
 
 TX_HEADER = [
     "transaction_id",
