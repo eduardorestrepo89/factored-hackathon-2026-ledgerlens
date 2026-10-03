@@ -1,0 +1,16 @@
+[
+  {
+    "name": "list_credit_cards",
+    "description": "Lists the customer's credit cards in every status (active, blocked, closed, suspended) with last 4 digits, status, currency, balance, credit limit, available credit, expiry date and days past due. Use when the customer asks about their cards, or to confirm which card they mean before searching transactions or blocking a card. Returns at most 25 cards, active first, as JSON with 'cards', 'count' and 'truncated'. Amounts are strings with 2 decimals in the card's currency. 'cards' is null when the customer has no credit cards.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "The authenticated customer's id from get_session_context."
+        }
+      },
+      "required": ["customer_id"]
+    }
+  }
+]

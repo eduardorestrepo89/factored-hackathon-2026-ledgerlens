@@ -4,9 +4,10 @@ Provides two authentication approaches for Gateway access:
 
 APPROACH 1 (Active): Direct Cognito token call with user identity propagation.
   Use this when the M2M token needs to carry user-specific claims (e.g., department,
-  role) for Cedar policy evaluation at the Gateway. The user_id from the validated
-  JWT is passed as aws_client_metadata to Cognito, where the V3 Pre-Token Lambda
-  reads it and injects claims into the M2M token.
+  role, customer_id) for Cedar policy evaluation at the Gateway. The user_id from the
+  validated JWT is passed as aws_client_metadata to Cognito, where the V3 Pre-Token
+  Lambda reads it and injects claims into the M2M token. The caller fetches the token
+  once (get_gateway_access_token) so it can also read customer_id from it.
 
 APPROACH 2 (Commented out): @requires_access_token decorator from AgentCore Identity SDK.
   Use this for pure M2M authentication where no user identity is needed in the token.
@@ -16,9 +17,10 @@ APPROACH 2 (Commented out): @requires_access_token decorator from AgentCore Iden
 
 To switch to Approach 2:
   1. Uncomment the decorator-based _fetch_gateway_token() below
-  2. Comment out the Approach 1 create_gateway_mcp_client(user_id)
-  3. Uncomment the Approach 2 create_gateway_mcp_client() (no user_id param)
-  4. Update callers to not pass user_id
+  2. Comment out the Approach 1 create_gateway_mcp_client(access_token)
+  3. Uncomment the Approach 2 create_gateway_mcp_client() (no access_token param)
+  4. Update callers to not fetch or pass the token (the token then carries no
+     customer_id claim)
   5. Verify GATEWAY_CREDENTIAL_PROVIDER_NAME env var is set in the CDK Runtime config
      (already configured in backend-stack.ts)
 """
@@ -28,7 +30,6 @@ import os
 
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp import MCPClient
-from utils.auth import get_gateway_access_token
 from utils.ssm import get_ssm_parameter
 
 logger = logging.getLogger(__name__)
@@ -37,19 +38,23 @@ logger = logging.getLogger(__name__)
 # ========================================
 # APPROACH 1 (Active): Direct Cognito call with user identity
 # ========================================
-def create_gateway_mcp_client(user_id: str) -> MCPClient:
+def create_gateway_mcp_client(access_token: str) -> MCPClient:
     """Create MCP client for AgentCore Gateway with user identity propagation.
 
-    The user_id is passed to get_gateway_access_token() which includes it as
-    aws_client_metadata[verified_user_id] in the Cognito token request. The V3
-    Pre-Token Lambda reads this to inject user-specific claims into the M2M token,
-    enabling Cedar policy evaluation at the Gateway.
+    The access_token comes from get_gateway_access_token(user_id), which passes
+    the user_id as aws_client_metadata[verified_user_id] in the Cognito token
+    request. The V3 Pre-Token Lambda reads this to inject user-specific claims
+    (including customer_id) into the M2M token, enabling Cedar policy evaluation
+    at the Gateway.
 
-    The token fetch is called INSIDE the lambda factory to ensure a fresh token
-    on every MCP reconnection, preventing stale token errors.
+    The caller fetches the token once per request and reuses it here, so the
+    customer_id the agent passes to tools comes from the same token the Gateway
+    checks. The agent is rebuilt on every invocation and a Cognito M2M token
+    outlives one invocation, so reconnections within a request don't see a
+    stale token.
 
     Args:
-        user_id (str): The authenticated user's ID for identity propagation.
+        access_token (str): The Gateway access token for this request.
     """
     stack_name = os.environ.get("STACK_NAME")
     if not stack_name:
@@ -63,7 +68,7 @@ def create_gateway_mcp_client(user_id: str) -> MCPClient:
     return MCPClient(
         lambda: streamablehttp_client(
             url=gateway_url,
-            headers={"Authorization": f"Bearer {get_gateway_access_token(user_id)}"},
+            headers={"Authorization": f"Bearer {access_token}"},
         ),
         prefix="gateway",
     )

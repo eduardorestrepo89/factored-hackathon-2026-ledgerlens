@@ -44,8 +44,6 @@ python scripts/deploy-frontend.py
 
 See the [deployment guide](docs/DEPLOYMENT.md) for detailed instructions on how to deploy FAST into an AWS account.
 
-> **Terraform alternative:** FAST also supports Terraform for infrastructure deployment. See [`infra-terraform/README.md`](infra-terraform/README.md) for the Terraform deployment guide. We recommend choosing one infrastructure tool and deleting the other directory (`infra-cdk/` or `infra-terraform/`) from your fork to keep things clean.
-
 What comes next? That's up to you, the developer. With your requirements in mind, open up your coding assistant, describe what you'd like to do, and begin. The steering docs in this repository help guide coding assistants with best practices, and encourage them to always refer to the documentation built-in to the repository to make sure you end up building something great.
 
 ## Architecture
@@ -63,7 +61,7 @@ The out-of-the-box architecture is shown above. The diagram illustrates the auth
 - **Frontend**: React with TypeScript, Vite, Tailwind CSS, and shadcn components - infinitely flexible and ready for coding assistants
 - **Agent Providers**: Multiple agent providers supported (Strands, LangGraph, etc.) running within AgentCore Runtime
 - **Authentication**: AWS Cognito User Pool with OAuth support for easy swapping out Cognito
-- **Infrastructure**: CDK deployment with Amplify Hosting for frontend and AgentCore backend ([Terraform also supported](infra-terraform/README.md))
+- **Infrastructure**: CDK deployment with Amplify Hosting for frontend and AgentCore backend
 
 ## Project Structure
 
@@ -106,15 +104,6 @@ fullstack-agentcore-solution-template/
 │   │   ├── feedback/       # Feedback API handler
 │   │   └── zip-packager/   # Runtime ZIP packager
 │   └── config.yaml         # Deployment configuration
-├── infra-terraform/        # Terraform infrastructure (alternative to CDK)
-│   ├── modules/            # Terraform modules
-│   │   ├── amplify-hosting/ # Amplify Hosting module
-│   │   ├── cognito/        # Cognito User Pool module
-│   │   └── backend/        # Backend resources module
-│   ├── scripts/            # Terraform-specific deployment scripts
-│   ├── lambdas/            # Terraform-specific Lambda code
-│   ├── terraform.tfvars.example # Example variable file
-│   └── README.md           # Terraform deployment guide
 ├── patterns/               # Agent pattern implementations
 │   ├── strands-single-agent/ # Basic strands agent pattern
 │   │   ├── basic_agent.py  # Agent implementation

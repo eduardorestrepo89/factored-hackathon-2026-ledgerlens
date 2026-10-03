@@ -2,8 +2,6 @@
 
 This guide walks you through deploying the Fullstack AgentCore Solution Template (FAST) to AWS.
 
-> **Terraform alternative:** This guide covers CDK deployment. FAST also supports Terraform -- see the [Terraform Deployment Guide](TERRAFORM_DEPLOYMENT.md) for the Terraform deployment guide. We recommend choosing one infrastructure tool and deleting the other directory (`infra-cdk/` or `infra-terraform/`) from your fork to keep things clean.
-
 ## Prerequisites
 
 > **Note:** If you prefer not to install local tooling, see [Option B: Deploy via CodeBuild](#option-b-deploy-via-codebuild) — requires only Python 3.11+ and AWS CLI.
