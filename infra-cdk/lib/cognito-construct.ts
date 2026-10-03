@@ -140,10 +140,10 @@ export class CognitoConstruct extends Construct {
       timeout: cdk.Duration.seconds(30),
       description: "V3 Pre-Token Lambda for M2M user identity propagation",
       environment: {
-        // Cognito sub -> LedgerLens customer_id, as a JSON string. Deployed as a
-        // blank template; replace the placeholders with the demo users' real subs
-        // and customer ids after deploy. See docs/LEDGERLENS_PRODUCT_DESIGN.md §5.2.
-        USER_CUSTOMER_IDS_MAP: '{"xxxxxxxxx" : "CLI-xxxxxxxxxx", "yyyyyyyy" : "CLI-yyyyyyyy"}',
+        // Cognito sub -> LedgerLens customer_id, as a JSON string. The v1 demo login
+        // (demo@ledgerlens.example) defaults to persona P03; switch personas in the
+        // Lambda console (README, "LedgerLens Agent (v1)"). A redeploy resets it here.
+        USER_CUSTOMER_IDS_MAP: '{"44b8f4a8-60d1-70bc-daa4-b5edd9e3270b": "CLI-70U0WJ1NH1MN"}',
       },
       logGroup: new logs.LogGroup(this, "PreTokenLambdaLogGroup", {
         logGroupName: `/aws/lambda/${config.stack_name_base}-pretoken-v3`,
