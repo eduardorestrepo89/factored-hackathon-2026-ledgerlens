@@ -435,3 +435,28 @@ The plan verifies V1–V3 first, on the deployed agent, before building on them.
 | `docs/LEDGERLENS_PRODUCT_DESIGN.md` | §6 fixes |
 | `README.md` | "Demo login" section (§5) |
 | `docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md` | This spec; smoke-test results in §8 |
+
+---
+
+## 11. Deferred: a shared psycopg layer, for the next tool redeploy
+
+This is **not part of v1**, because v1 doesn't redeploy the data stack. Do it the next time the three tool Lambdas are redeployed for another reason, such as decline reasons.
+
+**Why:** each tool bundles `psycopg[binary]` itself: about 7.7 MB per function, 23 MB in all, built three times. With a shared layer the dependency is built and uploaded once, and each function's zip holds only its code. Nothing changes for users, and cold starts stay about the same.
+
+**Design** (researched 2026-10-03):
+- **The layer:** one `PythonLayerVersion` (`@aws-cdk/aws-lambda-python-alpha`, already installed) in `data-construct.ts`, next to the functions.
+  - Its own `requirements.txt` pins `psycopg[binary]==3.3.6`, the latest release and the version the read check already pins.
+  - Set `compatibleRuntimes: [lambda.Runtime.PYTHON_3_13]` and `compatibleArchitectures: [lambda.Architecture.ARM_64]`. The construct bundles for the **first** architecture listed and defaults to x86_64.
+- **The tools:** they drop their `requirements.txt` and add `layers: [psycopgLayer]`. Packages land in `/opt/python`, which the runtime already has on its import path.
+- **The test:** `tests/unit/test_tool_requirements.py` changes to check that the tools bundle nothing and that the layer pins psycopg.
+- **The read-check Lambda is left alone.** Its `aurora-dsql-python-connector[psycopg]` dependency pulls psycopg into its own bundle anyway.
+- **No third-party psycopg layers:** they would run someone else's compiled binary.
+
+**Wheel compatibility:**
+- psycopg-binary 3.3.6's Python 3.13 ARM64 wheel is tagged `manylinux_2_28_aarch64`, which needs glibc 2.28 or newer. The `python3.13` runtime runs on Amazon Linux 2023 with glibc 2.34, so the wheel works.
+- AWS's usual Docker-free recipe, `pip install --platform manylinux2014_aarch64 --only-binary=:all:`, finds **no** wheel for this release. A layer built without Docker needs `--platform manylinux_2_28_aarch64`. `PythonLayerVersion` builds inside the ARM64 SAM image instead, so it's unaffected.
+
+**Limits:** 250 MB unzipped per function including its layers, and at most 5 layers per function.
+
+**Check after the redeploy:** invoke each tool directly, as in the curate smoke test (client context `bedrockAgentCoreToolName`), and run Gateway check G2. A wrong layer path breaks all three tools at once.
