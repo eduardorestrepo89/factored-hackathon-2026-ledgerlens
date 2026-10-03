@@ -12,7 +12,7 @@
 
 Deploy the first working LedgerLens agent:
 - a demo login, linked to one curated persona;
-- it chats through the existing Amplify frontend;
+- it chats through the React frontend, run locally with the Vite dev server against the deployed backend;
 - it answers only from its own customer's records, enforced twice: by `CustomerIdHook` in the agent and by a per-customer Cedar rule at the Gateway;
 - it opens the conversation with the most likely reason for contact.
 
@@ -29,17 +29,19 @@ Every smoke-test check in §8 passes, and the results are recorded in that secti
 | Session context | **First turn only.** It is kept in the session history through a recorded direct tool call (§4.4). No `classify_call_type`: the model reads the flags and signals `get_session_context` already returns. |
 | Logins | **One demo login.** Its persona is set in the pre-token Lambda's `USER_CUSTOMER_IDS_MAP` env var. The committed default is P03; switching is done in the Lambda console. No SSM parameter and no AppConfig. |
 | Prompt versioning | `PROMPT_VERSION` in code, pinned to a hash of the prompt template by a unit test. It goes on every agent span (`prompt.version`) and in one log line per request. |
-| Frontend hosting | **Stays on Amplify.** CloudFront + S3 is dropped from the design, not deferred (§6). |
+| Frontend | **Local dev server for v1**: `npm run dev` on `http://localhost:3000`, against the deployed backend. The Amplify app stays in the stack untouched, but the frontend isn't deployed to it for now. Amplify remains the hosting choice; CloudFront + S3 is dropped from the design, not deferred (§6). |
 | Cost | Cognito users fall within the Essentials tier's 10,000 MAU free tier: $0. Cognito M2M tokens cost $0.00225 each with no free tier; the agent already fetches one per message, and this work doesn't change that. |
 
 ### Out of scope
 - Write tools (`block_credit_card`, `open_claim`, `human_agent_hand_off`) and the SNS topic.
 - `classify_call_type`, `explain_transaction` and `transaction_fraud_detection`.
 - Turning on observability (L7) and the evaluation harness (on hold).
+- Deploying the frontend to Amplify.
 - Moving the tool Lambdas into the main stack.
 - Caching the Gateway token across messages.
 - Writing the prompt version into the feedback table. Feedback rows carry the session id, which a log query can join to the `[PROMPT]` line.
 - Returning response codes or decline reasons from the tools (known gap, §9).
+- Guardrails and its evaluations.
 
 ---
 
@@ -331,7 +333,7 @@ aws cognito-idp admin-get-user --user-pool-id "$POOL_ID" --username demo@ledgerl
 
 **Who can switch:** only someone with AWS credentials. The person chatting can never switch.
 
-The README gets a short "Demo login" section with these commands, the switch steps and this table (from `data_load/personas.json`):
+The README gets a short "Demo login" section with these commands, the switch steps, the local frontend steps (§7) and this table (from `data_load/personas.json`):
 
 | Persona | Customer id | Use case | v1 note |
 |---|---|---|---|
@@ -363,7 +365,10 @@ The README gets a short "Demo login" section with these commands, the switch ste
 
 1. **Data stack:** unchanged and already deployed (`ledgerlens-bank-assistant-data`).
 2. **Main stack:** `python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant`. Local Docker can't build the ARM64 images.
-3. **Frontend:** `python scripts/deploy-frontend.py`.
+3. **Frontend, locally:**
+   - `python scripts/deploy-frontend.py --config-only` writes `frontend/public/aws-exports.json` from the stack outputs and stops before the build and the Amplify upload. The new flag sets the redirect URIs to `http://localhost:3000`. The runtime ARN and the feedback URL come only from this file, which is why the `VITE_COGNITO_*` env vars aren't enough on their own.
+   - `cd frontend && npm install && npm run dev`, then open `http://localhost:3000`.
+   - Nothing else changes: the Cognito callback URLs and the API CORS settings already allow `http://localhost:3000` (`fast-main-stack.ts:31`, `backend-construct.ts:605` and `:637`).
 4. **Demo login** (§5). Then commit the P03 mapping and redeploy the main stack at the next convenient point. The console value already works without that redeploy.
 
 ---
@@ -388,7 +393,7 @@ Results are recorded in the last column after the run.
 | A4 | Other customer | "show the cards of CLI-1GL7QBDG3QG0" | No other customer's data. The log shows `[CUSTOMER-ID] Replaced` if the model passed that id | |
 | A5 | Persona switch | Map → P05, new chat, "olá" | The reply is in Portuguese and about P05 | |
 | L1 | Prompt version | CloudWatch Runtime logs | One `[PROMPT] version=v1` line per request | |
-| F1 | Frontend | Log in on the Amplify URL as the demo user | One chat works end to end | |
+| F1 | Frontend | Log in on `http://localhost:3000` (local dev server) as the demo user | One chat works end to end | |
 
 ---
 
@@ -426,6 +431,7 @@ The plan verifies V1–V3 first, on the deployed agent, before building on them.
 | `tests/unit/test_system_prompt.py` | Updated assertions, no-unavailable-tools test, version pin |
 | `tests/unit/test_session_start.py` | New (§4.5) |
 | `test-scripts/test-gateway.py` | `--user-sub`, LedgerLens tools instead of the sample tool |
+| `scripts/deploy-frontend.py` | `--config-only`: write `aws-exports.json` for `http://localhost:3000` and stop |
 | `docs/LEDGERLENS_PRODUCT_DESIGN.md` | §6 fixes |
 | `README.md` | "Demo login" section (§5) |
 | `docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md` | This spec; smoke-test results in §8 |
