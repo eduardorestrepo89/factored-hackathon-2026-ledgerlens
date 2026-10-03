@@ -29,7 +29,9 @@ def run(con, sql_file):
     for stmt in [s for s in Path(sql_file).read_text(encoding="utf-8").split(";\n") if s.strip()]:
         print("\n#####", stmt.strip().splitlines()[0])
         try:
-            con.sql(stmt).show(max_rows=60, max_width=250)
+            rel = con.sql(stmt)  # None for DDL such as CREATE TEMP TABLE
+            if rel is not None:
+                rel.show(max_rows=60, max_width=250)
         except duckdb.Error as e:  # keep going: one bad query shouldn't hide the rest
             print("ERROR:", e)
 
