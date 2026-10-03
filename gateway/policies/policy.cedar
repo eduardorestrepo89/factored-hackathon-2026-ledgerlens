@@ -41,13 +41,19 @@ permit(
 when { principal.hasTag("customer_id") && principal.getTag("customer_id") != "" };
 
 // 2) No call may be about a different customer than the one in the token.
+//    The actions are listed: AgentCore rejects a forbid over all actions as
+//    "Overly Restrictive", because it would also cover tools that don't exist yet.
+//    Every listed tool requires customer_id, so no `has` guards are needed.
 forbid(
   principal is AgentCore::OAuthUser,
-  action,
+  action in [
+    AgentCore::Action::"list-credit-cards-target___list_credit_cards",
+    AgentCore::Action::"list-card-transactions-target___list_card_transactions",
+    AgentCore::Action::"get-session-context-target___get_session_context"
+  ],
   resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
 )
 when {
-  context has input && context.input has customer_id &&
   principal.hasTag("customer_id") &&
   context.input.customer_id != principal.getTag("customer_id")
 };
