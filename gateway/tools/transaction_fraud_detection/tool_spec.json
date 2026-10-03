@@ -1,0 +1,15 @@
+[
+  {
+    "name": "transaction_fraud_detection",
+    "description": "Checks whether a credit-card charge is fraud, using the bank's fraud engine. Give exactly one of transaction_id (checks that charge) or card_last4 (checks every charge on that card in the last 30 days and returns only the flagged ones, with 'checked' = how many were looked at). Each assessment has a verdict: 'fraud' (confirm with the customer, then block the card and open a fraud claim), 'review' (ask whether they recognize the charge; if not, offer to open a case for clarification and dispute) or 'no_fraud'. 'next_step' says what to offer. basis 'not_scored' means the engine produced no score for that charge; it isn't proof the charge is genuine. Never tell the customer a score: none is returned. Amounts are strings with 2 decimals in the charge's currency.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": { "type": "string", "description": "The authenticated customer's ID from SESSION CONTEXT." },
+        "transaction_id": { "type": "string", "description": "One charge to check, e.g. TRX-23BIJAU4GL46ATPW9STY. Leave out when giving card_last4." },
+        "card_last4": { "type": "string", "description": "Last 4 digits of one of the customer's credit cards, to sweep its last 30 days. Leave out when giving transaction_id." }
+      },
+      "required": ["customer_id"]
+    }
+  }
+]

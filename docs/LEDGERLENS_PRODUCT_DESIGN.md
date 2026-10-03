@@ -498,104 +498,165 @@ ORDER BY t.transaction_id, t.transaction_date DESC
 
 ### 7.5 `explain_transaction` (A2)
 
-**Purpose:** everything needed to explain one charge, in a single call.
+**Purpose:** everything needed to explain one credit-card charge, in a single call. It explains; it never judges fraud (that is §7.6).
 
-**tool_spec description:** "Explains one transaction: merchant, original and converted amount with that day's exchange rate, decline reason, location and channel, how usual it is for this customer, and whether the customer's app was active elsewhere around the same time. Use when the customer asks about a specific charge."
+**Spec:** [2026-10-03-explain-transaction-lambda-design.md](superpowers/specs/2026-10-03-explain-transaction-lambda-design.md)
+
+**tool_spec description:** "Explains one credit-card charge so you can tell the customer what it is: the charge (merchant, amount, channel, place, status); 'fx' when it was in another currency (sell rate on that day and the amount in the card's currency, rate null if the bank has no rate for that day); 'decline' for declined charges (response code, its meaning, and contradicts_card_state = true when the code says expired but the card wasn't); 'habit' over the card's 90 days before the charge (how many approved charges, visits to this merchant, usual amount range, whether the country was seen before); 'app_activity': the customer's app or web session closest to the charge within 2 hours, with conflict = true when it was in another country during an in-person charge. App activity is usually not found; that's normal, not a sign of anything. This tool doesn't judge fraud: use transaction_fraud_detection for that. A null section couldn't be loaded and is named in 'unavailable'. Amounts are strings with 2 decimals."
 
 **Input:** `customer_id`, `transaction_id`
 
-**Output (shape)**
+**Output** (P07's charge; amounts are 2-decimal strings)
 ```json
 {
-  "transaction": { "id": "TX-77", "ts": "2026-03-14T03:12:00", "merchant": "AMZN MKTP US", "merchant_hint": "Amazon Marketplace", "amount": 99.00, "currency": "USD", "status": "Approved", "channel": "Online", "city": "Seattle", "country": "US", "card_last4": "4821" },
-  "fx": { "card_currency": "COP", "rate": 4161.62, "rate_date": "2026-03-14", "amount_in_card_currency": 412000.38 },
+  "transaction": {
+    "transaction_id": "TRX-23BIJAU4GL46ATPW9STY",
+    "transaction_date": "2026-05-31T06:09:15",
+    "card_last4": "4497",
+    "merchant_name": "Estación de Servicio",
+    "merchant_category": "Transport",
+    "amount": "288.69",
+    "currency": "USD",
+    "channel": "Web",
+    "transaction_city": "Ciudad de México",
+    "transaction_country": "México",
+    "transaction_status": "Approved"
+  },
+  "fx": null,
   "decline": null,
-  "habit": { "times_at_merchant_90d": 6, "usual_amount_range": [45000.00, 180000.00], "usual_country": true },
-  "location_check": { "app_active_nearby": true, "app_country": "CO", "minutes_apart": 4, "conflict": false }
+  "habit": {
+    "history_count": 1,
+    "times_at_merchant_90d": 0,
+    "usual_amount_range": null,
+    "country_seen_before": true
+  },
+  "app_activity": {
+    "found": false
+  },
+  "unavailable": []
 }
 ```
 
-**Queries (partial)**
+- `fx`, for a charge in another currency than the card's: `card_currency`, `rate_date`, `rate` (the stored `sell_rate`, all its decimals) and `amount_in_card_currency`. `rate` is null when the bank has no rate for that day.
+- `decline`, for `Declined` charges only: `response_code`, `meaning`, `contradicts_card_state`.
+- `habit.usual_amount_range` is `{low, high, currency}` (10th to 90th percentile of same-currency approved charges), or null with fewer than 3 of them.
+- `app_activity` with `found: true` adds `event_date`, `minutes_from_charge` (negative before the charge), `ip_country`, `ip_city` and `conflict`.
+- A section whose query failed is null and named in `unavailable`; only a failure loading the charge itself is an error.
 
-*Transaction + exchange rate (ownership check included):*
+**Decline meanings** (static table in the Lambda)
+
+| `response_code` | Meaning |
+|---|---|
+| 05 | declined by the issuer, no specific reason |
+| 14 | invalid card number |
+| 51 | insufficient available credit |
+| 54 | expired card |
+
+An unknown code keeps the code with a null meaning. `contradicts_card_state` is true for code 54 when the card's expiration date is on or after the charge date (D18: about 12,020 declines), so the agent doesn't tell the customer an unexpired card is expired.
+
+**Queries** (PostgreSQL dialect, psycopg placeholders)
+
+*The charge, its card and that day's rate (ownership check on `customer_id`, credit cards only):*
 ```sql
-SELECT t.*,
+SELECT DISTINCT ON (t.transaction_id)
+       t.transaction_id, t.transaction_date,
+       t.product_id,
        RIGHT(p.product_number, 4) AS card_last4,
        p.currency                 AS card_currency,
-       fx.sell_rate,
-       ROUND(t.amount * fx.sell_rate, 2) AS amount_in_card_ccy
-FROM transactions t
-JOIN products p ON p.product_id = t.product_id
-LEFT JOIN daily_exchange_rates fx
+       p.expiration_date          AS card_expiration_date,
+       t.merchant_name, t.merchant_category, t.amount, t.currency, t.channel,
+       t.transaction_city, t.transaction_country, t.transaction_status, t.response_code,
+       fx.sell_rate               AS fx_sell_rate
+FROM transactions AS t
+JOIN products AS p ON p.product_id = t.product_id
+LEFT JOIN daily_exchange_rates AS fx
        ON fx.date = t.transaction_date::date
       AND fx.source_currency = t.currency
       AND fx.target_currency = p.currency
       AND t.currency <> p.currency
-WHERE t.transaction_id = :transaction_id
-  AND t.customer_id    = :customer_id           -- ownership check
-LIMIT 1;
+WHERE t.transaction_id = %(transaction_id)s
+  AND t.customer_id = %(customer_id)s
+  AND p.product_type = 'Tarjeta Crédito'
+  AND t.transaction_date <= %(as_of)s
+ORDER BY t.transaction_id, t.transaction_date DESC NULLS LAST, p.last_updated DESC NULLS LAST
 ```
 
-*How usual it is (last 90 days, excluding this transaction):*
+*Habit: approved charges on the same card in the 90 days before the charge, excluding the charge:*
 ```sql
-SELECT COUNT(*) FILTER (WHERE merchant_name = :merchant_name)                  AS times_at_merchant_90d,
-       percentile_cont(0.10) WITHIN GROUP (ORDER BY amount)                    AS p10_amount,
-       percentile_cont(0.90) WITHIN GROUP (ORDER BY amount)                    AS p90_amount,
-       BOOL_OR(transaction_country = :transaction_country)                     AS country_seen_before
-FROM transactions
-WHERE customer_id = :customer_id
-  AND product_id  = :product_id
-  AND process_date >= (:tx_date::date - 90)
-  AND transaction_id <> :transaction_id
-  AND transaction_status = 'Approved';
+WITH hist AS (
+    SELECT DISTINCT ON (t.transaction_id)
+           t.transaction_id, t.merchant_name, t.amount, t.currency, t.transaction_country
+    FROM transactions AS t
+    WHERE t.customer_id = %(customer_id)s
+      AND t.product_id = %(product_id)s
+      AND t.transaction_status = 'Approved'
+      AND t.transaction_id <> %(transaction_id)s
+      AND t.process_date >= (%(charge_date)s::date - 91)
+      AND t.transaction_date >= %(charge_date)s - INTERVAL '90 days'
+      AND t.transaction_date <  %(charge_date)s
+    ORDER BY t.transaction_id, t.transaction_date DESC NULLS LAST
+)
+SELECT COUNT(*) AS history_count,
+       CASE WHEN %(merchant_name)s::text IS NULL THEN NULL
+            ELSE COUNT(*) FILTER (WHERE merchant_name = %(merchant_name)s::text) END AS times_at_merchant,
+       COUNT(*) FILTER (WHERE currency = %(currency)s::text) AS same_currency_count,
+       (percentile_cont(0.1) WITHIN GROUP (ORDER BY amount)
+            FILTER (WHERE currency = %(currency)s::text))::numeric AS usual_low,
+       (percentile_cont(0.9) WITHIN GROUP (ORDER BY amount)
+            FILTER (WHERE currency = %(currency)s::text))::numeric AS usual_high,
+       CASE WHEN %(transaction_country)s::text IS NULL THEN NULL
+            ELSE COALESCE(bool_or(
+                lower(translate(btrim(transaction_country), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÑÇáàâãäéèêëíìîïóòôõöúùûüñç', 'AAAAAEEEEIIIIOOOOOUUUUNCaaaaaeeeeiiiiooooouuuunc'))
+                = lower(translate(btrim(%(transaction_country)s::text), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÑÇáàâãäéèêëíìîïóòôõöúùûüñç', 'AAAAAEEEEIIIIOOOOOUUUUNCaaaaaeeeeiiiiooooouuuunc'))), FALSE)
+       END AS country_seen_before
+FROM hist
 ```
 
-*Location check (app activity ±2 hours):*
+*App activity: the closest digital event within ±2 h of the charge; `conflict` only for in-person channels (ATM, POS, Branch) whose country differs from the event's IP country, compared accent- and case-folded:*
 ```sql
-SELECT d.ip_country,
-       d.ip_city,
-       d.event_date,
-       ABS(EXTRACT(EPOCH FROM (d.event_date - t.transaction_date)) / 60)::int AS minutes_apart
-FROM transactions t
-JOIN digital_events d
-  ON d.customer_id  = t.customer_id
- AND d.process_date BETWEEN t.process_date - 1 AND t.process_date + 1
- AND d.event_date   BETWEEN t.transaction_date - INTERVAL '2 hours'
-                        AND t.transaction_date + INTERVAL '2 hours'
-WHERE t.transaction_id = :transaction_id
-  AND t.customer_id    = :customer_id
-  AND d.ip_country IS NOT NULL
-ORDER BY minutes_apart
-LIMIT 5;
--- conflict = the closest event is in a different country from the transaction AND the channel isn't Online
+SELECT e.event_id, e.event_date, e.ip_country, e.ip_city
+FROM digital_events AS e
+WHERE e.customer_id = %(customer_id)s
+  AND e.ip_country IS NOT NULL
+  AND e.process_date BETWEEN (%(charge_date)s::date - 1) AND (%(charge_date)s::date + 1)
+  AND e.event_date BETWEEN %(charge_date)s - INTERVAL '2 hours' AND %(charge_date)s + INTERVAL '2 hours'
+  AND e.event_date <= %(as_of)s
+ORDER BY ABS(EXTRACT(EPOCH FROM (e.event_date - %(charge_date)s))), e.event_id
+LIMIT 1
 ```
 
-**Decline reasons:** `response_code` maps to plain-language text through a static table in the Lambda. For example, `51` means "insufficient available credit" and `54` means "expired card". The actual code set must be confirmed with the data dictionary.
-
-**Merchant descriptors:** the Lambda uses a small dictionary for well-known cryptic descriptors (`AMZN MKTP` → Amazon Marketplace). If there's no match, it returns `merchant_hint: null`, and the prompt tells the agent not to guess.
+App activity is usually not found (D36); that's normal and never feeds a verdict.
 
 ---
 
 ### 7.6 `transaction_fraud_detection` (A2)
 
-**tool_spec description:** "Assesses the fraud risk of one transaction, or of all transactions on a card in the last 72 hours. Returns a risk level (low/medium/high) and plain-language reasons. Never returns raw scores."
+**Spec:** [2026-10-03-transaction-fraud-detection-lambda-design.md](superpowers/specs/2026-10-03-transaction-fraud-detection-lambda-design.md)
 
-**Input:** `customer_id`, and either `transaction_id` or `card_last4`
+**tool_spec description:** "Checks whether a credit-card charge is fraud, using the bank's fraud engine. Give exactly one of transaction_id (checks that charge) or card_last4 (checks every charge on that card in the last 30 days and returns only the flagged ones, with 'checked' = how many were looked at). Each assessment has a verdict: 'fraud' (confirm with the customer, then block the card and open a fraud claim), 'review' (ask whether they recognize the charge; if not, offer to open a case for clarification and dispute) or 'no_fraud'. 'next_step' says what to offer. basis 'not_scored' means the engine produced no score for that charge; it isn't proof the charge is genuine. Never tell the customer a score: none is returned. Amounts are strings with 2 decimals in the charge's currency."
 
-**Output**
+**Input:** `customer_id`, and exactly one of `transaction_id` (one charge) or `card_last4` (sweep of that card's last 30 days). The Lambda checks the "exactly one".
+
+**Output** (one charge)
 ```json
-{ "assessments": [
-  { "transaction_id": "TX-88", "risk_level": "high", "reasons": ["country never used before", "customer's app active in another country 4 minutes earlier", "amount above the customer's usual range"] }
-]}
+{ "mode": "transaction", "assessment": { "transaction_id": "TRX-23BIJAU4GL46ATPW9STY", "transaction_date": "2026-05-31T06:09:15", "card_last4": "4497", "merchant_name": "Estación de Servicio", "amount": "288.69", "currency": "USD", "transaction_status": "Approved", "verdict": "fraud", "basis": "scored", "next_step": "Confirm with the customer, then block the card and open a fraud claim." } }
 ```
 
-**Logic (in the Lambda, from the Q2 flags and the location check)**
+**Output** (card sweep: flagged charges only, plus how many were checked)
+```json
+{ "mode": "card", "card_last4": "4497", "date_from": "2026-05-18T23:59:59", "date_to": "2026-06-17T23:59:59", "checked": 3, "flagged": [ "...same shape as assessment..." ], "truncated": false }
+```
 
-| Condition | Level |
-|---|---|
-| `fraud_score ≥ 0.7` OR (location conflict AND new country) | high |
-| `fraud_score ≥ 0.4` OR two or more of {new country, new merchant, above usual amount} | medium |
-| Otherwise | low |
+**Logic (in the Lambda, from the stored `fraud_score` only)**
+
+| `fraud_score` | Verdict | `basis` |
+|---|---|---|
+| above 50 | fraud | scored |
+| above 30, up to 50 | review | scored |
+| 30 or below | no_fraud | scored |
+| NULL | no_fraud | not_scored |
+
+> `fraud_score` is 0–100 (`numeric(5,2)`), treated as a simulated fraud-engine feed; the bands come from the 2026-10-03 profiling. The earlier 0.7 / 0.4 thresholds assumed a 0–1 scale and were wrong. The location and habit conditions are dropped: the verdict uses the stored score only (user decision, 2026-10-03). The raw score is never returned.
 
 > `transactions.is_fraud` is an **outcome label**, known only after an investigation. It's **never used at runtime**, only for evaluation (section 13).
 

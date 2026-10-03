@@ -1,0 +1,14 @@
+[
+  {
+    "name": "explain_transaction",
+    "description": "Explains one credit-card charge so you can tell the customer what it is: the charge (merchant, amount, channel, place, status); 'fx' when it was in another currency (sell rate on that day and the amount in the card's currency, rate null if the bank has no rate for that day); 'decline' for declined charges (response code, its meaning, and contradicts_card_state = true when the code says expired but the card wasn't); 'habit' over the card's 90 days before the charge (how many approved charges, visits to this merchant, usual amount range, whether the country was seen before); 'app_activity': the customer's app or web session closest to the charge within 2 hours, with conflict = true when it was in another country during an in-person charge. App activity is usually not found; that's normal, not a sign of anything. This tool doesn't judge fraud: use transaction_fraud_detection for that. A null section couldn't be loaded and is named in 'unavailable'. Amounts are strings with 2 decimals.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": { "type": "string", "description": "The authenticated customer's ID from SESSION CONTEXT." },
+        "transaction_id": { "type": "string", "description": "The charge to explain, e.g. TRX-23BIJAU4GL46ATPW9STY." }
+      },
+      "required": ["customer_id", "transaction_id"]
+    }
+  }
+]

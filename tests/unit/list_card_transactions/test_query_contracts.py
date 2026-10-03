@@ -28,10 +28,13 @@ QUERIES_DIR = (
     REPO_ROOT
     / "gateway/tools/list_card_transactions/list_card_transactions_lambda/queries/postgresql"
 )
+SQL_FILE = QUERIES_DIR / "list_card_transactions.sql"
 TOOL_SPEC = REPO_ROOT / "gateway/tools/list_card_transactions/tool_spec.json"
 PLACEHOLDER = re.compile(r"%\((\w+)\)s")
 TRANSLATE = re.compile(r"translate\(([^,]+), '([^']*)', '([^']*)'\)")
 SESSION_STATEMENT = re.compile(r"^\s*SET\b", re.IGNORECASE | re.MULTILINE)
+# Escaped so this test file's own encoding can't change the expected value.
+CREDIT_CARD_FILTER = "p.product_type = 'Tarjeta Cr\u00e9dito'"
 
 # Merchant names in the dataset (transactions.merchant_name categorical values).
 KNOWN_MERCHANTS = (
@@ -113,6 +116,21 @@ def test_sql_orders_null_transaction_dates_last() -> None:
     assert len(order_bys) == 2
     for order_by in order_bys:
         assert "transaction_date DESC NULLS LAST" in order_by
+
+
+def test_sql_reads_only_credit_card_transactions() -> None:
+    # Without it, accounts, loans and debit cards come back under last-4s that
+    # list_credit_cards never shows the agent.
+    assert CREDIT_CARD_FILTER in sql()
+
+
+def test_credit_card_literal_is_nfc_utf8_without_bom() -> None:
+    # A decomposed accent or a BOM would silently match no transactions.
+    raw = SQL_FILE.read_bytes()
+
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    assert CREDIT_CARD_FILTER.encode("utf-8") in raw
+    assert unicodedata.is_normalized("NFC", raw.decode("utf-8"))
 
 
 def strip_accents(text: str) -> str:
