@@ -124,3 +124,44 @@ def test_the_statuses_used_pass_the_products_check_constraint() -> None:
 
     for status in ("'Blocked'", "'Closed'", "'Active'", "'Suspended'"):
         assert status in products
+
+
+def tool_spec() -> dict:
+    """Load the single tool definition from tool_spec.json."""
+    import json
+
+    specs = json.loads((TOOL_ROOT / "tool_spec.json").read_text(encoding="utf-8"))
+    assert isinstance(specs, list) and len(specs) == 1
+    return specs[0]
+
+
+def test_tool_spec_name_inputs_and_required_fields() -> None:
+    from block_credit_card_lambda.application.use_cases.block_credit_card import (
+        REASONS,
+    )
+
+    spec = tool_spec()
+    properties = spec["inputSchema"]["properties"]
+
+    assert spec["name"] == "block_credit_card"
+    assert spec["inputSchema"]["required"] == [
+        "customer_id",
+        "card_last4",
+        "reason",
+        "customer_confirmed",
+    ]
+    assert set(properties) == {
+        "customer_id",
+        "card_last4",
+        "reason",
+        "customer_confirmed",
+    }
+    assert set(properties["reason"]["enum"]) == set(REASONS)
+    assert properties["customer_confirmed"]["type"] == "boolean"
+
+
+def test_tool_spec_description_demands_an_explicit_yes() -> None:
+    description = tool_spec()["description"]
+
+    assert "Only call after the customer explicitly said yes" in description
+    assert "'already_blocked'" in description
