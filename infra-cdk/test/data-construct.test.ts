@@ -8,11 +8,11 @@ const config = {
   data: { as_of: "2026-06-17T23:59:59" },
 } as unknown as AppConfig
 
-function synth(): Template {
-  // skip Docker bundling of the read-check Lambda: these tests read the template only
+function synth(cfg: AppConfig = config): Template {
+  // skip Docker bundling of the Lambdas: these tests read the template only
   const app = new cdk.App({ context: { "aws:cdk:bundling-stacks": [] } })
   const stack = new cdk.Stack(app, "T", { env: { account: "111111111111", region: "us-east-1" } })
-  new DataConstruct(stack, "Data", { config })
+  new DataConstruct(stack, "Data", { config: cfg })
   return Template.fromStack(stack)
 }
 
@@ -62,7 +62,7 @@ test("uses the default VPC, creating no network of its own; the endpoint admits 
 
 test("every Lambda in the VPC runs in the endpoint's subnet", () => {
   const vpcFns = Object.values(t.findResources("AWS::Lambda::Function")).filter((f) => f.Properties.VpcConfig)
-  expect(vpcFns).toHaveLength(6) // the read check and the five tools
+  expect(vpcFns).toHaveLength(9) // the read check and the eight DSQL tools
   for (const fn of vpcFns) expect(fn.Properties.VpcConfig.SubnetIds).toEqual(["s-12345"])
 })
 
@@ -89,6 +89,7 @@ test.each([
   ["get_session_context", "ledgerlens-get-session-context"],
   ["transaction_fraud_detection", "ledgerlens-transaction-fraud-detection"],
   ["explain_transaction", "ledgerlens-explain-transaction"],
+  ["classify_call_type", "ledgerlens-classify-call-type"],
 ])("%s runs in the VPC as the tools role, against the private host as ll_read", (tool, functionName) => {
   const toolsId = logicalId("AWS::IAM::Role", { RoleName: "ledgerlens-tools" })
   t.hasResourceProperties("AWS::Lambda::Function", {
@@ -134,6 +135,7 @@ test("CodeBuild gets the secret's name, never its value; one build at a time", (
         Match.objectLike({ Name: "TEAM_BUCKET" }),
         Match.objectLike({ Name: "DSQL_ENDPOINT" }),
         Match.objectLike({ Name: "TOOLS_ROLE_ARN" }),
+        Match.objectLike({ Name: "WRITE_TOOLS_ROLE_ARN" }),
         { Name: "HACKATHON_SECRET_ID", Type: "PLAINTEXT", Value: "ledgerlens/hackathon-s3" },
       ]),
     }),
@@ -144,4 +146,63 @@ test("CodeBuild gets the secret's name, never its value; one build at a time", (
   const buildSpec = project.Properties.Source.BuildSpec
   expect(buildSpec).toContain('python -m data_load \\"$STAGE\\"')
   expect(buildSpec).toContain("import duckdb, psycopg, aurora_dsql_psycopg, boto3")
+})
+
+test("write tools role can connect to DSQL, never as admin", () => {
+  const writeId = logicalId("AWS::IAM::Role", { RoleName: "ledgerlens-write-tools" })
+  const actions = actionsOf(writeId)
+  expect(actions).toContain("dsql:DbConnect")
+  expect(actions).not.toContain("dsql:DbConnectAdmin")
+})
+
+test.each([
+  ["block_credit_card", "ledgerlens-block-credit-card"],
+  ["open_claim", "ledgerlens-open-claim"],
+])("%s runs in the VPC as the write tools role, against the private host", (tool, functionName) => {
+  const writeId = logicalId("AWS::IAM::Role", { RoleName: "ledgerlens-write-tools" })
+  t.hasResourceProperties("AWS::Lambda::Function", {
+    FunctionName: functionName,
+    Handler: `${tool}_lambda.delivery.handler.handler`,
+    Role: { "Fn::GetAtt": [writeId, "Arn"] },
+    Timeout: 30,
+    VpcConfig: Match.objectLike({ SubnetIds: Match.anyValue() }),
+    Environment: { Variables: { DSQL_CLUSTER_ENDPOINT: Match.anyValue(), AS_OF: "2026-06-17T23:59:59" } },
+  })
+})
+
+test("the read tools keep their construct ids, so the deployed functions are not replaced", () => {
+  for (const [functionName, prefix] of [
+    ["ledgerlens-list-credit-cards", "DataListCreditCardsFn"],
+    ["ledgerlens-list-card-transactions", "DataListCardTransactionsFn"],
+    ["ledgerlens-get-session-context", "DataGetSessionContextFn"],
+  ]) {
+    const ids = Object.keys(t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: functionName } }))
+    expect(ids).toHaveLength(1)
+    expect(ids[0].startsWith(prefix)).toBe(true)
+  }
+})
+
+test("the hand-off topic is encrypted; its Lambda runs outside the VPC and may only publish", () => {
+  const topicId = logicalId("AWS::SNS::Topic", { TopicName: "ledgerlens-human-handoff" })
+  const topic = t.findResources("AWS::SNS::Topic")[topicId]
+  expect(JSON.stringify(topic.Properties.KmsMasterKeyId)).toContain("alias/aws/sns")
+  const fns = Object.values(
+    t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: "ledgerlens-human-agent-hand-off" } })
+  )
+  expect(fns).toHaveLength(1)
+  const fn = fns[0]
+  expect(fn.Properties.VpcConfig).toBeUndefined()
+  expect(fn.Properties.Handler).toBe("human_agent_hand_off_lambda.delivery.handler.handler")
+  expect(fn.Properties.Timeout).toBe(10)
+  expect(fn.Properties.Environment.Variables.HANDOFF_TOPIC_ARN).toEqual({ Ref: topicId })
+  const roleId = fn.Properties.Role["Fn::GetAtt"][0]
+  const actions = actionsOf(roleId)
+  expect(actions).toContain("sns:Publish")
+  expect(actions.filter((a: string) => a.startsWith("dsql:"))).toEqual([])
+})
+
+test("the admin email gets the hand-offs only when it is configured", () => {
+  t.resourceCountIs("AWS::SNS::Subscription", 0)
+  const withEmail = synth({ ...config, admin_user_email: "ops@example.com" } as unknown as AppConfig)
+  withEmail.hasResourceProperties("AWS::SNS::Subscription", { Protocol: "email", Endpoint: "ops@example.com" })
 })

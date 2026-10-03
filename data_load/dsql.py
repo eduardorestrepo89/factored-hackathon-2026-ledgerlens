@@ -1,15 +1,19 @@
-"""Everything that touches Aurora DSQL: tables, the read role and its IAM mapping, bulk load, indexes."""
+"""Everything that touches Aurora DSQL: tables, the tool roles and their IAM mappings, bulk load, indexes."""
 
 import re
 import subprocess
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 
 from data_load.ddl import SchemaPlan
 
 LOADER = "aurora-dsql-loader"
 POLL_SECONDS = 10
-READ_ROLE = "ll_read"
+READ_ROLE = "ll_read"  # the read tools, IAM role ledgerlens-tools
+WRITE_ROLE = (
+    "ll_write"  # block_credit_card and open_claim, IAM role ledgerlens-write-tools
+)
 ROLE_ARN = re.compile(r"arn:aws:iam::\d{12}:role/[\w+=,.@/-]+")
 
 
@@ -33,26 +37,48 @@ def schema_statements(plan: SchemaPlan) -> list[str]:
     ]
 
 
-def apply_schema(conn, plan: SchemaPlan, tools_role_arn: str) -> None:
-    """Tables, then ll_read and its IAM mapping (if missing), then the grants."""
-    if not ROLE_ARN.fullmatch(tools_role_arn):  # it is spliced into AWS IAM GRANT below
-        raise ValueError(f"not an IAM role ARN: {tools_role_arn!r}")
+def apply_schema(conn, plan: SchemaPlan, role_arns: Mapping[str, str]) -> None:
+    """Recreate the tables, then apply_access: the roles, their IAM mappings, the grants."""
+    _check_role_arns(
+        plan, role_arns
+    )  # before the drops: a bad ARN must not cost the tables
     with conn.cursor() as cur:
         for stmt in schema_statements(plan):
             cur.execute(stmt)
+    apply_access(conn, plan, role_arns)
+
+
+def apply_access(conn, plan: SchemaPlan, role_arns: Mapping[str, str]) -> None:
+    """Create missing roles and IAM mappings, then re-run every grant. Drops nothing.
+
+    ``role_arns`` maps every role in schema.sql to the IAM role it is granted to:
+    ll_read -> ledgerlens-tools, ll_write -> ledgerlens-write-tools. The access
+    stage calls this alone, to add a role to a loaded cluster.
+    """
+    _check_role_arns(plan, role_arns)
+    with conn.cursor() as cur:
         cur.execute("SELECT rolname FROM pg_roles")
         existing_roles = {row[0] for row in cur.fetchall()}
         for role, stmt in plan.roles.items():
             if role not in existing_roles:
                 cur.execute(stmt)
-        cur.execute(
-            "SELECT arn FROM sys.iam_pg_role_mappings WHERE pg_role_name = %s",
-            (READ_ROLE,),
-        )
-        if tools_role_arn not in {row[0] for row in cur.fetchall()}:
-            cur.execute(f"AWS IAM GRANT {READ_ROLE} TO '{tools_role_arn}'")
+        for role in plan.roles:
+            cur.execute(
+                "SELECT arn FROM sys.iam_pg_role_mappings WHERE pg_role_name = %s",
+                (role,),
+            )
+            if role_arns[role] not in {row[0] for row in cur.fetchall()}:
+                cur.execute(f"AWS IAM GRANT {role} TO '{role_arns[role]}'")
         for stmt in plan.grants:  # recreated tables lose their grants
             cur.execute(stmt)
+
+
+def _check_role_arns(plan: SchemaPlan, role_arns: Mapping[str, str]) -> None:
+    """Every role needs a well-formed IAM role ARN: it is spliced into AWS IAM GRANT."""
+    for role in plan.roles:
+        arn = role_arns.get(role, "")
+        if not ROLE_ARN.fullmatch(arn):
+            raise ValueError(f"not an IAM role ARN for {role}: {arn!r}")
 
 
 def build_indexes(conn, statements: list[str], sleep=time.sleep) -> None:

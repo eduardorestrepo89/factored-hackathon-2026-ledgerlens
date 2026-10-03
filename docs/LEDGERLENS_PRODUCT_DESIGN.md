@@ -343,89 +343,151 @@ WHERE k.customer_id = :customer_id
 
 ### 7.2 `classify_call_type` (A1, bootstrap)
 
-**Purpose:** rank the 3 most likely reasons for contact, each with evidence and a confidence score. This is the core of A1.
+**Purpose:** rank up to 3 likely reasons for contact, each with a confidence, the record it points to and evidence. This is the core of A1. The reasons are hypotheses for the agent's opening line, not facts.
 
 > The diagram calls this `Classify_call_type`. Tool names use `snake_case` here for consistency.
 
-**tool_spec.json**
+**Spec:** [2026-10-03-classify-call-type-lambda-design.md](superpowers/specs/2026-10-03-classify-call-type-lambda-design.md)
+
+**tool_spec description:** "Ranks up to 3 likely reasons the customer is contacting the bank right now, best first, each with a confidence from 0 to 1, the record it points to (ref_id: a transaction_id, complaint_id, event_id or card last4) and evidence. Reasons: FRAUD_SUSPECTED (the fraud engine flagged an approved charge in the last 30 days), UNRECOGNIZED_CHARGE_REVIEW (a charge the engine wants the customer to confirm), DECLINED_TRANSACTION, PENDING_TRANSACTION and REVERSED_TRANSACTION (last 72 hours), OPEN_CASE_FOLLOWUP, CARD_NOT_ACTIVE (blocked or suspended card), FAILED_APP_ACTION (an app or web error in the last 24 hours), FOREIGN_TRANSACTION (approved charge abroad or in another currency, last 72 hours), PAYMENT_OVERDUE, CARD_EXPIRING (within 30 days). These are hypotheses to open the conversation with, not facts: confirm with the customer. An empty list means nothing stands out; ask how you can help. 'unavailable' names reasons that couldn't be checked. Call it at the start of the conversation."
+
+**Input:** `customer_id`. The tool isn't called automatically at session start yet; until that follow-up ships, the agent calls it at the start of the conversation.
+
+**Output** (P07's flagged charge; `confidence` is a number with 2 decimals, amounts are 2-decimal strings)
 ```json
 {
-  "name": "classify_call_type",
-  "description": "Ranks the 3 most likely reasons the customer is contacting the bank right now, each with evidence and a confidence from 0 to 1. Already called automatically at session start.",
-  "inputSchema": {
-    "type": "object",
-    "properties": { "customer_id": { "type": "string" } },
-    "required": ["customer_id"]
-  }
+  "reasons": [
+    {
+      "reason": "FRAUD_SUSPECTED",
+      "confidence": 0.77,
+      "ref_id": "TRX-23BIJAU4GL46ATPW9STY",
+      "evidence": {
+        "transaction_date": "2026-05-31T06:09:15",
+        "card_last4": "4497",
+        "merchant_name": "Estación de Servicio",
+        "amount": "288.69",
+        "currency": "USD",
+        "transaction_status": "Approved"
+      }
+    }
+  ],
+  "unavailable": []
 }
 ```
 
-**Output**
-```json
-{ "reasons": [
-  { "reason": "DECLINED_TRANSACTION", "confidence": 0.85, "ref_id": "TX-1", "evidence": "350000.00 COP at EXITO declined (code 51)" },
-  { "reason": "OPEN_CASE_FOLLOWUP",   "confidence": 0.58, "ref_id": "C-1182", "evidence": "Claim: Cards / Unrecognised charge (In progress)" }
-]}
+- `evidence` is a structured object whose keys depend on the reason (`DECLINED_TRANSACTION` adds `response_code`; `FOREIGN_TRANSACTION` adds `transaction_country`, `home_country` and `card_currency`; `CARD_EXPIRING` has `days_left`). The agent words it in the customer's language.
+- `unavailable` names the reasons whose query failed; the other reasons are still ranked. Only a failure of all four queries is an error.
+- No key in the output contains `fraud` or `score`. The stored `fraud_score` only picks the band and never leaves the Lambda; `is_fraud` is never read (DEC-10).
+
+**Reason taxonomy** (credit cards only; the order is the final tie-break)
+
+| Reason | Signal | Window | Weight | Decay | `ref_id` |
+|---|---|---|---:|---|---|
+| `FRAUD_SUSPECTED` | `Approved` and `fraud_score > 50` | 30 days | 95 | per day | `transaction_id` |
+| `DECLINED_TRANSACTION` | `Declined` | 72 hours | 85 | per hour | `transaction_id` |
+| `UNRECOGNIZED_CHARGE_REVIEW` | `Approved` and `30 < fraud_score <= 50` | 30 days | 70 | per day | `transaction_id` |
+| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if `sla_breached`, else 60 (NULL counts as false) | none | `complaint_id` |
+| `PENDING_TRANSACTION` | `Pending` | 72 hours | 65 | per hour | `transaction_id` |
+| `REVERSED_TRANSACTION` | `Reversed` | 72 hours | 65 | per hour | `transaction_id` |
+| `CARD_NOT_ACTIVE` | `product_status` in {`Blocked`, `Suspended`} | state | 60 | none | `card_last4` |
+| `FAILED_APP_ACTION` | Digital event with `event_type = 'Error'` | 24 hours | 60 | per hour | `event_id` |
+| `FOREIGN_TRANSACTION` | `Approved`, and the country differs from the home country (accent- and case-folded) or the currency differs from the card's | 72 hours | 55 | per hour | `transaction_id` |
+| `PAYMENT_OVERDUE` | `Active` card with `days_past_due > 0` | state | 50 | none | `card_last4` |
+| `CARD_EXPIRING` | `Active` card expiring within 30 days of `as_of` | state | 35 | none | `card_last4` |
+
+Score = weight minus 1 point per hour (72 h and 24 h reasons) or per day (30-day reasons) since the event, never below 40% of the weight; state reasons and cases don't decay. Confidence = score / 100, rounded half up to 2 decimals. Each reason keeps its best event (highest score, then newest, then lowest `ref_id`). Reasons rank by unrounded score, then weight, then the order above, and the top 3 are kept. One charge can be several reasons. A `Closed` card is no reason. The fraud reasons need `Approved`: a declined charge is `DECLINED_TRANSACTION`.
+
+**Queries** (PostgreSQL dialect, psycopg placeholders). The SQL only fetches candidates; the rules, weights and ranking live in the Lambda, and a failed query only makes its own reasons unavailable.
+
+*Charges: the last 72 hours, plus approved charges of the last 30 days scored above the review band:*
+```sql
+WITH tx_dedup AS (
+    SELECT DISTINCT ON (t.transaction_id)
+           t.transaction_id, t.transaction_date,
+           RIGHT(p.product_number, 4) AS card_last4,
+           p.currency                 AS card_currency,
+           t.merchant_name, t.amount, t.currency, t.transaction_status,
+           t.response_code, t.transaction_country, t.fraud_score
+    FROM transactions AS t
+    JOIN products AS p ON p.product_id = t.product_id
+    WHERE t.customer_id = %(customer_id)s
+      AND p.product_type = 'Tarjeta Crédito'
+      AND t.process_date >= (%(as_of)s::date - 31)
+      AND t.transaction_date >= %(as_of)s - INTERVAL '30 days'
+      AND t.transaction_date <= %(as_of)s
+    ORDER BY t.transaction_id, t.transaction_date DESC NULLS LAST
+),
+home AS (
+    SELECT c.country FROM customers AS c
+    WHERE c.customer_id = %(customer_id)s
+    ORDER BY c.last_updated DESC NULLS LAST
+    LIMIT 1
+)
+SELECT x.*, h.country AS home_country
+FROM tx_dedup AS x
+LEFT JOIN home AS h ON TRUE
+WHERE x.transaction_date >= %(as_of)s - INTERVAL '72 hours'
+   OR (x.transaction_status = 'Approved' AND x.fraud_score > %(review_above)s::numeric)
+ORDER BY x.transaction_date DESC NULLS LAST, x.transaction_id
+LIMIT %(limit)s
 ```
 
-**Reason taxonomy**
-
-| Reason | Signal | Base weight |
-|---|---|---|
-| `FRAUD_SUSPECTED` | `fraud_score ≥ 0.7`, or a transaction in a country not seen in the last 90 days | 95 |
-| `DECLINED_TRANSACTION` | `transaction_status <> 'Approved'` in the last 72 hours | 85 |
-| `TRANSACTION_DISPUTE` / `CARD_BLOCK_REQUEST` | Dispute or block pages visited in the last 24 hours | 80 |
-| `OPEN_CASE_FOLLOWUP` | Open complaint (75 if the SLA is breached, otherwise 60) | 60–75 |
-| `FX_CLARIFICATION` | Approved charge in a currency different from the card's | 55 |
-| `PAYMENT_OVERDUE` | `days_past_due > 0` | 50 |
-| `CARD_EXPIRING` | `expiration_date` within 30 days | 35 |
-
-Score = base weight − 1 point per hour since the event, but never below 40% of the base weight. Confidence = score / 100.
-
-**Query (partial: 3 of the 7 signals shown, the rest follow the same pattern)**
+*Credit cards at their latest state:*
 ```sql
--- WITH tx_dedup, recent, hist, home  (section 8.1)
-, signals AS (
-  SELECT 'FRAUD_SUSPECTED' AS reason,
-         95 AS base,
-         r.transaction_date AS event_ts,
-         r.transaction_id AS ref_id,
-         format('%s %s at %s (%s)', r.amount, r.currency, r.merchant_name, r.transaction_country) AS evidence
-  FROM recent r, home h
-  WHERE r.fraud_score >= 0.7
-     OR (r.transaction_country <> h.country
-         AND NOT EXISTS (SELECT 1 FROM hist x WHERE x.transaction_country = r.transaction_country))
+SELECT deduplicated.card_last4,
+       deduplicated.product_status,
+       deduplicated.expiration_date,
+       deduplicated.days_past_due
+FROM (
+    SELECT DISTINCT ON (p.product_id)
+           p.product_id,
+           RIGHT(p.product_number, 4)  AS card_last4,
+           p.product_status,
+           p.expiration_date,
+           p.days_past_due
+    FROM products AS p
+    WHERE p.customer_id = %(customer_id)s
+      AND p.product_type = 'Tarjeta Crédito'
+    ORDER BY p.product_id, p.last_updated DESC NULLS LAST
+) AS deduplicated
+ORDER BY deduplicated.card_last4, deduplicated.product_id
+```
 
-  UNION ALL
-  SELECT 'DECLINED_TRANSACTION', 85, r.transaction_date, r.transaction_id,
-         format('%s %s at %s declined (code %s)', r.amount, r.currency, r.merchant_name, r.response_code)
-  FROM recent r
-  WHERE r.transaction_status <> 'Approved'
+*Cases open at `as_of`:*
+```sql
+SELECT deduplicated.complaint_id,
+       deduplicated.case_type,
+       deduplicated.category,
+       deduplicated.subcategory,
+       deduplicated.status,
+       deduplicated.sla_breached,
+       deduplicated.creation_date,
+       (%(as_of)s::date - deduplicated.creation_date::date) AS days_open
+FROM (
+    SELECT DISTINCT ON (k.complaint_id) k.*
+    FROM complaints AS k
+    WHERE k.customer_id = %(customer_id)s
+      AND k.creation_date <= %(as_of)s
+      AND (k.closing_date > %(as_of)s
+           OR (k.closing_date IS NULL AND k.status NOT IN ('Resolved', 'Closed')))
+    ORDER BY k.complaint_id, k.process_date DESC NULLS LAST
+) AS deduplicated
+ORDER BY deduplicated.sla_breached DESC NULLS LAST,
+         deduplicated.creation_date DESC NULLS LAST,
+         deduplicated.complaint_id
+```
 
-  UNION ALL
-  SELECT 'OPEN_CASE_FOLLOWUP',
-         CASE WHEN c.sla_breached THEN 75 ELSE 60 END,
-         COALESCE(c.first_response_date, c.creation_date),
-         c.complaint_id,
-         format('%s: %s / %s (%s)', c.case_type, c.category, c.subcategory, c.status)
-  FROM complaints c
-  WHERE c.customer_id = :customer_id
-    AND c.closing_date IS NULL
-    AND c.status NOT IN ('Closed','Resolved')
-
-  -- UNION ALL  TRANSACTION_DISPUTE / CARD_BLOCK_REQUEST  (digital_events, last 24 hours)
-  -- UNION ALL  FX_CLARIFICATION                          (recent JOIN products, currencies differ)
-  -- UNION ALL  PAYMENT_OVERDUE / CARD_EXPIRING           (products)
-),
-scored AS (
-  SELECT *,
-         GREATEST(base * 0.4, base - EXTRACT(EPOCH FROM (:as_of - event_ts)) / 3600.0) AS score
-  FROM signals
-)
-SELECT reason, ref_id, evidence, ROUND(score / 100.0, 2) AS confidence
-FROM (SELECT DISTINCT ON (reason) * FROM scored ORDER BY reason, score DESC) best
-ORDER BY score DESC
-LIMIT 3;
+*App errors of the last 24 hours:*
+```sql
+SELECT e.event_id, e.event_date, e.page_title, e.action
+FROM digital_events AS e
+WHERE e.customer_id = %(customer_id)s
+  AND e.event_type = 'Error'
+  AND e.process_date >= (%(as_of)s::date - 1)
+  AND e.event_date >  %(as_of)s - INTERVAL '24 hours'
+  AND e.event_date <= %(as_of)s
+ORDER BY e.event_date DESC NULLS LAST, e.event_id
+LIMIT 50
 ```
 
 ---
@@ -664,6 +726,8 @@ App activity is usually not found (D36); that's normal and never feeds a verdict
 
 ### 7.7 `block_credit_card` (A2, **changes data**)
 
+Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tools-design.md) §3. The Lambda is deployed by the data stack; its Gateway target and Cedar statement 3 come later (spec §10).
+
 **tool_spec.json**
 ```json
 {
@@ -703,13 +767,15 @@ RETURNING product_id, RIGHT(product_number, 4) AS last4, product_status;
 
 ### 7.8 `open_claim` (A2, **changes data**)
 
+Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tools-design.md) §4. One claim per card and currency, with an id derived from its content, so the same claim can't be opened twice.
+
 **tool_spec description:** "Opens a dispute or fraud claim for one or more of the customer's transactions. Only call after the customer confirmed they don't recognise the transactions. Returns the claim ID and the typical resolution time for this type of claim."
 
 **Input:** `customer_id`, `transaction_ids[]`, `claim_type` (`fraud` | `dispute`), `customer_confirmed`, `customer_statement` (short text)
 
 **Queries**
 
-*Insert the claim (one row per claim; the transaction IDs go in the description until a link table exists). The transactions are de-duplicated first, and all disputed charges must be in the same currency. If they aren't, the Lambda opens one claim per currency.*
+*Insert the claim (one row per claim; the transaction IDs go in the description until a link table exists). The transactions are de-duplicated first, and all disputed charges must be in the same currency. The Lambda opens one claim per card and currency.*
 ```sql
 WITH t AS (
   SELECT DISTINCT ON (transaction_id) *
@@ -722,8 +788,8 @@ INSERT INTO complaints (complaint_id, creation_date, process_date, customer_id, 
                         reception_channel, affected_product_id, description, claimed_amount, currency,
                         priority, status, sla_breached, is_repeat_complainer)
 SELECT :new_complaint_id, now(), now()::date, :customer_id,
-       'Claim', 'Cards', CASE WHEN :claim_type = 'fraud' THEN 'Unrecognised transaction' ELSE 'Disputed charge' END,
-       'AI Assistant', MIN(t.product_id), :customer_statement || ' | tx: ' || string_agg(t.transaction_id, ','),
+       'Claim', 'Transactions', CASE WHEN :claim_type = 'fraud' THEN 'Cargo no reconocido' ELSE 'Cobro indebido' END,
+       'Web', MIN(t.product_id), :customer_statement || ' | tx: ' || string_agg(t.transaction_id, ','),
        SUM(t.amount), MIN(t.currency),
        CASE WHEN SUM(t.amount_usd) > 500 THEN 'High' ELSE 'Medium' END,
        'Open', false, false
@@ -739,7 +805,7 @@ SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY resolution_days) AS median_da
        percentile_cont(0.9) WITHIN GROUP (ORDER BY resolution_days) AS p90_days,
        COUNT(*) AS cases
 FROM complaints
-WHERE category = 'Cards'
+WHERE category = 'Transactions'
   AND subcategory = :subcategory
   AND resolution_days IS NOT NULL
   AND creation_date >= :as_of - INTERVAL '12 months'
@@ -750,6 +816,8 @@ HAVING COUNT(*) >= 20;             -- no estimate from too few cases
 ---
 
 ### 7.9 `human_agent_hand_off` (A2 + fallback)
+
+Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tools-design.md) §5. SNS only; the Lambda runs outside the VPC.
 
 **tool_spec description:** "Transfers the conversation to a human agent. Use when the customer asks for a person, after a confirmed fraud case, or when you can't resolve the request. Include a complete summary so the customer doesn't have to repeat anything."
 
@@ -766,7 +834,7 @@ HAVING COUNT(*) >= 20;             -- no estimate from too few cases
 
 **Behavior**
 - Publishes the payload to the SNS topic `ledgerlens-human-handoff`. Subscribers can be email or SMS for the demo, or a contact-center queue later.
-- Optionally inserts a `call_center_interactions` row (`channel = 'AI Assistant'`, `was_escalated = true`) so the hand-off is counted in reporting.
+- No `call_center_interactions` row: that table has no column for the summary.
 
 ---
 
@@ -1028,10 +1096,10 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 **Infrastructure (`infra-cdk/`)**
 - [ ] Create an Aurora DSQL cluster. No VPC, DB secret or RDS Proxy is needed: the tools reach the cluster endpoint over TLS with IAM tokens. Add a PrivateLink endpoint only if traffic must stay private.
-- [ ] Create the SNS topic `ledgerlens-human-handoff`.
+- [x] Create the SNS topic `ledgerlens-human-handoff` (data stack).
 - [ ] Create 9 tool Lambdas (Python 3.13, ARM64), each with `gateway/tools/<tool>/tool_spec.json`. Set `DB_ENGINE=aurora_dsql`, `DSQL_CLUSTER_ENDPOINT` and `DSQL_DB_USER`. Keep the Lambda timeout well under the agent's tool timeout, because DSQL has no per-query timeout.
 - [x] Call `gateway.addLambdaTarget(...)` once per tool, replacing `sample-tool-target`. Done for the three read tools, imported from the data stack by name.
-- [ ] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`), publish to SNS (hand-off only).
+- [x] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`). The read tools use `ledgerlens-tools` (DSQL role `ll_read`); `block_credit_card` and `open_claim` use `ledgerlens-write-tools` (`ll_write`); only the hand-off role may publish to SNS.
 - [x] Pre-token Lambda: look up `customer_id` in `USER_CUSTOMER_IDS_MAP` and add it as a claim (blank when not found).
 - [x] Pre-token Lambda CDK (`cognito-construct.ts`): set `USER_CUSTOMER_IDS_MAP` to the blank template from section 5.2.
 - [x] Cedar custom resource: create one policy per statement in `gateway/policies/policy.cedar`.

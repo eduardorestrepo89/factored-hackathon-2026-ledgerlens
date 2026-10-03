@@ -28,8 +28,16 @@ TABLES = {
 def test_plan_groups_every_statement():
     plan = load_plan()
     assert set(plan.data_tables) == TABLES
-    assert plan.roles == {"ll_read": "CREATE ROLE ll_read WITH LOGIN"}
-    assert plan.grants == ["GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read"]
+    assert plan.roles == {
+        "ll_read": "CREATE ROLE ll_read WITH LOGIN",
+        "ll_write": "CREATE ROLE ll_write WITH LOGIN",
+    }
+    assert plan.grants == [
+        "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read",
+        "GRANT SELECT ON products, transactions, complaints TO ll_write",
+        "GRANT UPDATE ON products TO ll_write",
+        "GRANT INSERT ON complaints TO ll_write",
+    ]
     assert [re.search(r"ON (\w+)", s)[1] for s in plan.indexes] == [
         "transactions",
         "products",
@@ -71,9 +79,25 @@ def test_tables_as_delivered_without_foreign_keys():
 
 @pytest.mark.unit
 def test_read_role_can_only_read():
-    for grant in load_plan().grants:
+    read_grants = [g for g in load_plan().grants if g.endswith(" TO ll_read")]
+    assert read_grants
+    for grant in read_grants:
         privileges = re.fullmatch(r"GRANT (.+) ON .+ TO ll_read", grant)[1]
         assert privileges in ("USAGE", "SELECT"), grant
+
+
+@pytest.mark.unit
+def test_write_role_can_only_block_cards_and_open_claims():
+    write_grants = {
+        re.fullmatch(r"GRANT (\w+) ON (.+) TO ll_write", grant).groups()
+        for grant in load_plan().grants
+        if grant.endswith(" TO ll_write")
+    }
+    assert write_grants == {
+        ("SELECT", "products, transactions, complaints"),
+        ("UPDATE", "products"),
+        ("INSERT", "complaints"),
+    }
 
 
 @pytest.mark.unit

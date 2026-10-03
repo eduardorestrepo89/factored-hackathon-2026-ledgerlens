@@ -1,0 +1,36 @@
+[
+  {
+    "name": "open_claim",
+    "description": "Opens a fraud or dispute claim for one or more of the customer's credit card transactions. Only call after the customer confirmed, in this conversation, exactly which transactions they don't recognise or dispute. Opens one claim per card and currency. Returns JSON with 'claims' (claim_id, card_last4, transaction_ids, claimed_amount, currency, priority, status, already_existed) and 'resolution_estimate' (median_days and p90_days from similar past claims, or null when there is not enough history). Never promise a refund or an outcome.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "The authenticated customer's id from get_session_context."
+        },
+        "transaction_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "maxItems": 10,
+          "description": "Transaction ids from list_card_transactions."
+        },
+        "claim_type": {
+          "type": "string",
+          "enum": ["fraud", "dispute"],
+          "description": "fraud: the customer doesn't recognise the charges. dispute: they recognise them but contest them."
+        },
+        "customer_statement": {
+          "type": "string",
+          "description": "What the customer said happened, in their words, at most 500 characters."
+        },
+        "customer_confirmed": {
+          "type": "boolean",
+          "description": "Must be true: the customer explicitly confirmed these transactions."
+        }
+      },
+      "required": ["customer_id", "transaction_ids", "claim_type", "customer_statement", "customer_confirmed"]
+    }
+  }
+]

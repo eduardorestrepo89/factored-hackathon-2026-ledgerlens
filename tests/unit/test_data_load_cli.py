@@ -55,7 +55,11 @@ def test_tables_subset_is_for_local_runs_only():
         (["ingest"], "RUN_ID, TEAM_BUCKET, HACKATHON_SECRET_ID"),
         (["transform"], "RUN_ID, TEAM_BUCKET"),
         (["curate"], "RUN_ID, TEAM_BUCKET"),
-        (["load"], "RUN_ID, TEAM_BUCKET, DSQL_ENDPOINT, TOOLS_ROLE_ARN"),
+        (
+            ["load"],
+            "RUN_ID, TEAM_BUCKET, DSQL_ENDPOINT, TOOLS_ROLE_ARN, WRITE_TOOLS_ROLE_ARN",
+        ),
+        (["access"], "DSQL_ENDPOINT, TOOLS_ROLE_ARN, WRITE_TOOLS_ROLE_ARN"),
     ],
 )
 def test_stages_list_missing_environment(monkeypatch, command, names):
@@ -65,6 +69,7 @@ def test_stages_list_missing_environment(monkeypatch, command, names):
         "HACKATHON_SECRET_ID",
         "DSQL_ENDPOINT",
         "TOOLS_ROLE_ARN",
+        "WRITE_TOOLS_ROLE_ARN",
     ):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(SystemExit, match=f"missing environment variables: {names}$"):
@@ -167,6 +172,7 @@ def test_a_failed_rerun_removes_the_stages_old_record(monkeypatch, stage):
         "HACKATHON_SECRET_ID": "ledgerlens/hackathon-s3",
         "DSQL_ENDPOINT": "c.dsql.us-east-1.on.aws",
         "TOOLS_ROLE_ARN": "arn:aws:iam::111111111111:role/ledgerlens-tools",
+        "WRITE_TOOLS_ROLE_ARN": "arn:aws:iam::111111111111:role/ledgerlens-write-tools",
     }
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -233,6 +239,7 @@ def fake_load_env(monkeypatch, tables):
         "TEAM_BUCKET": "team",
         "DSQL_ENDPOINT": "c.dsql.us-east-1.on.aws",
         "TOOLS_ROLE_ARN": "arn:aws:iam::111111111111:role/ledgerlens-tools",
+        "WRITE_TOOLS_ROLE_ARN": "arn:aws:iam::111111111111:role/ledgerlens-write-tools",
     }
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -253,7 +260,7 @@ def fake_load_env(monkeypatch, tables):
     monkeypatch.setattr("data_load.dsql.connect", lambda *a, **k: mock.MagicMock())
     monkeypatch.setattr(
         "data_load.dsql.apply_schema",
-        lambda conn, plan, arn: calls.append(("schema", arn)),
+        lambda conn, plan, role_arns: calls.append(("schema", role_arns)),
     )
     monkeypatch.setattr(
         "data_load.dsql.load_all",
@@ -275,7 +282,13 @@ def test_load_dry_runs_every_table_largest_first_then_loads(monkeypatch):
     assert main(["load"]) == 0
     order = sorted(tables, key=tables.get, reverse=True)
     assert calls == [
-        ("schema", "arn:aws:iam::111111111111:role/ledgerlens-tools"),
+        (
+            "schema",
+            {
+                "ll_read": "arn:aws:iam::111111111111:role/ledgerlens-tools",
+                "ll_write": "arn:aws:iam::111111111111:role/ledgerlens-write-tools",
+            },
+        ),
         ("dry", order),
         ("load", order),
         ("indexes", 3),
@@ -369,3 +382,42 @@ def test_cloud_curate_downloads_checks_uploads_and_records(monkeypatch, tmp_path
         "uri": "s3://team/curated/run-1/branches.parquet",
         "sha256": "c" * 64,
     }
+
+
+@pytest.mark.unit
+def test_access_applies_roles_mappings_and_grants_only(monkeypatch, capsys):
+    env = {
+        "DSQL_ENDPOINT": "c.dsql.us-east-1.on.aws",
+        "TOOLS_ROLE_ARN": "arn:aws:iam::111111111111:role/ledgerlens-tools",
+        "WRITE_TOOLS_ROLE_ARN": "arn:aws:iam::111111111111:role/ledgerlens-write-tools",
+    }
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    conn = mock.MagicMock()
+    calls = []
+    monkeypatch.setattr("data_load.dsql.connect", lambda endpoint: conn)
+    monkeypatch.setattr(
+        "data_load.dsql.apply_access",
+        lambda c, plan, role_arns: calls.append((c, set(plan.roles), role_arns)),
+    )
+    monkeypatch.setattr(
+        "data_load.dsql.apply_schema",
+        lambda *a: pytest.fail("access must not recreate the tables"),
+    )
+
+    assert main(["access"]) == 0
+
+    assert calls == [
+        (
+            conn,
+            {"ll_read", "ll_write"},
+            {
+                "ll_read": env["TOOLS_ROLE_ARN"],
+                "ll_write": env["WRITE_TOOLS_ROLE_ARN"],
+            },
+        )
+    ]
+    conn.close.assert_called_once()
+    assert (
+        "access: roles ll_read, ll_write mapped and granted" in capsys.readouterr().out
+    )

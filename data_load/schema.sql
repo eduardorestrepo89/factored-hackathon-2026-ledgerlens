@@ -117,6 +117,14 @@ CREATE ROLE ll_read WITH LOGIN;
 -- public: DSQL refuses grants on that system schema, and every role already has USAGE.
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ll_read;
 
+-- The write tools' role (block_credit_card, open_claim). Created if missing; mapped to
+-- the ledgerlens-write-tools IAM role by the load and access stages. These grants are
+-- the only limit on what those tools can change: DSQL rejects default_transaction_read_only.
+CREATE ROLE ll_write WITH LOGIN;
+GRANT SELECT ON products, transactions, complaints TO ll_write;
+GRANT UPDATE ON products TO ll_write;
+GRANT INSERT ON complaints TO ll_write;
+
 -- Secondary indexes, only for queries the read tools run. Rebuilt after every load.
 CREATE INDEX ASYNC idx_transactions_customer_date ON transactions (customer_id, transaction_date);
 CREATE INDEX ASYNC idx_products_customer ON products (customer_id);

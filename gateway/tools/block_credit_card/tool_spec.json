@@ -1,0 +1,28 @@
+[
+  {
+    "name": "block_credit_card",
+    "description": "Blocks one of the customer's credit cards immediately so it can't be charged again. Only call after the customer explicitly said yes, in this conversation, to blocking the card with these last 4 digits. Can't be undone through this assistant. Returns JSON with 'card_last4', 'status' and 'already_blocked' (true when the card was already blocked; that is not an error).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "The authenticated customer's id from get_session_context."
+        },
+        "card_last4": {
+          "type": "string",
+          "description": "Last 4 digits of the card, from list_credit_cards."
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["suspected_fraud", "lost", "stolen", "customer_request"]
+        },
+        "customer_confirmed": {
+          "type": "boolean",
+          "description": "Must be true: the customer explicitly said yes to blocking this card."
+        }
+      },
+      "required": ["customer_id", "card_last4", "reason", "customer_confirmed"]
+    }
+  }
+]

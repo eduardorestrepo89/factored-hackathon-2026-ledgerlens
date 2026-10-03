@@ -1,4 +1,4 @@
-"""python -m data_load {ingest,transform,curate,load,check}: the data pipeline's stages.
+"""python -m data_load {ingest,transform,curate,load,access,check}: the data pipeline's stages.
 
 CodeBuild runs `python -m data_load $STAGE` for stages 1-4; Step Functions sets STAGE
 and RUN_ID. Design: docs/superpowers/specs/2026-10-02-data-pipeline-design.md and
@@ -152,8 +152,12 @@ def _print_curated(written, record) -> None:
 
 
 def cmd_load(args) -> int:
-    run_id, bucket, endpoint, tools_role = require_env(
-        "RUN_ID", "TEAM_BUCKET", "DSQL_ENDPOINT", "TOOLS_ROLE_ARN"
+    run_id, bucket, endpoint, tools_role, write_tools_role = require_env(
+        "RUN_ID",
+        "TEAM_BUCKET",
+        "DSQL_ENDPOINT",
+        "TOOLS_ROLE_ARN",
+        "WRITE_TOOLS_ROLE_ARN",
     )
     import boto3
     from botocore.exceptions import ClientError
@@ -178,7 +182,11 @@ def cmd_load(args) -> int:
 
     conn = dsql.connect(endpoint)
     try:
-        dsql.apply_schema(conn, plan, tools_role)
+        dsql.apply_schema(
+            conn,
+            plan,
+            {dsql.READ_ROLE: tools_role, dsql.WRITE_ROLE: write_tools_role},
+        )
     finally:
         conn.close()
     dsql.load_all(
@@ -197,6 +205,31 @@ def cmd_load(args) -> int:
     uri = runrecord.write(s3, bucket, run_id, "load", record)
     total = sum(staged[t]["rows"] for t in order)
     print(f"load: {total:,} rows in {len(order)} tables, record {uri}", flush=True)
+    return 0
+
+
+def cmd_access(args) -> int:
+    """Create the tool roles, map them to their IAM roles and re-run the grants.
+
+    No table is dropped, so a role added to schema.sql reaches a loaded cluster
+    without a reload. CodeBuild runs it with STAGE=access.
+    """
+    endpoint, tools_role, write_tools_role = require_env(
+        "DSQL_ENDPOINT", "TOOLS_ROLE_ARN", "WRITE_TOOLS_ROLE_ARN"
+    )
+    from data_load import dsql
+
+    plan = load_plan()
+    conn = dsql.connect(endpoint)
+    try:
+        dsql.apply_access(
+            conn,
+            plan,
+            {dsql.READ_ROLE: tools_role, dsql.WRITE_ROLE: write_tools_role},
+        )
+    finally:
+        conn.close()
+    print(f"access: roles {', '.join(plan.roles)} mapped and granted", flush=True)
     return 0
 
 
@@ -253,6 +286,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("load", help="stage 4: recreate the tables and bulk-load DSQL")
     p.set_defaults(func=cmd_load)
+
+    p = sub.add_parser(
+        "access",
+        help="create the tool roles, map them to IAM roles and re-run the grants (no reload)",
+    )
+    p.set_defaults(func=cmd_access)
 
     p = sub.add_parser(
         "check", help="compare the organizer bucket with a run's ingest record"
