@@ -71,13 +71,13 @@ Out of scope for v1: service recovery, relationship-aware behavior, human-agent 
 ## 4. Architecture
 
 ```
-Browser ──> CloudFront ──> S3 (React build)
+Browser ──> Amplify Hosting (React build; v1 runs the Vite dev server locally)
    │
    │ Cognito user token (OIDC)
    ▼
 AgentCore Runtime (Strands agent, Claude Sonnet 4.5)
    │   ├─ AgentCore Memory (short-term session history)
-   │   ├─ session bootstrap (code): get_session_context + classify_call_type
+   │   ├─ session start (code, first turn): get_session_context
    │   └─ Gateway MCP client (machine token + customer claims)
    ▼
 AgentCore Gateway (Cognito machine JWT → Cedar policy engine, ENFORCE)
@@ -88,7 +88,7 @@ Lambda tools (IAM token auth) ──> Aurora DSQL (customer data, serverless, Po
 
 | Component | Role | Status in the repo |
 |---|---|---|
-| CloudFront + S3 | Hosts the React app | **To build.** The repo currently deploys Amplify. |
+| Amplify Hosting | Hosts the React app | Exists. v1 runs the frontend locally (`npm run dev`); nothing is deployed to Amplify yet |
 | Cognito | Customer login (user pool); machine client for the Gateway | Exists |
 | Pre-token Lambda (V3) | Adds `user_id` and **`customer_id`** claims to the machine token | Exists; `customer_id` lookup added (env variable map, section 5.2) |
 | AgentCore Runtime | Runs the Strands agent | Exists |
@@ -181,6 +181,7 @@ Notes:
 - **Run both calls in parallel** (`asyncio.gather` with `call_tool_async`), so session start takes about as long as the slower of the two.
 - **This is deliberate:** conceptually these are a startup step, not tools for the model. They're still registered on the Gateway so the same Cedar and token path covers them, and the model can refresh them in long sessions.
 - Both bootstrap tools stay registered on the Gateway, so they're visible to the model. Their descriptions say "already called at session start; call again only to refresh".
+- **v1 (2026-10-03):** the system prompt isn't saved in AgentCore Memory, so context added to it on the first turn would be gone by the second. v1 instead calls `get_session_context` directly on the first turn. Strands records the call and its result in the history, and memory keeps it (`tools/session_start.py`; spec `docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md` §4.4). `classify_call_type` is deferred.
 
 ---
 
@@ -771,6 +772,8 @@ SET p95_usd       = EXCLUDED.p95_usd,
 
 Tool descriptions (section 7) tell the model **what each tool does**. The prompt covers only **what spans several tools**: order, required steps, confirmation rules and limits.
 
+> **v1 (2026-10-03):** the deployed agent runs a reduced prompt, `PROMPT_VERSION` v1 in `patterns/strands-single-agent/tools/system_prompt.py`, which names only the deployed tools. The prompt below stays the target for when every tool exists.
+
 ```text
 ROLE
 You are LedgerLens, LATAM Bank's post-sale assistant. You have two jobs:
@@ -963,24 +966,23 @@ when { context has input && !(context.input has customer_confirmed && context.in
 ## 15. Implementation checklist (CDK and code)
 
 **Infrastructure (`infra-cdk/`)**
-- [ ] Replace `AmplifyHostingConstruct` with CloudFront + S3 (OAC). Update the Cognito callback URLs and the backend CORS settings (`fast-main-stack.ts`).
 - [ ] Create an Aurora DSQL cluster. No VPC, DB secret or RDS Proxy is needed: the tools reach the cluster endpoint over TLS with IAM tokens. Add a PrivateLink endpoint only if traffic must stay private.
 - [ ] Create the SNS topic `ledgerlens-human-handoff`.
 - [ ] Create 9 tool Lambdas (Python 3.13, ARM64), each with `gateway/tools/<tool>/tool_spec.json`. Set `DB_ENGINE=aurora_dsql`, `DSQL_CLUSTER_ENDPOINT` and `DSQL_DB_USER`. Keep the Lambda timeout well under the agent's tool timeout, because DSQL has no per-query timeout.
-- [ ] Call `gateway.addLambdaTarget(...)` once per tool, replacing `sample-tool-target`.
+- [x] Call `gateway.addLambdaTarget(...)` once per tool, replacing `sample-tool-target`. Done for the three read tools, imported from the data stack by name.
 - [ ] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`), publish to SNS (hand-off only).
 - [x] Pre-token Lambda: look up `customer_id` in `USER_CUSTOMER_IDS_MAP` and add it as a claim (blank when not found).
 - [x] Pre-token Lambda CDK (`cognito-construct.ts`): set `USER_CUSTOMER_IDS_MAP` to the blank template from section 5.2.
 - [x] Cedar custom resource: create one policy per statement in `gateway/policies/policy.cedar`.
-- [ ] Cedar: replace the sample policy with the 3 statements in section 10, listing only the tools whose Gateway targets are deployed.
+- [x] Cedar: replace the sample policy with statements 1 and 2 of section 10 for the three read tools. Statement 3 waits for the write tools.
 
 **Agent (`patterns/strands-single-agent/`)**
 - [x] Read `customer_id` from the machine token once per request and pass it to the system prompt (section 5.3, option 1).
 - [x] `BeforeToolCallEvent` hook that overwrites `customer_id` on every tool call (section 5.3, option 1).
-- [ ] Session start in `invocations()` (section 6): first turn only, two parallel tool calls.
-- [ ] Replace `SYSTEM_PROMPT` with section 9 and inject `SESSION CONTEXT`.
+- [x] Session start in `invocations()` (section 6): first turn only. Done for `get_session_context`; `classify_call_type` is deferred.
+- [x] Replace `SYSTEM_PROMPT`: v1 runs a reduced section 9 prompt (`PROMPT_VERSION` v1); the session context comes from the recorded session-start call.
 - [ ] Set `conversation_manager` explicitly.
-- [ ] Remove Code Interpreter from the tool list. It isn't needed, and it's extra risk in a banking context.
+- [x] Remove Code Interpreter from the tool list. It isn't needed, and it's extra risk in a banking context.
 
 **Data**
 - [ ] Load the schema and data; add the section 8.2 indexes; confirm the enum values (section 12).
@@ -995,7 +997,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | **P1: A2 clarification** | `list_card_transactions`, `explain_transaction` | J2: foreign-currency charge explained with the rate |
 | **P2: A1 opening** | `get_session_context`, `classify_call_type`, session start in code, the new prompt | J1: agent opens with the declined charge |
 | **P3: A2 fraud** | `transaction_fraud_detection`, `block_credit_card`, `open_claim`, `human_agent_hand_off` + SNS | J3: full fraud flow |
-| **P4: Hardening** | Evaluations (section 13), red-team, latency tuning, CloudFront frontend | Metrics dashboard |
+| **P4: Hardening** | Evaluations (section 13), red-team, latency tuning | Metrics dashboard |
 
 ---
 
