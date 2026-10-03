@@ -1,4 +1,4 @@
-"""Strands agent with Gateway MCP tools, Memory, and Code Interpreter."""
+"""Strands agent with Gateway MCP tools and Memory."""
 
 import json
 import logging
@@ -17,14 +17,13 @@ from strands.models import BedrockModel
 from tools.customer_id_hook import CustomerIdHook
 from tools.gateway import create_gateway_mcp_client
 from tools.mcp_registry import build_registry_mcp_clients, is_discovery_enabled
-from tools.system_prompt import build_system_prompt
+from tools.session_start import load_session_context
+from tools.system_prompt import PROMPT_VERSION, build_system_prompt
 from utils.auth import (
     extract_customer_id_from_token,
     extract_user_id_from_context,
     get_gateway_access_token,
 )
-
-from tools.code_interpreter import StrandsCodeInterpreterTools
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +85,7 @@ def _create_session_manager(
 def create_strands_agent(
     user_id: str, session_id: str, access_token: str, customer_id: str
 ) -> Agent:
-    """Create a Strands agent with Gateway tools, memory, and Code Interpreter.
+    """Create a Strands agent with Gateway tools and memory.
 
     Args:
         user_id: The authenticated user's ID (JWT sub claim).
@@ -102,13 +101,11 @@ def create_strands_agent(
 
     session_manager = _create_session_manager(user_id, session_id)
 
-    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-    code_tools = StrandsCodeInterpreterTools(region)
-
     gateway_client = create_gateway_mcp_client(access_token)
 
-    # Base tools: Gateway MCP client + secure Code Interpreter.
-    tools: list = [gateway_client, code_tools.execute_python_securely]
+    # Base tools: the Gateway MCP client only. Code Interpreter isn't used: it
+    # isn't needed for card questions and is extra risk in a banking context.
+    tools: list = [gateway_client]
 
     # Auto-connect MCP servers discovered from the AWS Agent Registry (opt-in via
     # MCP_REGISTRY_DISCOVERY_ENABLED). Each discovered public streamable-HTTP
@@ -133,7 +130,12 @@ def create_strands_agent(
         session_manager=session_manager,
         # Overwrites customer_id on every tool call with the token's value.
         hooks=[CustomerIdHook(customer_id)],
-        trace_attributes={"user.id": user_id, "session.id": session_id},
+        trace_attributes={
+            "user.id": user_id,
+            "session.id": session_id,
+            # Lets evaluation and observability tell prompt versions apart.
+            "prompt.version": PROMPT_VERSION,
+        },
     )
 
 
@@ -161,6 +163,9 @@ async def invocations(payload, context: RequestContext):
         access_token = get_gateway_access_token(user_id)
         customer_id = extract_customer_id_from_token(access_token)
         agent = create_strands_agent(user_id, session_id, access_token, customer_id)
+        logger.info("[PROMPT] version=%s session=%s", PROMPT_VERSION, session_id)
+        # First turn only: records get_session_context into the memory-backed history.
+        load_session_context(agent, customer_id)
 
         async for event in agent.stream_async(user_query):
             yield json.loads(json.dumps(dict(event), default=str))
