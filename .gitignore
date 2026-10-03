@@ -31,3 +31,6 @@ frontend/public/aws-exports.json
 scripts/zip-artifact/
 public/
 .mkdocs/public/
+
+# Superdesign scratch HTML
+.superdesign/tmp/
