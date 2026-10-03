@@ -513,7 +513,8 @@ FROM (
     FROM complaints AS k
     WHERE k.customer_id = %(customer_id)s
       AND k.creation_date <= %(as_of)s
-      AND (k.closing_date IS NULL OR k.closing_date > %(as_of)s)
+      AND (k.closing_date > %(as_of)s
+           OR (k.closing_date IS NULL AND k.status NOT IN ('Resolved', 'Closed')))
     ORDER BY k.complaint_id, k.process_date DESC NULLS LAST
 ) AS deduplicated
 ORDER BY deduplicated.sla_breached DESC NULLS LAST,
@@ -522,6 +523,7 @@ ORDER BY deduplicated.sla_breached DESC NULLS LAST,
 LIMIT %(limit)s
 ```
 - **"Open at `as_of`":** created on or before `as_of`, and not closed by then. This replaces §7.1's `status NOT IN ('Closed','Resolved')`, because a case that's closed today may still have been open on a past demo date. `status` is returned as it's stored now, so on a past `AS_OF` it can read `Closed`. The model is told nothing extra about this; it's a demo-only effect.
+- **Amended 2026-10-02:** some `Resolved`/`Closed` complaints have no `closing_date` (profiling check C5 counts 772 with no `resolution_date`), so the date-only filter showed them as open forever. When `closing_date` is set it still decides; when it's `NULL`, `status NOT IN ('Resolved','Closed')` decides. Found live on CLI-3MRJLWWCXW87 (CMP-TG0PDWL7RGZ0YXKC1Y6F, Resolved, 940 days open).
 - `date - date` is an integer in PostgreSQL, so `days_open` maps to an `int`.
 
 ---

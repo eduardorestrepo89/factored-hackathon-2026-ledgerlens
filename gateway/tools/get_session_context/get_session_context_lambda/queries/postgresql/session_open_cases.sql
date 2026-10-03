@@ -12,6 +12,8 @@
 -- "Open at as_of" means created on or before as_of and not closed by then, so a
 -- case closed today still counts on a past demo date. status is returned as it is
 -- stored now, so on a past AS_OF it can read Closed (risk C3, accepted for demos).
+-- Some Resolved/Closed rows have no closing_date; without a date, status decides,
+-- so those don't show up as open forever.
 -- date minus date is an integer in PostgreSQL, so days_open maps to an int.
 --
 -- TODO(ledgerlens): R3 - not yet run against a real Aurora DSQL cluster. Column
@@ -34,7 +36,8 @@ FROM (
     FROM complaints AS k
     WHERE k.customer_id = %(customer_id)s
       AND k.creation_date <= %(as_of)s
-      AND (k.closing_date IS NULL OR k.closing_date > %(as_of)s)
+      AND (k.closing_date > %(as_of)s
+           OR (k.closing_date IS NULL AND k.status NOT IN ('Resolved', 'Closed')))
     ORDER BY k.complaint_id, k.process_date DESC NULLS LAST
 ) AS deduplicated
 ORDER BY deduplicated.sla_breached DESC NULLS LAST,
