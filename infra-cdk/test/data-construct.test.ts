@@ -30,14 +30,13 @@ test("cluster policy denies DSQL connections from outside the VPC, except the lo
   expect(policy).toContain("DenyOutsideAnyVpcExceptLoader")
   expect(policy).toContain('\\"Null\\":{\\"aws:SourceVpc\\":\\"true\\"}')
   expect(policy).toContain("DenyOtherVpcsExceptLoader")
-  expect(policy).toContain('\\"aws:SourceVpc\\":\\"')
-  const vpcId = logicalId("AWS::EC2::VPC", {})
+  // the account's default VPC, looked up at synth (vpc-12345 is CDK's lookup placeholder in tests)
+  expect(policy).toContain('\\"aws:SourceVpc\\":\\"vpc-12345\\"')
   const loaderId = logicalId("AWS::IAM::Role", {
     AssumeRolePolicyDocument: Match.objectLike({
       Statement: [Match.objectLike({ Principal: { Service: "codebuild.amazonaws.com" } })],
     }),
   })
-  expect(policy).toContain(`{"Ref":"${vpcId}"}`)
   expect(policy).toContain(`{"Fn::GetAtt":["${loaderId}","Arn"]}`)
 })
 
@@ -48,11 +47,23 @@ test("tools role can connect to DSQL, never as admin", () => {
   expect(actions).not.toContain("dsql:DbConnectAdmin")
 })
 
-test("the VPC has no NAT or internet gateway; the endpoint admits only the tools", () => {
-  t.resourceCountIs("AWS::EC2::NatGateway", 0)
-  t.resourceCountIs("AWS::EC2::InternetGateway", 0)
-  t.hasResourceProperties("AWS::EC2::VPCEndpoint", { VpcEndpointType: "Interface", PrivateDnsEnabled: true })
+test("uses the default VPC, creating no network of its own; the endpoint admits only the tools", () => {
+  for (const type of ["AWS::EC2::VPC", "AWS::EC2::Subnet", "AWS::EC2::NatGateway", "AWS::EC2::InternetGateway"]) {
+    t.resourceCountIs(type, 0)
+  }
+  t.hasResourceProperties("AWS::EC2::VPCEndpoint", {
+    VpcId: "vpc-12345",
+    VpcEndpointType: "Interface",
+    PrivateDnsEnabled: true,
+    SubnetIds: ["s-12345"], // one AZ: each extra AZ costs another endpoint ENI
+  })
   t.hasResourceProperties("AWS::EC2::SecurityGroupIngress", { IpProtocol: "tcp", FromPort: 5432, ToPort: 5432 })
+})
+
+test("every Lambda in the VPC runs in the endpoint's subnet", () => {
+  const vpcFns = Object.values(t.findResources("AWS::Lambda::Function")).filter((f) => f.Properties.VpcConfig)
+  expect(vpcFns).toHaveLength(4) // the read check and the three tools
+  for (const fn of vpcFns) expect(fn.Properties.VpcConfig.SubnetIds).toEqual(["s-12345"])
 })
 
 test("read check runs in the VPC with the tools role and the private host", () => {

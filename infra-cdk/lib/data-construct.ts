@@ -35,7 +35,7 @@ export class DataConstruct extends Construct {
   public readonly privateHost: string
   public readonly loadProjectName: string
   public readonly stateMachineArn: string
-  public readonly vpc: ec2.Vpc
+  public readonly vpc: ec2.IVpc
   public readonly toolsRole: iam.Role
   public readonly toolsSecurityGroup: ec2.SecurityGroup
 
@@ -43,12 +43,13 @@ export class DataConstruct extends Construct {
     super(scope, id)
     const stack = cdk.Stack.of(this)
 
-    // Network (spec 7.2): one AZ, isolated subnet, no NAT or internet gateway
-    this.vpc = new ec2.Vpc(this, "Vpc", {
-      maxAzs: 1,
-      natGateways: 0,
-      subnetConfiguration: [{ name: "tools", subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 }],
-    })
+    // Network (spec 7.2): the account's default VPC, one AZ. Its subnets are public, but
+    // Lambdas get no public IP, so the tools still reach only the DSQL endpoint.
+    this.vpc = ec2.Vpc.fromLookup(this, "Vpc", { isDefault: true })
+    const subnets: ec2.SubnetSelection = {
+      subnetType: ec2.SubnetType.PUBLIC,
+      availabilityZones: [stack.availabilityZones[0]], // each extra AZ costs another endpoint ENI
+    }
     this.toolsSecurityGroup = new ec2.SecurityGroup(this, "ToolsSg", {
       vpc: this.vpc,
       description: "LedgerLens tool Lambdas",
@@ -105,6 +106,7 @@ export class DataConstruct extends Construct {
 
     new ec2.InterfaceVpcEndpoint(this, "DsqlEndpoint", {
       vpc: this.vpc,
+      subnets,
       service: new ec2.InterfaceVpcEndpointService(cluster.attrVpcEndpointServiceName, 5432),
       privateDnsEnabled: true,
       securityGroups: [endpointSg],
@@ -196,7 +198,8 @@ export class DataConstruct extends Construct {
       handler: "handler",
       role: this.toolsRole,
       vpc: this.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      vpcSubnets: subnets,
+      allowPublicSubnet: true, // no public IP and no route out; see the network note above
       securityGroups: [this.toolsSecurityGroup],
       timeout: cdk.Duration.minutes(2),
       environment: { DSQL_HOST: this.privateHost },
@@ -228,7 +231,8 @@ export class DataConstruct extends Construct {
         bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
         role: this.toolsRole,
         vpc: this.vpc,
-        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+        vpcSubnets: subnets,
+        allowPublicSubnet: true,
         securityGroups: [this.toolsSecurityGroup],
         timeout: cdk.Duration.seconds(30),
         environment: { DSQL_CLUSTER_ENDPOINT: this.privateHost, AS_OF: props.config.data.as_of },

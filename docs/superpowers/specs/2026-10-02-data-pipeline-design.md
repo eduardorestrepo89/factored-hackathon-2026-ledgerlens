@@ -191,7 +191,7 @@ The first statement is the AWS-documented "block public internet" pattern: a req
 
 ### 7.2 Network resources
 
-- **VPC:** one AZ, one private isolated subnet, no NAT gateway and no internet gateway. DNS support and DNS hostnames are on.
+- **VPC:** the account's default VPC (looked up at synth, `Vpc.fromLookup({ isDefault: true })`); the stack creates no VPC, subnet or gateway. The endpoint and the Lambdas share one default subnet (one AZ). Default subnets are public, so the Lambdas set `allowPublicSubnet`; Lambda ENIs get no public IP, so the tools still have no internet path and reach only the DSQL endpoint. DNS support and DNS hostnames are on in a default VPC. *Amended 2026-10-02: replaced the dedicated one-AZ isolated VPC.* Anything else running in the default VPC passes the policy's `aws:SourceVpc` check, so layers 1 and 2 (IAM and `ll_read`) and the endpoint's security group carry more of the weight.
 - **Interface endpoint:** for the cluster's `attrVpcEndpointServiceName`, port 5432, private DNS on. Its security group allows 5432 only from the tools security group.
 - **Private hostname:** `<cluster-id>.<service-id>.us-east-1.on.aws`, where `<service-id>` is the last dot-separated part of the service name. It's passed to Lambdas as `DSQL_HOST`.
 - **No S3 endpoint:** the read check needs nothing but DSQL. The tools sign DSQL tokens locally, so they need no AWS endpoint besides DSQL.
@@ -269,7 +269,7 @@ The first statement is the AWS-documented "block public internet" pattern: a req
 | Lambda arm64 | $0.0000133334/GB-s and $0.20 per 1M requests; 400,000 GB-s and 1M requests a month free |
 | Secrets Manager | $0.40 per secret per month |
 | CloudWatch Logs | $0.50/GB ingested; $0.03/GB-month stored |
-| VPC, subnets, security groups | Free (no NAT gateway, internet gateway or public IP) |
+| Security groups (default VPC) | Free (no NAT gateway or public IP) |
 
 ### 11.2 Inputs (measured on the local copy, 2026-10-02)
 
