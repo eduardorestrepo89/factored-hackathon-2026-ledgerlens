@@ -204,7 +204,7 @@ Conventions for every tool:
 - **Row caps:** every list returns at most 25 rows, so tool output doesn't flood the context window.
 - **Hidden fields:** amounts come back with 2 decimals and the currency code. Card numbers come back only as `last4`. Internal scores are never returned as raw numbers to the model.
 - **Duplicates:** transactions are always read through the de-duplication CTE `tx_dedup` (section 8.1).
-- **Parameters:** `:as_of` is `now()` in production. For the historical dataset it's a fixed timestamp inside the data.
+- **Parameters:** `:as_of` comes from the optional `AS_OF` env var of each tool Lambda; unset means the real UTC time (production). Demos set it to a timestamp inside the dataset.
 - **Descriptions:** the tool descriptions below are exactly what the model sees (`tool_spec.json`). **The system prompt doesn't repeat them** (section 9).
 
 ---
@@ -213,119 +213,130 @@ Conventions for every tool:
 
 **Purpose:** a single compact snapshot of everything relevant at session start.
 
+Spec: [2026-10-01-get-session-context-lambda-design.md](superpowers/specs/2026-10-01-get-session-context-lambda-design.md).
+
 **tool_spec.json**
 ```json
 {
   "name": "get_session_context",
-  "description": "Returns the customer's profile, cards, transactions from the last 72 hours with risk flags, app/web activity from the last 24 hours, and open cases. Already called automatically at session start; call again only if the customer asks you to refresh or more than 30 minutes have passed.",
+  "description": "Returns a snapshot of the customer: profile, credit cards, card transactions from the last 72 hours with risk flags (declined, foreign, above_usual_amount, new_merchant), app/web signals from the last 24 hours (FAILED_ACTION, REVIEWING_TRANSACTIONS, VIEWING_CREDIT_CARD, SEEKING_HELP) and open cases. Already called automatically at session start; call again only if the customer asks you to refresh or more than 30 minutes have passed. Lists hold at most 25 items (5 open cases). An empty list means there is nothing; a null section couldn't be loaded and is named in 'unavailable'. 'truncated' names lists that had more items. Amounts are strings with 2 decimals in the given currency.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "customer_id": { "type": "string", "description": "The authenticated customer's ID from SESSION CONTEXT." }
+      "customer_id": {
+        "type": "string",
+        "description": "The authenticated customer's ID from SESSION CONTEXT."
+      }
     },
-    "required": ["customer_id"]
+    "required": [
+      "customer_id"
+    ]
   }
 }
 ```
 
 **Output (shape)**
+Amounts are 2-decimal strings. An empty list means there is nothing; a section that couldn't be loaded is `null` and is named in `unavailable`. `truncated` names the lists that had more rows than their cap (25, open cases 5).
 ```json
 {
-  "customer": { "customer_id": "CLI-F2DZJYU0POJ9", "first_name": "Ana", "country": "CO", "city": "Bogotá", "language_hint": "es" },
-  "cards": [ { "product_id": "PRD-9", "last4": "4821", "status": "Active", "currency": "COP", "available_credit": 210000.00, "expiration_date": "2027-03-31", "days_past_due": 0 } ],
-  "recent_transactions": [ { "transaction_id": "TX-1", "ts": "2026-03-14T10:42:00", "card_last4": "4821", "merchant": "EXITO", "amount": 350000.00, "currency": "COP", "status": "Declined", "flags": ["declined"] } ],
-  "digital_signals": [ { "ts": "2026-03-14T10:48:00", "signal": "REVIEWING_TRANSACTIONS" } ],
-  "open_cases": [ { "complaint_id": "C-1182", "case_type": "Claim", "category": "Cards", "status": "In progress", "days_open": 3, "sla_breached": false } ]
+  "as_of": "2026-03-14T12:00:00Z",
+  "customer": {
+    "customer_id": "CLI-F2DZJYU0POJ9",
+    "first_name": "Ana",
+    "country": "CO",
+    "city": "Bogotá",
+    "customer_status": "Active"
+  },
+  "cards": [
+    {
+      "card_last4": "4821",
+      "product_status": "Active",
+      "currency": "COP",
+      "current_balance": "1250000.00",
+      "credit_limit": "3000000.00",
+      "available_credit": "1750000.00",
+      "expiration_date": "2027-03-31",
+      "days_past_due": 0
+    }
+  ],
+  "recent_transactions": [
+    {
+      "transaction_id": "TX-1",
+      "transaction_date": "2026-03-14T10:42:00",
+      "card_last4": "4821",
+      "merchant_name": "EXITO",
+      "amount": "350000.00",
+      "currency": "COP",
+      "transaction_status": "Declined",
+      "transaction_country": "CO",
+      "flags": ["declined", "above_usual_amount"]
+    }
+  ],
+  "digital_signals": [
+    {
+      "event_date": "2026-03-14T10:48:00",
+      "signal": "FAILED_ACTION",
+      "page_title": "Tarjeta de Crédito",
+      "ip_country": "CO",
+      "ip_city": "Bogotá"
+    }
+  ],
+  "open_cases": [
+    {
+      "complaint_id": "C-1182",
+      "case_type": "Claim",
+      "category": "Cards",
+      "subcategory": "Unrecognized charge",
+      "status": "In progress",
+      "priority": "High",
+      "sla_breached": false,
+      "claimed_amount": "350000.00",
+      "currency": "COP",
+      "days_open": 3
+    }
+  ],
+  "truncated": [],
+  "unavailable": []
 }
 ```
 
-**Queries (run in parallel inside the Lambda)**
+**Queries (run one after another inside the Lambda)**
 
-*Q1: profile and cards.* Sensitive fields (credit score, income, gender and others) are deliberately not selected.
+Each query lives in `gateway/tools/get_session_context/get_session_context_lambda/queries/postgresql/` and asks for one row more than its cap, so the Lambda can tell whether the list was truncated. Only a failure of the profile query fails the call; any other failed query makes its section `null`.
+
+*Q1: profile, then credit cards (two queries).* `session_customer_profile` selects `customer_id`, `first_name`, `country`, `city` and `customer_status` only; sensitive fields (document, date of birth, gender, contact details, credit score, income) are deliberately not selected. `session_credit_cards` is the `list_credit_cards` query: credit cards (`product_type = 'Tarjeta Crédito'`) in every status, active first.
+
+*Q2: recent transactions with flags.* Credit-card transactions from the 72 hours up to `:as_of`, read through `tx_dedup` (section 8.1).
 ```sql
-SELECT c.customer_id,
-       c.first_name,
-       c.country,
-       c.city,
-       c.customer_status,
-       p.product_id,
-       RIGHT(p.product_number, 4)         AS last4,
-       p.product_type,
-       p.currency,
-       p.current_balance,
-       p.credit_limit,
-       p.credit_limit - p.current_balance AS available_credit,
-       p.product_status,
-       p.expiration_date,
-       p.days_past_due
-FROM customers c
-JOIN products p ON p.customer_id = c.customer_id
-WHERE c.customer_id = :customer_id
-  AND p.product_type = 'Tarjeta Crédito';
+(r.transaction_status = 'Declined')               AS is_declined,
+-- country names, compared ignoring case, outer spaces and accents
+(lower(translate(btrim(r.transaction_country), 'ÁÉÍÓÚÜÑáéíóúüñ', 'AEIOUUNaeiouun'))
+ <> lower(translate(btrim(h.country), 'ÁÉÍÓÚÜÑáéíóúüñ', 'AEIOUUNaeiouun'))) AS is_foreign,
+(r.amount_usd > COALESCE(b.p95_usd, 'Infinity'))  AS is_above_usual_amount,
+(r.merchant_name IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM hist AS x
+                 WHERE x.merchant_name = r.merchant_name)) AS is_new_merchant
+```
+`Pending` and `Reversed` aren't declines; the model sees them in `transaction_status`. The baseline is the 95th percentile of approved USD amounts in the 90 days before the window.
+
+*Q3: app/web activity signals (last 24 hours).* The first matching rule wins; events with no signal are filtered out in SQL.
+```sql
+CASE
+  WHEN e.event_type = 'Error'                                             THEN 'FAILED_ACTION'
+  WHEN e.page_title = 'Mis Movimientos' OR e.action = 'view_transactions' THEN 'REVIEWING_TRANSACTIONS'
+  WHEN e.page_title = 'Tarjeta de Crédito'                                THEN 'VIEWING_CREDIT_CARD'
+  WHEN e.page_title = 'Ayuda' OR e.action = 'view_help'                   THEN 'SEEKING_HELP'
+END AS signal
 ```
 
-*Q2: recent transactions with flags.* Uses the shared CTEs from section 8.1.
+*Q4: open cases.* Cases open at `:as_of`: created on or before it and not closed by then, SLA breaches first.
 ```sql
--- WITH tx_dedup, recent, hist, baseline, home  (section 8.1)
-SELECT r.transaction_id,
-       r.transaction_date,
-       RIGHT(p.product_number, 4) AS card_last4,
-       r.merchant_name,
-       r.amount,
-       r.currency,
-       r.transaction_status,
-       r.transaction_country,
-       (r.transaction_status <> 'Approved')                     AS is_declined,
-       (r.transaction_country <> h.country)                     AS is_foreign,
-       (r.amount_usd > COALESCE(b.p95_usd, 'Infinity'))         AS above_usual_amount,
-       NOT EXISTS (SELECT 1 FROM hist x WHERE x.merchant_name = r.merchant_name) AS new_merchant
-FROM recent r
-JOIN products p ON p.product_id = r.product_id
-CROSS JOIN home h
-CROSS JOIN baseline b
-ORDER BY r.transaction_date DESC
-LIMIT 25;
+WHERE k.customer_id = :customer_id
+  AND k.creation_date <= :as_of
+  AND (k.closing_date IS NULL OR k.closing_date > :as_of)
+-- days_open = :as_of::date - creation_date::date
 ```
-
-*Q3: app/web activity signals (last 24 hours).*
-```sql
-SELECT event_date,
-       CASE
-         WHEN page_title ILIKE ANY (ARRAY['%fraud%','%disput%','%reclam%','%contest%']) THEN 'DISPUTE_INTEREST'
-         WHEN page_title ILIKE ANY (ARRAY['%bloq%','%block%','%lost%','%perd%','%robo%']) THEN 'BLOCK_INTEREST'
-         WHEN page_title ILIKE ANY (ARRAY['%movim%','%transac%','%extract%','%statement%']) THEN 'REVIEWING_TRANSACTIONS'
-         WHEN event_type ILIKE '%error%' OR action ILIKE '%fail%'                            THEN 'FAILED_ACTION'
-       END AS signal,
-       ip_country,
-       ip_city
-FROM digital_events
-WHERE customer_id = :customer_id
-  AND process_date >= (:as_of::date - 1)
-  AND event_date BETWEEN :as_of - INTERVAL '24 hours' AND :as_of
-ORDER BY event_date DESC
-LIMIT 30;
--- The Lambda drops rows where signal IS NULL before returning.
-```
-
-*Q4: open cases.*
-```sql
-SELECT complaint_id,
-       case_type,
-       category,
-       subcategory,
-       status,
-       priority,
-       sla_breached,
-       claimed_amount,
-       currency,
-       EXTRACT(DAY FROM :as_of - creation_date)::int AS days_open
-FROM complaints
-WHERE customer_id = :customer_id
-  AND closing_date IS NULL
-  AND status NOT IN ('Closed','Resolved')
-ORDER BY sla_breached DESC, creation_date DESC
-LIMIT 5;
-```
+`status` is returned as stored now, so on a past `AS_OF` it can read `Closed` (accepted for demos).
 
 ---
 
@@ -992,11 +1003,11 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 | # | Question | Impact |
 |---|---|---|
-| Q1 | Actual values for `transaction_status`, `response_code`, `product_status`, complaint `status`/`category`/`subcategory` and `page_title` | Every WHERE clause and the reason taxonomy |
+| Q1 | **Partly answered 2026-10-01.** Confirmed by the user: `transaction_status` is `Approved`, `Declined`, `Pending` or `Reversed`; `page_title` has 12 values (`Inicio`, `Iniciar Sesión`, `Cerrar Sesión`, `Mis Movimientos`, `Tarjeta de Crédito`, `Ayuda`, `Préstamos`, `Cuenta de Ahorro`, `Pagar Servicios`, `Transferir`, `Mis Cuentas`, `Productos`); `event_type` (7 values, including `Error`), `action` (10, including `view_transactions` and `view_help`) and `event_category` (4) are confirmed too. Still open: `response_code`, `product_status`, complaint `status`/`category`/`subcategory`. | Every WHERE clause and the reason taxonomy |
 | Q2 | **Answered 2026-10-01: no.** Does the AgentCore Gateway forward JWT claims to Lambda targets? It doesn't: the Lambda event holds only the tool's input properties, and the context holds only Gateway metadata. `customer_id` stays a tool input, filled in by code (section 5.3), and Cedar check 2 is the check that ties it to the token. | Security design, section 5 |
 | Q3 | Do `forbid` statements on `context.input` affect tool visibility at `tools/list`? | Cedar, section 10 |
 | Q4 | Should `block_credit_card` write to Aurora DSQL only (demo), or call a card processor sandbox? | Scope of P3 |
 | Q5 | Who receives the SNS hand-off: email for the demo, or a contact-center queue? | P3 |
 | Q6 | Which customer language(s) are in the demo dataset? `customers` has no language field, so it's inferred from `country`. | Style section of the prompt |
-| Q7 | Dataset time range, to choose `:as_of` for demos | All the "recent" windows |
+| Q7 | **Answered 2026-10-01:** every tool Lambda reads an optional `AS_OF` env var as "now"; demos set it to a timestamp inside the dataset's time range. | All the "recent" windows |
 | Q8 | Does Cedar evaluate a tool call's arguments before or after a Gateway REQUEST interceptor transforms them? | Whether the interceptor option in section 5.3 keeps Cedar check 2 meaningful |
