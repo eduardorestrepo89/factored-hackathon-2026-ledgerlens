@@ -21,7 +21,9 @@ def load_session_context(agent, customer_id: str) -> None:
     """On a session's first turn, call get_session_context so its result is in the history.
 
     A failure is logged and the turn goes on without the context: the model can
-    still call get_session_context itself.
+    still call get_session_context itself. Strands returns a failed tool call (a
+    Lambda error, a Cedar denial) as a result with status "error" rather than
+    raising, so the result's status is checked too.
 
     Args:
         agent: The Strands agent, built with its memory session manager, so
@@ -41,10 +43,15 @@ def load_session_context(agent, customer_id: str) -> None:
                 "[SESSION-START] get_session_context is not on the Gateway; skipping"
             )
             return
-        getattr(agent.tool, name)(customer_id=customer_id)
+        result = getattr(agent.tool, name)(customer_id=customer_id)
     except Exception:
         logger.exception(
             "[SESSION-START] get_session_context failed; continuing without it"
+        )
+        return
+    if result.get("status") != "success":
+        logger.warning(
+            "[SESSION-START] get_session_context returned an error; continuing without it"
         )
         return
     logger.info("[SESSION-START] Loaded the session context with %s", name)

@@ -20,19 +20,27 @@ TOOL_NAME = "gateway_get-session-context-target___get_session_context"
 OTHER_TOOL = "gateway_list-credit-cards-target___list_credit_cards"
 
 
-class FakeToolCaller:
-    """Stands in for agent.tool: records each direct call, optionally raising."""
+SUCCESS = {"status": "success", "content": [{"text": "{}"}]}
 
-    def __init__(self, error=None):
+
+class FakeToolCaller:
+    """Stands in for agent.tool: records each direct call, optionally raising.
+
+    Like strands 1.32.0, a tool that fails returns a result with status "error"
+    rather than raising; pass that as ``result``.
+    """
+
+    def __init__(self, error=None, result=SUCCESS):
         self.calls = []
         self.error = error
+        self.result = result
 
     def __getattr__(self, name):
         def call(**kwargs):
             self.calls.append((name, kwargs))
             if self.error is not None:
                 raise self.error
-            return {"status": "success", "content": [{"text": "{}"}]}
+            return self.result
 
         return call
 
@@ -40,10 +48,16 @@ class FakeToolCaller:
 class FakeAgent:
     """Stands in for strands.Agent after the memory session manager restored the history."""
 
-    def __init__(self, messages=(), tool_names=(OTHER_TOOL, TOOL_NAME), error=None):
+    def __init__(
+        self,
+        messages=(),
+        tool_names=(OTHER_TOOL, TOOL_NAME),
+        error=None,
+        result=SUCCESS,
+    ):
         self.messages = list(messages)
         self.tool_names = list(tool_names)
-        self.tool = FakeToolCaller(error)
+        self.tool = FakeToolCaller(error, result)
 
 
 @pytest.fixture(scope="module")
@@ -96,3 +110,15 @@ def test_a_failing_call_is_logged_and_the_turn_goes_on(session_start, caplog):
 
     assert agent.tool.calls == [(TOOL_NAME, {"customer_id": CUSTOMER_ID})]
     assert "get_session_context failed" in caplog.text
+
+
+def test_an_error_result_is_logged_as_a_failure(session_start, caplog):
+    # A Lambda error or a Cedar denial comes back as an error result, not an exception.
+    denied = {"status": "error", "content": [{"text": "Tool Execution Denied"}]}
+    agent = FakeAgent(result=denied)
+
+    with caplog.at_level(logging.INFO):
+        session_start.load_session_context(agent, CUSTOMER_ID)
+
+    assert "get_session_context returned an error" in caplog.text
+    assert "Loaded the session context" not in caplog.text
