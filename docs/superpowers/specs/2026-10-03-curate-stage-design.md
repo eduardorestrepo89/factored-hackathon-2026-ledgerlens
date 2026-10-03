@@ -316,6 +316,25 @@ python -m data_load curate --source <tmp> --out <tmp2>                         #
 
 The endpoint ($7.30/month) still dominates the monthly cost.
 
+### 13.1 Measured on the first curated run (2026-10-03)
+
+Run `15775704-4aed-44db-84b2-a6e4bd266bd7`, started 07:31 UTC. The data stack was redeployed from `feat/curate-stage` at `df18a28`. Durations come from the Step Functions history; row counts from `runs/<run-id>/curate.json` and `load.json`.
+
+| Stage | Duration | Result |
+|---|---:|---|
+| Ingest | 2.2 min | 7,671 files copied |
+| Transform | 4.7 min | 23,495,188 rows; R1–R6 counts as pinned |
+| Curate | 1.9 min | 1,500 clean + 159 defect-cohort customers, 270,866 rows; every check and pinned count passed |
+| Load | 1.2 min | 270,866 rows loaded (`load.json`) |
+| Read check | 0.1 min | `{"tables_read": 13, "insert_denied": true}` |
+| **Whole run** | **10.0 min** | Down from 30.3 min for the full load (pipeline spec 11.4) |
+
+**Tool smoke test,** read-only, invoked the way the Gateway calls the tools: tool name in `client_context.custom.bedrockAgentCoreToolName`.
+- `ledgerlens-get-session-context` for P01 opens with `TRX-SSJAIUCVVU1L4605ZLNM` (Declined; flags `declined`, `new_merchant`) on card 6811, available credit USD 11,244.35.
+- `ledgerlens-list-credit-cards` for P10 lists card 2626 (Active, 180 days past due) and card 7718 (Blocked).
+
+**Cost** was not yet read from billing. CodeBuild ran about 9 build-minutes (≈ $0.14). DSQL writes about 1.2% of the rows the full load wrote.
+
 ## 14. Documentation (written after the rehearsal)
 
 1. **This spec.** Pinned counts are added after the rehearsal.
