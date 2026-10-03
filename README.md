@@ -117,6 +117,74 @@ uv run --no-project --with-requirements data_load/requirements.txt python -m dat
 
 - **Redeploying after a delete:** redeploying the data stack after deleting it creates a new, empty cluster.
 
+## LedgerLens Agent (v1)
+
+The Strands agent on AgentCore Runtime answers card questions from the signed-in customer's own records, through three read tools on the Gateway: `list_credit_cards`, `list_card_transactions` and `get_session_context`.
+- **Design:** [docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md](docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md).
+- **Prompt:** `patterns/strands-single-agent/tools/system_prompt.py`. Bump `PROMPT_VERSION` on any change; `tests/unit/test_system_prompt.py` pins each version's hash.
+
+**Deploy:** the data stack first (it holds the tool Lambdas), then the agent stack:
+
+```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant
+```
+
+**Run the frontend locally** (nothing is deployed to Amplify in v1):
+
+```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-frontend.py --config-only
+cd frontend && npm install && npm run dev   # http://localhost:3000
+```
+
+**Demo login:** one Cognito user, `demo@ledgerlens.example`, linked to one persona at a time. Create it once after the first deploy. The password must have 8+ characters with upper, lower, digit and symbol; share it with the team and the judges, never in git.
+
+```bash
+export AWS_PROFILE=ledgerlens
+POOL_ID=$(aws cloudformation describe-stacks --stack-name ledgerlens-bank-assistant \
+  --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId'].OutputValue" --output text)
+aws cognito-idp admin-create-user --user-pool-id "$POOL_ID" --username demo@ledgerlens.example \
+  --user-attributes Name=email,Value=demo@ledgerlens.example Name=email_verified,Value=true \
+  --message-action SUPPRESS
+aws cognito-idp admin-set-user-password --user-pool-id "$POOL_ID" \
+  --username demo@ledgerlens.example --password "$DEMO_PASSWORD" --permanent
+SUB=$(aws cognito-idp admin-get-user --user-pool-id "$POOL_ID" --username demo@ledgerlens.example \
+  --query "UserAttributes[?Name=='sub'].Value" --output text)
+```
+
+**Switch persona:** the pre-token Lambda's `USER_CUSTOMER_IDS_MAP` links the login to a customer. Either edit it in the Lambda console (`ledgerlens-bank-assistant-pretoken-v3` → Configuration → Environment variables), or run:
+
+```bash
+set_persona() {  # usage: set_persona <customer_id>
+  aws lambda update-function-configuration --function-name ledgerlens-bank-assistant-pretoken-v3 \
+    --cli-input-json "$(python -c 'import json,sys; print(json.dumps({"Environment": {"Variables": {"USER_CUSTOMER_IDS_MAP": json.dumps({sys.argv[1]: sys.argv[2]})}}}))' "$SUB" "$1")" \
+    --query "Environment.Variables" --output text
+  aws lambda wait function-updated --function-name ledgerlens-bank-assistant-pretoken-v3
+}
+set_persona CLI-50OIF5EIYSWK   # P05
+```
+
+- **Start a new chat after every switch.** The old chat's memory still holds the previous persona's data.
+- **Who can switch:** only someone with AWS credentials. The person chatting never can.
+- **After a redeploy:** the login goes back to the persona committed in `USER_CUSTOMER_IDS_MAP` in `infra-cdk/lib/cognito-construct.ts`. Commit the demo login's sub there, mapped to P03, right after creating it: until then a redeploy resets the map to placeholders and the login becomes unlinked.
+
+| Persona | Customer id | Use case | v1 note |
+|---|---|---|---|
+| P01 | CLI-1GL7QBDG3QG0 | Decline explained | The tools return no decline reason, so the agent says it can't tell why |
+| P02 | CLI-7EC6UCDZMSKV | Pending charge | |
+| **P03 (default)** | CLI-70U0WJ1NH1MN | Reversed charge with app context | Shows the session-start opening |
+| P04 | CLI-N4FPJIEGD917 | Which card? | |
+| P05 | CLI-50OIF5EIYSWK | Portuguese persona, foreign charge | |
+| P06 | CLI-PV0OIEA8DAAE | Limit increase (out of scope) | |
+| P07 | CLI-EX6BOAOEFZHQ | Suspected fraud | Can't block: the agent says a human must, and gives a summary |
+| P08 | CLI-GG3Z1440277M | Open unrecognized-charge case | No hand-off tool: a text hand-off |
+| P09 | CLI-UBR2NCZWTD4K | Records contradict | No decline reason in the tools, so the contradiction can't be seen |
+| P10 | CLI-Z3V3SBS18YWQ | Card not active | |
+
+**Smoke scripts** (`AWS_PROFILE=ledgerlens`, with `uv run --no-project --with-requirements test-scripts/requirements.txt python ...`):
+- `test-scripts/test-gateway.py --user-sub "$SUB" [--customer-id <id>]`: the Gateway and Cedar, without the agent. A sub that isn't in the map tests an unlinked login.
+- `test-scripts/test-agent.py`: chats with the deployed agent as the demo login.
+
+
 ## Architecture
 
 ![Architecture Diagram](docs/architecture-diagram/FAST-architecture-20260403.png)
@@ -193,9 +261,11 @@ fullstack-agentcore-solution-template/
 │       └── code_interpreter_tools.py # Core implementation
 ├── gateway/                # Gateway utilities and tools
 │   ├── policies/           # Cedar policy definitions
-│   │   └── policy.cedar    # Department-based access control policy
-│   └── tools/              # Gateway tool implementations
-│       └── sample_tool/    # Example Gateway tool
+│   │   └── policy.cedar    # Per-customer access control policy
+│   └── tools/              # Gateway tool implementations (deployed in the data stack)
+│       ├── list_credit_cards/
+│       ├── list_card_transactions/
+│       └── get_session_context/
 ├── scripts/                # Deployment and utility scripts
 │   ├── deploy-frontend.py  # Cross-platform frontend deployment
 │   └── utils.py            # Shared script utilities
