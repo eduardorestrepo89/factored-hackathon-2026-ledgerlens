@@ -1,0 +1,1246 @@
+
+##### -- [S1] row counts per table (compare with documented counts)
+┌──────────────────────────┬──────────┐
+│            t             │    n     │
+│         varchar          │  int64   │
+├──────────────────────────┼──────────┤
+│ customers                │   150000 │
+│ products                 │   400000 │
+│ branches                 │      350 │
+│ service_agents           │     1200 │
+│ marketing_campaigns      │      200 │
+│ daily_exchange_rates     │    13164 │
+│ transactions             │  4425008 │
+│ call_center_interactions │   686296 │
+│ call_transcripts         │   171321 │
+│ satisfaction_surveys     │   212759 │
+│ digital_events           │ 15620994 │
+│ complaints               │    67095 │
+│ campaign_sends           │  1746801 │
+└──────────────────────────┴──────────┘
+  13 rows                   2 columns
+
+
+##### -- [D1] contact reason mix (reason_category vs contact_reason)
+┌────────────────┬─────────────────┬────────┬────────┐
+│ contact_reason │ reason_category │   n    │  pct   │
+│    varchar     │     varchar     │ int64  │ double │
+├────────────────┼─────────────────┼────────┼────────┤
+│ Transaccional  │ Transaccional   │ 240056 │  34.98 │
+│ Producto       │ Producto        │ 150863 │  21.98 │
+│ Queja          │ Queja           │ 117021 │  17.05 │
+│ Técnico        │ Técnico         │ 102899 │  14.99 │
+│ Comercial      │ Comercial       │  54879 │    8.0 │
+│ Retención      │ Retención       │  20578 │    3.0 │
+└────────────────┴─────────────────┴────────┴────────┘
+
+
+##### -- [D2] channel x interaction type
+┌──────────┬──────────────────┬────────┐
+│ channel  │ interaction_type │   n    │
+│ varchar  │     varchar      │ int64  │
+├──────────┼──────────────────┼────────┤
+│ Phone    │ Inbound Call     │ 480678 │
+│ Phone    │ Outbound Call    │ 102572 │
+│ Email    │ Email            │  27543 │
+│ App      │ Chat             │  22947 │
+│ WhatsApp │ Chat             │  22888 │
+│ Web Chat │ Chat             │  22856 │
+│ App      │ Video            │   3417 │
+│ Web      │ Video            │   3395 │
+└──────────┴──────────────────┴────────┘
+
+
+##### -- [D3] KPIs by contact reason
+┌────────────────┬────────┬─────────┬─────────┬──────────────┬────────────────┬────────────┬───────────────┬────────────────┐
+│ contact_reason │   n    │ fcr_pct │ esc_pct │ followup_pct │ med_duration_s │ med_wait_s │ avg_sentiment │ transcript_pct │
+│    varchar     │ int64  │ double  │ double  │    double    │     double     │   double   │    double     │     double     │
+├────────────────┼────────┼─────────┼─────────┼──────────────┼────────────────┼────────────┼───────────────┼────────────────┤
+│ Transaccional  │ 240056 │    91.5 │     9.9 │         22.1 │          205.0 │      119.0 │          -0.0 │           24.9 │
+│ Producto       │ 150863 │    89.6 │    10.0 │         23.8 │          263.0 │      119.0 │        -0.037 │           25.0 │
+│ Queja          │ 117021 │    43.6 │    10.0 │         63.0 │          431.0 │      120.0 │        -0.067 │           25.0 │
+│ Técnico        │ 102899 │    69.9 │    10.1 │         40.6 │          360.0 │      119.0 │        -0.067 │           25.0 │
+│ Comercial      │  54879 │    65.2 │     9.8 │         44.5 │          540.0 │      120.0 │        -0.066 │           25.2 │
+│ Retención      │  20578 │    60.2 │     9.8 │         49.1 │          478.0 │      120.0 │        -0.065 │           25.2 │
+└────────────────┴────────┴─────────┴─────────┴──────────────┴────────────────┴────────────┴───────────────┴────────────────┘
+
+
+##### -- [D4] quarterly volume
+┌─────────┬───────┬───────┬───────────┐
+│    q    │   n   │ queja │ non_phone │
+│ varchar │ int64 │ int64 │   int64   │
+├─────────┼───────┼───────┼───────────┤
+│ 2023-Q2 │  9012 │  1607 │      1343 │
+│ 2023-Q3 │ 57339 │  9827 │      8512 │
+│ 2023-Q4 │ 57043 │  9641 │      8610 │
+│ 2024-Q1 │ 56373 │  9593 │      8390 │
+│ 2024-Q2 │ 57140 │  9665 │      8656 │
+│ 2024-Q3 │ 58332 │  9979 │      8844 │
+│ 2024-Q4 │ 56281 │  9593 │      8363 │
+│ 2025-Q1 │ 56207 │  9630 │      8472 │
+│ 2025-Q2 │ 57064 │  9656 │      8557 │
+│ 2025-Q3 │ 58110 │ 10090 │      8721 │
+│ 2025-Q4 │ 57645 │  9841 │      8703 │
+│ 2026-Q1 │ 57013 │  9726 │      8569 │
+│ 2026-Q2 │ 48737 │  8173 │      7306 │
+└─────────┴───────┴───────┴───────────┘
+  13 rows                   4 columns
+
+
+##### -- [D5] day of week: business date (process_date) vs raw timestamp
+┌───────┬────────────────────┬────────────────────┐
+│  dow  │ n_by_business_date │ n_by_raw_timestamp │
+│ int64 │       int64        │       int64        │
+├───────┼────────────────────┼────────────────────┤
+│     1 │             115688 │              96388 │
+│     2 │             114633 │             114794 │
+│     3 │             114047 │             114736 │
+│     4 │             113314 │             113216 │
+│     5 │             113382 │             113314 │
+│     6 │              57447 │              76177 │
+│     7 │              57785 │              57671 │
+└───────┴────────────────────┴────────────────────┘
+
+
+##### -- [D6] hour of day (raw timestamps)
+┌───────┬───────┐
+│   h   │   n   │
+│ int64 │ int64 │
+├───────┼───────┤
+│     0 │ 28527 │
+│     1 │ 28541 │
+│     2 │ 28270 │
+│     3 │ 28878 │
+│     4 │ 28465 │
+│     5 │ 28699 │
+│     6 │ 28516 │
+│     7 │ 28415 │
+│     8 │ 28625 │
+│     9 │ 28573 │
+│    10 │ 28664 │
+│    11 │ 28614 │
+│    12 │ 28634 │
+│    13 │ 28632 │
+│    14 │ 28542 │
+│    15 │ 28401 │
+│    16 │ 28644 │
+│    17 │ 29081 │
+│    18 │ 28545 │
+│    19 │ 28679 │
+│    20 │ 28767 │
+│    21 │ 28444 │
+│    22 │ 28310 │
+│    23 │ 28830 │
+└───────┴───────┘
+     24 rows   
+
+
+##### -- [D7] CSAT by resolution and escalation
+┌──────────────┬───────────────┬───────┬────────┐
+│ was_resolved │ was_escalated │   n   │  csat  │
+│   boolean    │    boolean    │ int64 │ double │
+├──────────────┼───────────────┼───────┼────────┤
+│ false        │ false         │ 27042 │  2.002 │
+│ false        │ true          │  2963 │  2.018 │
+│ true         │ false         │ 88080 │  2.999 │
+│ true         │ true          │  9771 │  2.997 │
+└──────────────┴───────────────┴───────┴────────┘
+
+
+##### -- [D8] CSAT by detected sentiment
+┌────────────────────┬───────┬────────┐
+│ detected_sentiment │   n   │  csat  │
+│      varchar       │ int64 │ double │
+├────────────────────┼───────┼────────┤
+│ Muy Positivo       │  3534 │  2.631 │
+│ Negativo           │ 17599 │  2.641 │
+│ Muy Negativo       │  7007 │  2.644 │
+│ Positivo           │ 14205 │  2.646 │
+│ Neutral            │ 85511 │  2.826 │
+└────────────────────┴───────┴────────┘
+
+
+##### -- [D9] accent match vs FCR
+┌──────────────┬────────┬────────┬───────────┬──────────────┐
+│ accent_match │   n    │  fcr   │ sentiment │ avg_duration │
+│   boolean    │ int64  │ double │  double   │    double    │
+├──────────────┼────────┼────────┼───────────┼──────────────┤
+│ false        │  89507 │  76.59 │   -0.0402 │        322.0 │
+│ true         │ 392039 │  76.68 │   -0.0364 │        321.0 │
+└──────────────┴────────┴────────┴───────────┴──────────────┘
+
+
+##### -- [D10] FCR / escalation / wait by country and segment
+┌───────────┬─────────┬────────┬────────┬────────┬──────────┐
+│  country  │ segment │   n    │  fcr   │  esc   │ med_wait │
+│  varchar  │ varchar │ int64  │ double │ double │  double  │
+├───────────┼─────────┼────────┼────────┼────────┼──────────┤
+│ Argentina │ Basic   │  81945 │  76.57 │   9.97 │    119.0 │
+│ Argentina │ Plus    │  33990 │  76.55 │    9.7 │    119.0 │
+│ Argentina │ Premium │  13514 │  76.94 │   9.75 │    121.0 │
+│ Argentina │ Student │   6868 │  76.19 │   9.23 │    120.0 │
+│ Colombia  │ Basic   │ 123918 │  76.68 │  10.21 │    120.0 │
+│ Colombia  │ Plus    │  51739 │  76.45 │   9.93 │    119.0 │
+│ Colombia  │ Premium │  20721 │  77.07 │   9.95 │    119.0 │
+│ Colombia  │ Student │  10412 │  76.93 │   9.83 │    119.0 │
+│ México    │ Basic   │ 205112 │  76.63 │   9.87 │    120.0 │
+│ México    │ Plus    │  86445 │  76.74 │   9.95 │    119.0 │
+│ México    │ Premium │  34769 │  76.59 │  10.24 │    119.0 │
+│ México    │ Student │  16863 │  76.67 │  10.04 │    119.0 │
+└───────────┴─────────┴────────┴────────┴────────┴──────────┘
+  12 rows                                         6 columns
+
+
+##### -- [D11] agent-level FCR spread (agents with >200 contacts)
+┌────────┬──────────────┬─────────┬────────┬────────┬────────┬─────────┐
+│ agents │ med_contacts │ min_fcr │   p5   │  med   │  p95   │ max_fcr │
+│ int64  │    double    │ double  │ double │ double │ double │ double  │
+├────────┼──────────────┼─────────┼────────┼────────┼────────┼─────────┤
+│   1090 │        630.0 │    69.9 │   73.8 │   76.6 │   79.5 │    81.6 │
+└────────┴──────────────┴─────────┴────────┴────────┴────────┴─────────┘
+
+
+##### -- [D12] contacts per customer
+┌──────────┬───────────┐
+│ contacts │ customers │
+│  int64   │   int64   │
+├──────────┼───────────┤
+│        1 │      7107 │
+│        2 │     16224 │
+│        3 │     24533 │
+│        4 │     28329 │
+│        5 │     25821 │
+│        6 │     19478 │
+│        7 │     12886 │
+│        8 │      7451 │
+│        9 │      3753 │
+│       10 │      1757 │
+│       11 │       732 │
+│       12 │       252 │
+│       13 │        79 │
+│       14 │        28 │
+│       15 │        10 │
+│       16 │         1 │
+│       17 │         1 │
+│       18 │         1 │
+└──────────┴───────────┘
+  18 rows    2 columns
+
+
+##### -- [D13] agent time by contact reason (contacts with a duration only)
+┌────────────────┬────────┬───────────────┬────────┬────────┬───────────────────┐
+│ contact_reason │   n    │ with_duration │ mean_s │ med_s  │ total_agent_hours │
+│    varchar     │ int64  │     int64     │ double │ double │      double       │
+├────────────────┼────────┼───────────────┼────────┼────────┼───────────────────┤
+│ Transaccional  │ 240056 │        206465 │  221.0 │  205.0 │           12663.0 │
+│ Queja          │ 117021 │        100727 │  435.0 │  431.0 │           12160.0 │
+│ Producto       │ 150863 │        129644 │  266.0 │  263.0 │            9593.0 │
+│ Técnico        │ 102899 │         88493 │  360.0 │  360.0 │            8861.0 │
+│ Comercial      │  54879 │         47082 │  540.0 │  540.0 │            7061.0 │
+│ Retención      │  20578 │         17651 │  479.0 │  478.0 │            2350.0 │
+└────────────────┴────────┴───────────────┴────────┴────────┴───────────────────┘
+
+
+##### -- [D14] historical routing: agent specialty vs contact reason (random => no escalation ground truth)
+┌───────────────────┬────────┬───────────┬───────────────────┐
+│     specialty     │   n    │ queja_pct │ transaccional_pct │
+│      varchar      │ int64  │  double   │      double       │
+├───────────────────┼────────┼───────────┼───────────────────┤
+│ (none)            │ 277949 │      17.0 │              35.0 │
+│ Cobranza          │  54204 │      17.0 │              34.9 │
+│ Créditos          │  50394 │      17.2 │              34.9 │
+│ Fraudes           │  60528 │      17.2 │              34.8 │
+│ Inversiones       │  46342 │      17.3 │              35.0 │
+│ Quejas y Reclamos │  40305 │      17.2 │              35.0 │
+│ Retención         │  53741 │      16.9 │              35.3 │
+│ Soporte Técnico   │  56403 │      16.8 │              35.2 │
+│ Ventas            │  46430 │      17.0 │              34.8 │
+└───────────────────┴────────┴───────────┴───────────────────┘
+
+
+##### -- [D15] survey scores are a fixed function of was_resolved
+┌─────────────┬──────────────┬──────────────┬────────────┐
+│ survey_type │ was_resolved │ score_values │ mean_score │
+│   varchar   │   boolean    │   int64[]    │   double   │
+├─────────────┼──────────────┼──────────────┼────────────┤
+│ CES         │ false        │ [1, 2, 3]    │        2.0 │
+│ CES         │ true         │ [2, 3, 4]    │        3.0 │
+│ CSAT        │ false        │ [1, 2, 3]    │        2.0 │
+│ CSAT        │ true         │ [2, 3, 4]    │        3.0 │
+│ NPS         │ false        │ [2, 3, 4]    │        3.0 │
+│ NPS         │ true         │ [5, 6, 7]    │        6.0 │
+└─────────────┴──────────────┴──────────────┴────────────┘
+
+
+##### -- [T1] transcript language
+┌───────────────────┬────────┐
+│ detected_language │   n    │
+│      varchar      │ int64  │
+├───────────────────┼────────┤
+│ es                │ 171321 │
+└───────────────────┴────────┘
+
+
+##### -- [T2] transcript detected_intents
+┌──────────────────┬────────┐
+│ detected_intents │   n    │
+│     varchar      │ int64  │
+├──────────────────┼────────┤
+│ consulta_general │ 162864 │
+│ NULL             │   8457 │
+└──────────────────┴────────┘
+
+
+##### -- [T3] transcript text diversity
+┌────────┬────────────────────┬────────────────────────┬─────────────────────┐
+│   n    │ distinct_full_text │ distinct_customer_text │ distinct_agent_text │
+│ int64  │       int64        │         int64          │        int64        │
+├────────┼────────────────────┼────────────────────────┼─────────────────────┤
+│ 171321 │                546 │                     42 │                  42 │
+└────────┴────────────────────┴────────────────────────┴─────────────────────┘
+
+
+##### -- [T4] unfilled placeholders
+┌──────────┬────────┬──────────────────────────────┐
+│   tok    │   n    │ transcripts_with_placeholder │
+│ varchar  │ int64  │            int64             │
+├──────────┼────────┼──────────────────────────────┤
+│ {moneda} │ 257231 │                       171321 │
+│ {monto}  │ 171321 │                       171321 │
+│ {limite} │  85910 │                       171321 │
+└──────────┴────────┴──────────────────────────────┘
+
+
+##### -- [T5] distinct customer sentences
+┌──────────────────────────────────────────────────────────────────────┬───────┐
+│                                  s                                   │   n   │
+│                               varchar                                │ int64 │
+├──────────────────────────────────────────────────────────────────────┼───────┤
+│ Hola, buenos días                                                    │ 85411 │
+│ Buenas tardes, necesito consultar el saldo de mi tarjeta de crédito. │ 51555 │
+│ Quisiera saber cuál es mi saldo actual en mi cuenta de ahorros.      │ 51189 │
+│ Buenas tardes, necesito consultar el saldo de mi tarjeta de crédito  │ 34355 │
+│ Quisiera saber cuál es mi saldo actual en mi cuenta de ahorros       │ 34222 │
+│ ¿Y eso cuánto tiempo tarda?                                          │ 17331 │
+│ Entiendo, muchas gracias.                                            │ 17147 │
+│ Perfecto, eso es lo que necesitaba.                                  │ 17120 │
+│ Muy bien, ¿hay algo más que deba saber?                              │ 16979 │
+│ Entiendo, muchas gracias                                             │  8588 │
+│ ¿Y eso cuánto tiempo tarda                                           │  8577 │
+│ Perfecto, eso es lo que necesitaba                                   │  8553 │
+│ Muy bien, ¿hay algo más que deba saber                               │  8552 │
+└──────────────────────────────────────────────────────────────────────┴───────┘
+  13 rows                                                            2 columns
+
+
+##### -- [T6] distinct agent sentences (note: no identity-verification sentence exists)
+┌─────────────────────────────────────────────────────────────────────────────────────┬───────┐
+│                                          s                                          │   n   │
+│                                       varchar                                       │ int64 │
+├─────────────────────────────────────────────────────────────────────────────────────┼───────┤
+│ Buenas tardes, claro que sí                                                         │ 85910 │
+│ Déjeme revisar esa información                                                      │ 85910 │
+│ Permítame un momento para verificar su saldo                                        │ 85411 │
+│ Buenos días, con gusto le ayudo                                                     │ 85411 │
+│ Su saldo actual es {monto} {moneda} y su límite disponible es de {limite} {moneda}. │ 51555 │
+│ Su saldo actual es de {monto} {moneda}.                                             │ 51189 │
+│ Su saldo actual es {monto} {moneda} y su límite disponible es de {limite} {moneda}  │ 34355 │
+│ Su saldo actual es de {monto} {moneda}                                              │ 34222 │
+│ Con gusto                                                                           │ 25766 │
+│ No hay problema, que tenga buen día.                                                │ 17242 │
+│ Claro, estoy para servirle.                                                         │ 17225 │
+│ ¿Hay algo más en lo que pueda ayudarle?                                             │ 17146 │
+│ Perfecto, ¿necesita algo más?                                                       │ 16964 │
+│ ¿Hay algo más en lo que pueda ayudarle                                              │  8620 │
+│ No hay problema, que tenga buen día                                                 │  8581 │
+│ Perfecto, ¿necesita algo más                                                        │  8542 │
+│ Claro, estoy para servirle                                                          │  8527 │
+└─────────────────────────────────────────────────────────────────────────────────────┴───────┘
+  17 rows                                                                           2 columns
+
+
+##### -- [T7] transcript opening vs labelled contact reason (text is independent of label)
+┌─────────────────────┬────────────────┬───────┐
+│       script        │ contact_reason │   n   │
+│       varchar       │    varchar     │ int64 │
+├─────────────────────┼────────────────┼───────┤
+│ credit_card_balance │ Transaccional  │ 29936 │
+│ credit_card_balance │ Producto       │ 18685 │
+│ credit_card_balance │ Queja          │ 14722 │
+│ credit_card_balance │ Técnico        │ 12893 │
+│ credit_card_balance │ Comercial      │  7043 │
+│ credit_card_balance │ Retención      │  2631 │
+│ savings_balance     │ Transaccional  │ 29850 │
+│ savings_balance     │ Producto       │ 18973 │
+│ savings_balance     │ Queja          │ 14476 │
+│ savings_balance     │ Técnico        │ 12798 │
+│ savings_balance     │ Comercial      │  6765 │
+│ savings_balance     │ Retención      │  2549 │
+└─────────────────────┴────────────────┴───────┘
+  12 rows                            3 columns
+
+
+##### -- [T8] main_topics is a copy of contact_reason
+┌───────────┬────────┐
+│ pct_equal │   n    │
+│  double   │ int64  │
+├───────────┼────────┤
+│     100.0 │ 171321 │
+└───────────┴────────┘
+
+
+##### -- [T9] free-text diversity in complaints and surveys
+┌────────────────────────┬───────────────────────┬─────────────────┐
+│ complaint_descriptions │ complaint_resolutions │ survey_comments │
+│         int64          │         int64         │      int64      │
+├────────────────────────┼───────────────────────┼─────────────────┤
+│                      5 │                     5 │              13 │
+└────────────────────────┴───────────────────────┴─────────────────┘
+
+
+##### -- [C1] complaint category x subcategory
+┌──────────────┬──────────────────────┬───────┬────────┬────────────────┬──────────────┬─────────────┬─────────┐
+│   category   │     subcategory      │   n   │  pct   │ sla_breach_pct │ med_res_days │ avg_claimed │ res_sat │
+│   varchar    │       varchar        │ int64 │ double │     double     │    double    │   double    │ double  │
+├──────────────┼──────────────────────┼───────┼────────┼────────────────┼──────────────┼─────────────┼─────────┤
+│ Transactions │ Cargo no reconocido  │ 12297 │  18.33 │           20.4 │         15.0 │      2538.0 │    3.07 │
+│ Fees         │ Cobro indebido       │ 12194 │  18.17 │           19.9 │         16.0 │      2519.0 │    2.99 │
+│ Technical    │ Problema con app     │ 12128 │  18.08 │           20.0 │         16.0 │      2527.0 │    3.02 │
+│ Branch       │ Atención en sucursal │ 11892 │  17.72 │           20.4 │         16.0 │      2593.0 │    3.05 │
+│ Service      │ Calidad de servicio  │ 11886 │  17.72 │           20.3 │         16.0 │      2527.0 │    2.93 │
+│ Branch       │ NULL                 │  1469 │   2.19 │           20.6 │         16.0 │      2464.0 │    3.05 │
+│ Fees         │ NULL                 │  1359 │   2.03 │           18.3 │         14.0 │      2531.0 │    2.77 │
+│ Service      │ NULL                 │  1308 │   1.95 │           19.8 │         16.0 │      2471.0 │    3.28 │
+│ Transactions │ NULL                 │  1283 │   1.91 │           18.1 │         16.0 │      2533.0 │    3.33 │
+│ Technical    │ NULL                 │  1279 │   1.91 │           19.7 │         16.0 │      2468.0 │    3.05 │
+└──────────────┴──────────────────────┴───────┴────────┴────────────────┴──────────────┴─────────────┴─────────┘
+  10 rows                                                                                            8 columns
+
+
+##### -- [C2] complaint case_type and reception channel
+┌────────────┬───────────────────┬───────┬────────────────┐
+│ case_type  │ reception_channel │   n   │ sla_breach_pct │
+│  varchar   │      varchar      │ int64 │     double     │
+├────────────┼───────────────────┼───────┼────────────────┤
+│ Complaint  │ Call Center       │ 20303 │           19.9 │
+│ Claim      │ Call Center       │  8372 │           19.8 │
+│ Complaint  │ Email             │  8023 │           20.1 │
+│ Complaint  │ Web               │  5957 │           20.4 │
+│ Complaint  │ App               │  4078 │           19.9 │
+│ Request    │ Call Center       │  3393 │           20.3 │
+│ Claim      │ Email             │  3273 │           19.9 │
+│ Claim      │ Web               │  2445 │           20.1 │
+│ Claim      │ App               │  1697 │           20.7 │
+│ Suggestion │ Call Center       │  1693 │           22.6 │
+│ Complaint  │ Branch            │  1656 │           20.5 │
+│ Request    │ Email             │  1355 │           18.6 │
+│ Request    │ Web               │  1014 │           20.4 │
+│ Request    │ App               │   677 │           22.7 │
+│ Suggestion │ Email             │   672 │           18.5 │
+│ Claim      │ Branch            │   640 │           18.9 │
+│ Suggestion │ Web               │   468 │           20.5 │
+│ Complaint  │ Regulator         │   435 │           22.3 │
+│ Suggestion │ App               │   275 │           23.3 │
+│ Request    │ Branch            │   253 │           19.0 │
+│ Claim      │ Regulator         │   171 │           21.1 │
+│ Suggestion │ Branch            │   134 │           18.7 │
+│ Request    │ Regulator         │    69 │           27.5 │
+│ Suggestion │ Regulator         │    42 │           21.4 │
+└────────────┴───────────────────┴───────┴────────────────┘
+  24 rows                                       4 columns
+
+
+##### -- [C3] complaint status share (overall and 2023 cohort)
+┌─────────┬────────────────────────┬────────────────┬────────────────────────┐
+│ cohort  │ open_or_in_process_pct │ unresolved_pct │ no_resolution_text_pct │
+│ varchar │         double         │     double     │         double         │
+├─────────┼────────────────────────┼────────────────┼────────────────────────┤
+│ all     │                   70.0 │           74.9 │                   77.2 │
+│ 2023    │                   70.7 │           75.5 │                   77.6 │
+└─────────┴────────────────────────┴────────────────┴────────────────────────┘
+
+
+##### -- [C4] complaint link fill rates
+┌───────┬─────────────────────────┬──────────────┬─────────────┬──────────┬────────────┐
+│   n   │ with_origin_interaction │ with_product │ with_amount │ assigned │ repeat_pct │
+│ int64 │          int64          │    int64     │    int64    │  int64   │   double   │
+├───────┼─────────────────────────┼──────────────┼─────────────┼──────────┼────────────┤
+│ 67095 │                       0 │        44570 │       21751 │    43980 │       15.0 │
+└───────┴─────────────────────────┴──────────────┴─────────────┴──────────┴────────────┘
+
+
+##### -- [C5] complaint date coherence
+┌────────────────────┬───────────────────────┬───────────────┐
+│ resp_before_create │ resolved_without_date │ days_mismatch │
+│       int64        │         int64         │     int64     │
+├────────────────────┼───────────────────────┼───────────────┤
+│                  0 │                   772 │             0 │
+└────────────────────┴───────────────────────┴───────────────┘
+
+
+##### -- [C6] complaint category -> subcategory is 1:1
+┌──────────────┬─────────────────┬──────────────────────┐
+│   category   │ n_subcategories │     subcategory      │
+│   varchar    │      int64      │       varchar        │
+├──────────────┼─────────────────┼──────────────────────┤
+│ Branch       │               1 │ Atención en sucursal │
+│ Fees         │               1 │ Cobro indebido       │
+│ Service      │               1 │ Calidad de servicio  │
+│ Technical    │               1 │ Problema con app     │
+│ Transactions │               1 │ Cargo no reconocido  │
+└──────────────┴─────────────────┴──────────────────────┘
+
+
+##### -- [C7] complaint priority is independent of category; SLA breach and first response independent of priority
+┌───────────────────────┬───────┬──────────────────────┬────────────────┬──────────────────────┐
+│           k           │   n   │ high_or_critical_pct │ sla_breach_pct │ med_first_response_h │
+│        varchar        │ int64 │        double        │     double     │        double        │
+├───────────────────────┼───────┼──────────────────────┼────────────────┼──────────────────────┤
+│ category=Branch       │ 13361 │                 20.1 │           NULL │                 NULL │
+│ category=Fees         │ 13553 │                 19.6 │           NULL │                 NULL │
+│ category=Service      │ 13194 │                 19.5 │           NULL │                 NULL │
+│ category=Technical    │ 13407 │                 19.7 │           NULL │                 NULL │
+│ category=Transactions │ 13580 │                 19.7 │           NULL │                 NULL │
+│ priority=Critical     │  3355 │                 NULL │           19.2 │                 38.0 │
+│ priority=High         │  9890 │                 NULL │           20.5 │                 37.0 │
+│ priority=Low          │ 20411 │                 NULL │           20.1 │                 38.0 │
+│ priority=Medium       │ 33439 │                 NULL │           20.1 │                 38.0 │
+└───────────────────────┴───────┴──────────────────────┴────────────────┴──────────────────────┘
+
+
+##### -- [C8] is_repeat_complainer vs actual complaint in prior 90 days
+┌──────────────────────┬───────┬──────────────────────┐
+│ is_repeat_complainer │   n   │ actual_prior_90d_pct │
+│       boolean        │ int64 │        double        │
+├──────────────────────┼───────┼──────────────────────┤
+│ false                │ 57009 │                 3.48 │
+│ true                 │ 10086 │                  3.3 │
+└──────────────────────┴───────┴──────────────────────┘
+
+
+##### -- [C9] complaint currency vs customer country (random)
+┌───────────┬──────────┬───────┐
+│  country  │ currency │   n   │
+│  varchar  │ varchar  │ int64 │
+├───────────┼──────────┼───────┤
+│ Argentina │ NULL     │  9009 │
+│ Argentina │ MXN      │  1124 │
+│ Argentina │ ARS      │  1082 │
+│ Argentina │ COP      │  1070 │
+│ Argentina │ USD      │  1051 │
+│ Colombia  │ NULL     │ 13707 │
+│ Colombia  │ ARS      │  1711 │
+│ Colombia  │ USD      │  1682 │
+│ Colombia  │ MXN      │  1650 │
+│ Colombia  │ COP      │  1634 │
+│ México    │ NULL     │ 22603 │
+│ México    │ COP      │  2752 │
+│ México    │ MXN      │  2713 │
+│ México    │ USD      │  2698 │
+│ México    │ ARS      │  2609 │
+└───────────┴──────────┴───────┘
+  15 rows            3 columns
+
+
+##### -- [X1] transaction type x status
+┌──────────────────┬────────────────────┬────────┐
+│ transaction_type │ transaction_status │   n    │
+│     varchar      │      varchar       │ int64  │
+├──────────────────┼────────────────────┼────────┤
+│ Adjustment       │ Approved           │ 121394 │
+│ Adjustment       │ Declined           │   6688 │
+│ Adjustment       │ Pending            │   2708 │
+│ Adjustment       │ Reversed           │   1328 │
+│ Deposit          │ Approved           │ 560724 │
+│ Deposit          │ Declined           │  30240 │
+│ Deposit          │ Pending            │  12268 │
+│ Deposit          │ Reversed           │   6177 │
+│ Payment          │ Approved           │ 679954 │
+│ Payment          │ Declined           │  36851 │
+│ Payment          │ Pending            │  14684 │
+│ Payment          │ Reversed           │   7475 │
+│ Purchase         │ Approved           │ 996168 │
+│ Purchase         │ Declined           │  54565 │
+│ Purchase         │ Pending            │  21595 │
+│ Purchase         │ Reversed           │  11078 │
+│ Transfer         │ Approved           │ 824676 │
+│ Transfer         │ Declined           │  44979 │
+│ Transfer         │ Pending            │  17841 │
+│ Transfer         │ Reversed           │   8942 │
+│ Withdrawal       │ Approved           │ 887765 │
+│ Withdrawal       │ Declined           │  47911 │
+│ Withdrawal       │ Pending            │  19247 │
+│ Withdrawal       │ Reversed           │   9750 │
+└──────────────────┴────────────────────┴────────┘
+  24 rows                              3 columns
+
+
+##### -- [X2] transaction status x response code
+┌────────────────────┬───────────────┬─────────┬───────────┐
+│ transaction_status │ response_code │    n    │ fraud_pct │
+│      varchar       │    varchar    │  int64  │  double   │
+├────────────────────┼───────────────┼─────────┼───────────┤
+│ Approved           │ 00            │ 3867312 │       0.1 │
+│ Approved           │ NULL          │  203369 │       0.1 │
+│ Declined           │ 51            │   52788 │       0.1 │
+│ Declined           │ 14            │   52711 │      0.13 │
+│ Declined           │ 54            │   52527 │      0.07 │
+│ Declined           │ 05            │   52246 │      0.08 │
+│ Declined           │ NULL          │   10962 │      0.11 │
+│ Pending            │ 05            │   21191 │      0.08 │
+│ Pending            │ 14            │   21096 │      0.08 │
+│ Pending            │ 51            │   20911 │      0.09 │
+│ Pending            │ 54            │   20753 │      0.11 │
+│ Pending            │ NULL          │    4392 │      0.11 │
+│ Reversed           │ 05            │   10704 │      0.07 │
+│ Reversed           │ 14            │   10665 │      0.08 │
+│ Reversed           │ 54            │   10591 │       0.1 │
+│ Reversed           │ 51            │   10480 │      0.08 │
+│ Reversed           │ NULL          │    2310 │      0.09 │
+└────────────────────┴───────────────┴─────────┴───────────┘
+  17 rows                                        4 columns
+
+
+##### -- [X3] fraud rate by fraud_score bucket
+┌─────────┬─────────┬────────┬───────────┐
+│ bucket  │    n    │ fraud  │ fraud_pct │
+│ varchar │  int64  │ int128 │  double   │
+├─────────┼─────────┼────────┼───────────┤
+│ 00-20   │ 2358695 │    696 │      0.03 │
+│ 20-50   │ 1179486 │   1059 │      0.09 │
+│ 50-80   │     997 │    997 │     100.0 │
+│ 80-100  │     673 │    673 │     100.0 │
+│ null    │  885157 │    891 │       0.1 │
+└─────────┴─────────┴────────┴───────────┘
+
+
+##### -- [X4] composition of fraud labels by score
+┌───────┬─────────────┬─────────────┬────────────┐
+│ fraud │ score_ge_50 │ score_lt_50 │ score_null │
+│ int64 │    int64    │    int64    │   int64    │
+├───────┼─────────────┼─────────────┼────────────┤
+│  4316 │        1670 │        1755 │        891 │
+└───────┴─────────────┴─────────────┴────────────┘
+
+
+##### -- [X15] exact fraud_score boundary: non-fraud scores never exceed 30
+┌────────────────────┬─────────────┬─────────────┬───────┐
+│ max_nonfraud_score │ score_gt_30 │ fraud_gt_30 │ fraud │
+│       double       │    int64    │    int64    │ int64 │
+├────────────────────┼─────────────┼─────────────┼───────┤
+│               30.0 │        2373 │        2373 │  4316 │
+└────────────────────┴─────────────┴─────────────┴───────┘
+
+
+##### -- [X5] transaction country x currency
+┌─────────────────────┬──────────┬─────────┐
+│ transaction_country │ currency │    n    │
+│       varchar       │ varchar  │  int64  │
+├─────────────────────┼──────────┼─────────┤
+│ Argentina           │ ARS      │  752794 │
+│ Argentina           │ USD      │  102708 │
+│ Argentina           │ COP      │   12059 │
+│ Brazil              │ USD      │   20726 │
+│ Brazil              │ COP      │   11887 │
+│ Brazil              │ ARS      │    7859 │
+│ Colombia            │ COP      │ 1134801 │
+│ Colombia            │ USD      │  146719 │
+│ Colombia            │ ARS      │    7983 │
+│ Mexico              │ USD      │   20615 │
+│ Mexico              │ COP      │   11905 │
+│ Mexico              │ ARS      │    7995 │
+│ México              │ USD      │ 2105794 │
+│ Spain               │ USD      │   20829 │
+│ Spain               │ COP      │   11790 │
+│ Spain               │ ARS      │    7923 │
+│ USA                 │ USD      │   20588 │
+│ USA                 │ COP      │   12002 │
+│ USA                 │ ARS      │    8031 │
+└─────────────────────┴──────────┴─────────┘
+  19 rows                        3 columns
+
+
+##### -- [X6] amount_usd fill by currency
+┌──────────┬─────────┬──────────┬────────────┬─────────┐
+│ currency │    n    │ with_usd │ med_amount │ med_usd │
+│ varchar  │  int64  │  int64   │   double   │ double  │
+├──────────┼─────────┼──────────┼────────────┼─────────┤
+│ ARS      │  792585 │   752544 │  163284.79 │ 466.395 │
+│ USD      │ 2437979 │        0 │     467.08 │    NULL │
+│ COP      │ 1194444 │  1135008 │ 1867136.48 │  466.86 │
+└──────────┴─────────┴──────────┴────────────┴─────────┘
+
+
+##### -- [X7] product type x status
+┌──────────────────────┬────────────────┬────────┐
+│     product_type     │ product_status │   n    │
+│       varchar        │    varchar     │ int64  │
+├──────────────────────┼────────────────┼────────┤
+│ Cuenta Ahorro        │ Active         │ 102148 │
+│ Cuenta Ahorro        │ Closed         │   9716 │
+│ Cuenta Ahorro        │ Blocked        │   5923 │
+│ Cuenta Ahorro        │ Suspended      │   2416 │
+│ Cuenta Corriente     │ Active         │  85079 │
+│ Cuenta Corriente     │ Closed         │   7936 │
+│ Cuenta Corriente     │ Blocked        │   4962 │
+│ Cuenta Corriente     │ Suspended      │   2002 │
+│ Inversión            │ Active         │   5022 │
+│ Inversión            │ Closed         │    434 │
+│ Inversión            │ Blocked        │    275 │
+│ Inversión            │ Suspended      │    128 │
+│ Préstamo Hipotecario │ Active         │  10157 │
+│ Préstamo Hipotecario │ Closed         │    912 │
+│ Préstamo Hipotecario │ Blocked        │    612 │
+│ Préstamo Hipotecario │ Suspended      │    229 │
+│ Préstamo Personal    │ Active         │  16977 │
+│ Préstamo Personal    │ Closed         │   1585 │
+│ Préstamo Personal    │ Blocked        │   1010 │
+│ Préstamo Personal    │ Suspended      │    388 │
+│ Seguro               │ Active         │   1743 │
+│ Seguro               │ Closed         │    159 │
+│ Seguro               │ Blocked        │    109 │
+│ Seguro               │ Suspended      │     38 │
+│ Tarjeta Crédito      │ Active         │  85090 │
+│ Tarjeta Crédito      │ Closed         │   8053 │
+│ Tarjeta Crédito      │ Blocked        │   4932 │
+│ Tarjeta Crédito      │ Suspended      │   2027 │
+│ Tarjeta Débito       │ Active         │  33749 │
+│ Tarjeta Débito       │ Closed         │   3244 │
+│ Tarjeta Débito       │ Blocked        │   2112 │
+│ Tarjeta Débito       │ Suspended      │    833 │
+└──────────────────────┴────────────────┴────────┘
+  32 rows                              3 columns
+
+
+##### -- [X8] credit products: limits, delinquency, expiry
+┌──────────────────────┬────────┬────────────┬────────────────────┬────────────────────────┬────────────────────┬─────────┬──────────┬─────────────┐
+│     product_type     │   n    │ with_limit │     med_limit      │ dpd_pos_pct_of_nonnull │ dpd_pos_pct_of_all │ max_dpd │ avg_rate │ with_expiry │
+│       varchar        │ int64  │   int64    │       double       │         double         │       double       │ double  │  double  │    int64    │
+├──────────────────────┼────────┼────────────┼────────────────────┼────────────────────────┼────────────────────┼─────────┼──────────┼─────────────┤
+│ Cuenta Ahorro        │ 120203 │          0 │               NULL │                   NULL │                0.0 │    NULL │     2.25 │           0 │
+│ Tarjeta Crédito      │ 100102 │      95043 │           45461.94 │                   14.9 │               14.2 │   180.0 │     31.5 │       95119 │
+│ Cuenta Corriente     │  99979 │          0 │               NULL │                   NULL │                0.0 │    NULL │      0.3 │           0 │
+│ Tarjeta Débito       │  39938 │          0 │               NULL │                   NULL │                0.0 │    NULL │      0.0 │       38042 │
+│ Préstamo Personal    │  19960 │      18968 │          136161.43 │                   15.0 │               14.2 │   180.0 │    20.03 │           0 │
+│ Préstamo Hipotecario │  11910 │      11306 │ 133493.16499999998 │                   15.2 │               14.5 │   180.0 │     8.99 │           0 │
+│ Inversión            │   5859 │          0 │               NULL │                   NULL │                0.0 │    NULL │     5.47 │           0 │
+│ Seguro               │   2049 │          0 │               NULL │                   NULL │                0.0 │    NULL │      0.0 │           0 │
+└──────────────────────┴────────┴────────────┴────────────────────┴────────────────────────┴────────────────────┴─────────┴──────────┴─────────────┘
+
+
+##### -- [X9] active-but-expired products and over-limit balances (as of dataset end 2026-06-17)
+┌──────────────────────┬────────────────┬────────────┬───────────────────┐
+│     product_type     │ active_expired │ over_limit │ over_limit_active │
+│       varchar        │     int64      │   int64    │       int64       │
+├──────────────────────┼────────────────┼────────────┼───────────────────┤
+│ Cuenta Ahorro        │              0 │          0 │                 0 │
+│ Cuenta Corriente     │              0 │          0 │                 0 │
+│ Inversión            │              0 │          0 │                 0 │
+│ Préstamo Hipotecario │              0 │       5854 │              4981 │
+│ Préstamo Personal    │              0 │        453 │               393 │
+│ Seguro               │              0 │          0 │                 0 │
+│ Tarjeta Crédito      │          40484 │       1203 │              1015 │
+│ Tarjeta Débito       │          16180 │          0 │                 0 │
+└──────────────────────┴────────────────┴────────────┴───────────────────┘
+
+
+##### -- [X10] product currency by owner country
+┌───────────┬──────────┬────────┐
+│  country  │ currency │   n    │
+│  varchar  │ varchar  │ int64  │
+├───────────┼──────────┼────────┤
+│ Argentina │ ARS      │  71524 │
+│ Argentina │ USD      │   7918 │
+│ Colombia  │ COP      │ 107975 │
+│ Colombia  │ USD      │  12185 │
+│ México    │ USD      │ 200398 │
+└───────────┴──────────┴────────┘
+
+
+##### -- [X11] transactions on currently non-active products
+┌────────────────┬─────────┐
+│ product_status │    n    │
+│    varchar     │  int64  │
+├────────────────┼─────────┤
+│ Active         │ 4425008 │
+└────────────────┴─────────┘
+
+
+##### -- [X12] transactions outside product lifetime fields
+┌─────────┬────────────────┬──────────────────────┐
+│    n    │ before_opening │ after_last_txn_field │
+│  int64  │     int64      │        int64         │
+├─────────┼────────────────┼──────────────────────┤
+│ 4425008 │         827610 │              2137973 │
+└─────────┴────────────────┴──────────────────────┘
+
+
+##### -- [X13] transaction types on loans / insurance / investments
+┌──────────────────────┬──────────────────┬────────┐
+│     product_type     │ transaction_type │   n    │
+│       varchar        │     varchar      │ int64  │
+├──────────────────────┼──────────────────┼────────┤
+│ Inversión            │ Payment          │  39121 │
+│ Inversión            │ Adjustment       │  19577 │
+│ Inversión            │ Transfer         │   6367 │
+│ Préstamo Hipotecario │ Payment          │  78908 │
+│ Préstamo Hipotecario │ Adjustment       │  39352 │
+│ Préstamo Hipotecario │ Transfer         │  13125 │
+│ Préstamo Personal    │ Payment          │ 132653 │
+│ Préstamo Personal    │ Adjustment       │  66330 │
+│ Préstamo Personal    │ Transfer         │  22181 │
+│ Seguro               │ Payment          │  13579 │
+│ Seguro               │ Adjustment       │   6859 │
+│ Seguro               │ Transfer         │   2268 │
+└──────────────────────┴──────────────────┴────────┘
+  12 rows                                3 columns
+
+
+##### -- [X14] transaction channel x type (implausible combinations such as ATM Purchase, POS Deposit)
+┌──────────┬──────────────────┬────────┐
+│ channel  │ transaction_type │   n    │
+│ varchar  │     varchar      │ int64  │
+├──────────┼──────────────────┼────────┤
+│ ATM      │ Purchase         │ 325993 │
+│ ATM      │ Withdrawal       │ 289518 │
+│ ATM      │ Transfer         │ 268811 │
+│ ATM      │ Payment          │ 221647 │
+│ ATM      │ Deposit          │ 182775 │
+│ ATM      │ Adjustment       │  39590 │
+│ App      │ Purchase         │ 162618 │
+│ App      │ Withdrawal       │ 144402 │
+│ App      │ Transfer         │ 134801 │
+│ App      │ Payment          │ 110413 │
+│ App      │ Deposit          │  91446 │
+│ App      │ Adjustment       │  19734 │
+│ Branch   │ Purchase         │  32314 │
+│ Branch   │ Withdrawal       │  28837 │
+│ Branch   │ Transfer         │  26914 │
+│ Branch   │ Payment          │  22064 │
+│ Branch   │ Deposit          │  18388 │
+│ Branch   │ Adjustment       │   3978 │
+│ POS      │ Purchase         │ 378515 │
+│ POS      │ Withdrawal       │ 337693 │
+│ POS      │ Transfer         │ 313434 │
+│ POS      │ Payment          │ 258573 │
+│ POS      │ Deposit          │ 213678 │
+│ POS      │ Adjustment       │  46268 │
+│ Transfer │ Purchase         │  21697 │
+│ Transfer │ Withdrawal       │  19466 │
+│ Transfer │ Transfer         │  18026 │
+│ Transfer │ Payment          │  15052 │
+│ Transfer │ Deposit          │  12217 │
+│ Transfer │ Adjustment       │   2701 │
+│ Web      │ Purchase         │ 162269 │
+│ Web      │ Withdrawal       │ 144757 │
+│ Web      │ Transfer         │ 134452 │
+│ Web      │ Payment          │ 111215 │
+│ Web      │ Deposit          │  90905 │
+│ Web      │ Adjustment       │  19847 │
+└──────────┴──────────────────┴────────┘
+  36 rows                    3 columns
+
+
+##### -- [A1] transaction product belongs to transaction customer
+┌─────────┬─────────────┐
+│    n    │ owner_match │
+│  int64  │    int64    │
+├─────────┼─────────────┤
+│ 4425008 │     4425008 │
+└─────────┴─────────────┘
+
+
+##### -- [A2] complaint affected_product belongs to complainant
+┌───────┬─────────────┐
+│   n   │ owner_match │
+│ int64 │    int64    │
+├───────┼─────────────┤
+│ 44570 │           0 │
+└───────┴─────────────┘
+
+
+##### -- [A3] interaction mentioned_products belong to caller
+┌────────┬─────────────────┬─────────────┐
+│  refs  │ owned_by_caller │ nonexistent │
+│ int64  │      int64      │    int64    │
+├────────┼─────────────────┼─────────────┤
+│ 548680 │               0 │      545118 │
+└────────┴─────────────────┴─────────────┘
+
+
+##### -- [A4] transcript vs interaction consistency
+┌────────┬───────────────┬────────────┬───────────────┐
+│   n    │ same_customer │ same_agent │ same_duration │
+│ int64  │     int64     │   int64    │     int64     │
+├────────┼───────────────┼────────────┼───────────────┤
+│ 171321 │        171321 │     171321 │        147292 │
+└────────┴───────────────┴────────────┴───────────────┘
+
+
+##### -- [A14] digital_events.product_id belongs to the event's customer (third ownership trap)
+┌────────────────────────────────────┬─────────────┐
+│ n_events_with_customer_and_product │ owner_match │
+│               int64                │    int64    │
+├────────────────────────────────────┼─────────────┤
+│                            1094242 │          16 │
+└────────────────────────────────────┴─────────────┘
+
+
+##### -- [A12] active Portuguese-speaking agents in dispute-relevant specialties, by shift
+┌───────────────────┬────────────┬───────────┬────────────┐
+│     specialty     │ work_shift │ pt_active │ all_active │
+│      varchar      │  varchar   │   int64   │   int64    │
+├───────────────────┼────────────┼───────────┼────────────┤
+│ Fraudes           │ Afternoon  │         2 │         30 │
+│ Fraudes           │ Morning    │         4 │         31 │
+│ Fraudes           │ Night      │         0 │         24 │
+│ Fraudes           │ Rotating   │         1 │         11 │
+│ Quejas y Reclamos │ Afternoon  │         1 │         20 │
+│ Quejas y Reclamos │ Morning    │         2 │         17 │
+│ Quejas y Reclamos │ Night      │         1 │         14 │
+│ Quejas y Reclamos │ Rotating   │         3 │         13 │
+└───────────────────┴────────────┴───────────┴────────────┘
+
+
+##### -- [A5] shared email addresses
+┌───────────────┬────────────────────────────┬─────────────┐
+│ shared_emails │ customers_on_shared_emails │ null_emails │
+│     int64     │           int128           │    int64    │
+├───────────────┼────────────────────────────┼─────────────┤
+│         24203 │                      79930 │        2984 │
+└───────────────┴────────────────────────────┴─────────────┘
+
+
+##### -- [A6] document type by country
+┌───────────┬───────────────┬───────┐
+│  country  │ document_type │   n   │
+│  varchar  │    varchar    │ int64 │
+├───────────┼───────────────┼───────┤
+│ Argentina │ DNI           │ 29842 │
+│ Colombia  │ CE            │ 15150 │
+│ Colombia  │ Pasaporte     │ 15062 │
+│ Colombia  │ CC            │ 15039 │
+│ México    │ DNI           │ 74907 │
+└───────────┴───────────────┴───────┘
+
+
+##### -- [A7] mobile phone prefix by country
+┌───────────┬─────────┬───────┐
+│  country  │ prefix  │   n   │
+│  varchar  │ varchar │ int64 │
+├───────────┼─────────┼───────┤
+│ Argentina │ +54     │ 28897 │
+│ Argentina │ NULL    │   945 │
+│ Colombia  │ +57     │ 43848 │
+│ Colombia  │ NULL    │  1403 │
+│ México    │ +54     │ 72548 │
+│ México    │ NULL    │  2359 │
+└───────────┴─────────┴───────┘
+
+
+##### -- [A8] campaign sends vs marketing consent
+┌───────────────────┬────────┐
+│ accepts_marketing │ sends  │
+│      boolean      │ int64  │
+├───────────────────┼────────┤
+│ true              │ 872384 │
+│ false             │ 874417 │
+└───────────────────┴────────┘
+
+
+##### -- [A9] contacts by customer status
+┌─────────────────┬────────┐
+│ customer_status │   n    │
+│     varchar     │ int64  │
+├─────────────────┼────────┤
+│ Active          │ 584388 │
+│ Inactive        │  68009 │
+│ Suspended       │  20176 │
+│ Closed          │  13723 │
+└─────────────────┴────────┘
+
+
+##### -- [A10] agent languages
+┌────────────────────────────┬───────┬────────┐
+│         languages          │   n   │ active │
+│          varchar           │ int64 │ int64  │
+├────────────────────────────┼───────┼────────┤
+│ español                    │   649 │    587 │
+│ español, inglés            │   422 │    388 │
+│ español, portugués         │    68 │     60 │
+│ español, inglés, portugués │    61 │     55 │
+└────────────────────────────┴───────┴────────┘
+
+
+##### -- [A11] agent specialties
+┌───────────────────┬───────┬────────┐
+│     specialty     │   n   │ active │
+│      varchar      │ int64 │ int64  │
+├───────────────────┼───────┼────────┤
+│ NULL              │   476 │    442 │
+│ Fraudes           │   105 │     96 │
+│ Cobranza          │    97 │     86 │
+│ Retención         │    96 │     85 │
+│ Soporte Técnico   │    96 │     89 │
+│ Créditos          │    87 │     80 │
+│ Inversiones       │    83 │     74 │
+│ Ventas            │    82 │     74 │
+│ Quejas y Reclamos │    78 │     64 │
+└───────────────────┴───────┴────────┘
+
+
+##### -- [Q1] primary-key duplicates
+┌────────────────┬─────────┐
+│       t        │ pk_dups │
+│    varchar     │  int64  │
+├────────────────┼─────────┤
+│ customers      │       0 │
+│ products       │       0 │
+│ transactions   │       0 │
+│ interactions   │       0 │
+│ transcripts    │       0 │
+│ complaints     │       0 │
+│ surveys        │       0 │
+│ digital_events │       0 │
+│ campaign_sends │       0 │
+│ fx             │       0 │
+└────────────────┴─────────┘
+  10 rows        2 columns
+
+
+##### -- [Q2] content duplicates (same business content, different id)
+┌────────────────┬──────────────┐
+│       t        │ content_dups │
+│    varchar     │    int64     │
+├────────────────┼──────────────┤
+│ transactions   │            0 │
+│ interactions   │            0 │
+│ complaints     │            0 │
+│ digital_events │            0 │
+└────────────────┴──────────────┘
+
+
+##### -- [Q3] orphan foreign keys
+┌───────────────────────────────────┬─────────┐
+│                fk                 │ orphans │
+│              varchar              │  int64  │
+├───────────────────────────────────┼─────────┤
+│ transactions.customer_id          │       0 │
+│ transactions.product_id           │       0 │
+│ interactions.customer_id          │       0 │
+│ interactions.agent_id             │       0 │
+│ transcripts.interaction_id        │       0 │
+│ complaints.customer_id            │       0 │
+│ complaints.affected_product_id    │       0 │
+│ products.customer_id              │       0 │
+│ surveys.interaction_id            │       0 │
+│ surveys.agent_id                  │       0 │
+│ campaign_sends.campaign_id        │       0 │
+│ customers.registration_branch_id  │  149995 │
+│ products.opening_branch_id        │       0 │
+│ service_agents.assigned_branch_id │     831 │
+│ transactions.branch_id            │       0 │
+│ complaints.related_branch_id      │       0 │
+└───────────────────────────────────┴─────────┘
+  16 rows                           2 columns
+
+
+##### -- [Q4] process_date minus event date per table, with time-of-day range (per-table batch cutoff, not late data)
+┌────────────────┬──────────┬──────────┬──────────┬──────────┐
+│       t        │ lag_days │    n     │ min_hhmm │ max_hhmm │
+│    varchar     │  int64   │  int64   │ varchar  │ varchar  │
+├────────────────┼──────────┼──────────┼──────────┼──────────┤
+│ complaints     │       -1 │    22585 │ 00:00    │ 08:00    │
+│ complaints     │        0 │    44510 │ 08:00    │ 23:59    │
+│ digital_events │       -1 │  3930816 │ 00:00    │ 06:09    │
+│ digital_events │        0 │ 11690178 │ 06:00    │ 23:59    │
+│ interactions   │       -1 │   228318 │ 00:00    │ 08:00    │
+│ interactions   │        0 │   457978 │ 08:00    │ 23:59    │
+│ surveys        │       -2 │    12241 │ 00:00    │ 07:55    │
+│ surveys        │       -1 │   156851 │ 00:00    │ 23:59    │
+│ surveys        │        0 │    43667 │ 09:09    │ 23:59    │
+│ transactions   │       -1 │  1106307 │ 00:00    │ 06:00    │
+│ transactions   │        0 │  3318701 │ 06:00    │ 23:59    │
+└────────────────┴──────────┴──────────┴──────────┴──────────┘
+  11 rows                                          5 columns
+
+
+##### -- [Q4b] the cutoff is the same for every customer country (so not a customer timezone)
+┌───────────┬───────────────────────────┐
+│  country  │ interactions_prev_day_pct │
+│  varchar  │          double           │
+├───────────┼───────────────────────────┤
+│ Argentina │                      33.3 │
+│ Colombia  │                      33.3 │
+│ México    │                      33.2 │
+└───────────┴───────────────────────────┘
+
+
+##### -- [Q13] future-dated fields relative to the dataset end (2026-06-17 business day)
+┌────────────────────────────┬───────────────────────────┬───────────────────────────┬───────────────────────┬────────────────────────────────┐
+│ customers_max_last_updated │ products_max_last_updated │ complaints_max_resolution │ resolutions_after_end │ first_response_after_file_date │
+│         timestamp          │         timestamp         │         timestamp         │         int64         │             int64              │
+├────────────────────────────┼───────────────────────────┼───────────────────────────┼───────────────────────┼────────────────────────────────┤
+│ 2027-06-15 19:35:27        │ 2027-06-15 02:26:58       │ 2026-07-18 06:07:57       │                   211 │                          40137 │
+└────────────────────────────┴───────────────────────────┴───────────────────────────┴───────────────────────┴────────────────────────────────┘
+
+
+##### -- [Q5] partition file date vs process_date, and event timestamp range
+┌────────────────────┬─────────────────────┬─────────────────────┬────────────┬────────────┐
+│ file_date_mismatch │       min_ts        │       max_ts        │   min_pd   │   max_pd   │
+│       int64        │      timestamp      │      timestamp      │    date    │    date    │
+├────────────────────┼─────────────────────┼─────────────────────┼────────────┼────────────┤
+│                  0 │ 2023-06-17 06:01:30 │ 2026-06-18 05:59:41 │ 2023-06-17 │ 2026-06-17 │
+└────────────────────┴─────────────────────┴─────────────────────┴────────────┴────────────┘
+
+
+##### -- [Q6] FX coverage and range
+┌─────────────────┬─────────────────┬───────┬────────────┬────────────┬───────────┬──────────┐
+│ source_currency │ target_currency │   n   │ first_day  │  last_day  │ min_rate  │ max_rate │
+│     varchar     │     varchar     │ int64 │    date    │    date    │  double   │  double  │
+├─────────────────┼─────────────────┼───────┼────────────┼────────────┼───────────┼──────────┤
+│ ARS             │ COP             │  1097 │ 2023-06-17 │ 2026-06-17 │    11.201 │  11.6553 │
+│ ARS             │ MXN             │  1097 │ 2023-06-17 │ 2026-06-17 │    0.0476 │   0.0495 │
+│ ARS             │ USD             │  1097 │ 2023-06-17 │ 2026-06-17 │    0.0028 │   0.0029 │
+│ COP             │ ARS             │  1097 │ 2023-06-17 │ 2026-06-17 │    0.0858 │   0.0892 │
+│ COP             │ MXN             │  1097 │ 2023-06-17 │ 2026-06-17 │    0.0042 │   0.0043 │
+│ COP             │ USD             │  1097 │ 2023-06-17 │ 2026-06-17 │    0.0002 │   0.0003 │
+│ MXN             │ ARS             │  1097 │ 2023-06-17 │ 2026-06-17 │   20.1771 │  20.9988 │
+│ MXN             │ COP             │  1097 │ 2023-06-17 │ 2026-06-17 │  230.6027 │ 239.9983 │
+│ MXN             │ USD             │  1097 │ 2023-06-17 │ 2026-06-17 │    0.0576 │     0.06 │
+│ USD             │ ARS             │  1097 │ 2023-06-17 │ 2026-06-17 │  343.0101 │ 356.9781 │
+│ USD             │ COP             │  1097 │ 2023-06-17 │ 2026-06-17 │ 3920.0148 │ 4079.944 │
+│ USD             │ MXN             │  1097 │ 2023-06-17 │ 2026-06-17 │    16.661 │  17.3396 │
+└─────────────────┴─────────────────┴───────┴────────────┴────────────┴───────────┴──────────┘
+  12 rows                                                                          7 columns
+
+
+##### -- [Q7] amount_usd consistency with FX table
+┌──────────┬─────────┬──────────────────┬────────────┐
+│ currency │    n    │ mean_abs_err_usd │ mean_ratio │
+│ varchar  │  int64  │      double      │   double   │
+├──────────┼─────────┼──────────────────┼────────────┤
+│ COP      │ 1135008 │            17.12 │     1.0007 │
+│ ARS      │  752544 │            16.48 │     0.9997 │
+└──────────┴─────────┴──────────────────┴────────────┘
+
+
+##### -- [Q8] customers by country and segment
+┌───────────┬─────────┬───────┬──────────────────┬──────────────┐
+│  country  │ segment │   n   │ avg_credit_score │  med_income  │
+│  varchar  │ varchar │ int64 │      double      │    double    │
+├───────────┼─────────┼───────┼──────────────────┼──────────────┤
+│ Argentina │ Basic   │ 17924 │            599.0 │    629051.49 │
+│ Argentina │ Plus    │  7441 │            699.0 │    2350665.3 │
+│ Argentina │ Premium │  2979 │            797.0 │   6335479.47 │
+│ Argentina │ Student │  1498 │            648.0 │    235842.16 │
+│ Colombia  │ Basic   │ 27069 │            600.0 │   7181139.39 │
+│ Colombia  │ Plus    │ 11309 │            699.0 │ 26949578.205 │
+│ Colombia  │ Premium │  4584 │            797.0 │  71978433.73 │
+│ Colombia  │ Student │  2289 │            650.0 │    2636783.2 │
+│ México    │ Basic   │ 44763 │            600.0 │      30634.4 │
+│ México    │ Plus    │ 18797 │            699.0 │    114069.51 │
+│ México    │ Premium │  7644 │            798.0 │     305599.8 │
+│ México    │ Student │  3703 │            649.0 │     11639.42 │
+└───────────┴─────────┴───────┴──────────────────┴──────────────┘
+  12 rows                                             5 columns
+
+
+##### -- [Q9] sentiment label ranges
+┌────────────────────┬────────┬────────┬────────┐
+│ detected_sentiment │   n    │ min_s  │ max_s  │
+│      varchar       │ int64  │ double │ double │
+├────────────────────┼────────┼────────┼────────┤
+│ Neutral            │ 459712 │   -0.3 │    0.3 │
+│ Negativo           │  94322 │   -0.7 │   -0.3 │
+│ Positivo           │  75562 │    0.3 │    0.7 │
+│ Muy Negativo       │  37727 │   -1.0 │   -0.7 │
+│ Muy Positivo       │  18973 │    0.7 │    1.0 │
+└────────────────────┴────────┴────────┴────────┘
+
+
+##### -- [Q10] survey scales and NPS categories
+┌─────────────┬──────────────┬────────┬───────────┬───────────┐
+│ survey_type │ nps_category │   n    │ min_score │ max_score │
+│   varchar   │   varchar    │ int64  │   int64   │   int64   │
+├─────────────┼──────────────┼────────┼───────────┼───────────┤
+│ CES         │ NULL         │  21235 │         1 │         4 │
+│ CSAT        │ NULL         │ 127856 │         1 │         4 │
+│ NPS         │ Detractor    │  45007 │         2 │         6 │
+│ NPS         │ Passive      │  15387 │         7 │         7 │
+│ NPS         │ NULL         │   3274 │         2 │         7 │
+└─────────────┴──────────────┴────────┴───────────┴───────────┘
+
+
+##### -- [Q11] digital events: types, anonymous share, IP country vs customer country
+┌────────────┬────────────────┬─────────┬───────────────┐
+│ event_type │ event_category │    n    │ anonymous_pct │
+│  varchar   │    varchar     │  int64  │    double     │
+├────────────┼────────────────┼─────────┼───────────────┤
+│ Login      │ Authentication │ 2434770 │          24.0 │
+│ Logout     │ Authentication │ 2433612 │          24.0 │
+│ PageView   │ Product        │ 1991955 │          24.0 │
+│ PageView   │ Navigation     │ 1991314 │          24.0 │
+│ PageView   │ Transaction    │ 1989295 │          24.0 │
+│ Click      │ Product        │ 1794359 │          24.0 │
+│ Click      │ Navigation     │ 1790675 │          23.9 │
+│ FormSubmit │ Transaction    │  596908 │          24.0 │
+│ Purchase   │ Transaction    │  239383 │          24.1 │
+│ Error      │ Transaction    │  179388 │          24.1 │
+│ Error      │ Navigation     │  179335 │          23.9 │
+└────────────┴────────────────┴─────────┴───────────────┘
+  11 rows                                     4 columns
+
+
+##### -- [Q12] digital IP country vs customer home country
+┌───────────┬────────────┬─────────┐
+│  country  │ ip_country │    n    │
+│  varchar  │  varchar   │  int64  │
+├───────────┼────────────┼─────────┤
+│ Argentina │ Argentina  │ 2366476 │
+│ Colombia  │ Colombia   │ 3578002 │
+│ México    │ México     │ 5931070 │
+└───────────┴────────────┴─────────┘
+
+
+##### -- [K1] declined transaction -> any contact within 7 days (full population)
+┌────────────────────┬─────────┬───────────┬────────────────┐
+│ transaction_status │    n    │ contacted │ contact_7d_pct │
+│      varchar       │  int64  │  int128   │     double     │
+├────────────────────┼─────────┼───────────┼────────────────┤
+│ Approved           │ 4070681 │    116866 │          2.871 │
+│ Declined           │  221234 │      6315 │          2.854 │
+│ Pending            │   88343 │      2522 │          2.855 │
+│ Reversed           │   44750 │      1274 │          2.847 │
+└────────────────────┴─────────┴───────────┴────────────────┘
+
+
+##### -- [K2] digital error vs login -> any contact within 1 day (full population)
+┌────────────┬─────────┬───────────┬────────────────┐
+│ event_type │    n    │ contacted │ contact_1d_pct │
+│  varchar   │  int64  │  int128   │     double     │
+├────────────┼─────────┼───────────┼────────────────┤
+│ Error      │  272663 │      1171 │          0.429 │
+│ Login      │ 1850949 │      7937 │          0.429 │
+└────────────┴─────────┴───────────┴────────────────┘
+
+
+##### -- [K3] fraud transaction -> complaint within 30 days (full population)
+┌──────────┬─────────┬───────────────────┬─────────────────────────────┐
+│ is_fraud │    n    │ complaint_30d_pct │ unrecognized_charge_30d_pct │
+│ boolean  │  int64  │      double       │           double            │
+├──────────┼─────────┼───────────────────┼─────────────────────────────┤
+│ true     │    4316 │             0.927 │                       0.185 │
+│ false    │ 4420692 │             1.222 │                       0.229 │
+└──────────┴─────────┴───────────────────┴─────────────────────────────┘
+
+
+##### -- [K4] repeat contact by first-contact resolution
+┌──────────────┬────────┬───────────────┬────────────────┐
+│ was_resolved │   n    │ repeat_7d_pct │ repeat_30d_pct │
+│   boolean    │ int64  │    double     │     double     │
+├──────────────┼────────┼───────────────┼────────────────┤
+│ false        │ 160266 │          2.87 │          11.53 │
+│ true         │ 526030 │          2.87 │          11.65 │
+└──────────────┴────────┴───────────────┴────────────────┘
+

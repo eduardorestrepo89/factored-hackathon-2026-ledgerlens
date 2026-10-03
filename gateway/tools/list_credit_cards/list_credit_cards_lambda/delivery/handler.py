@@ -20,10 +20,8 @@ AS_OF (optional) is read once into CLOCK. This tool has no time window, so it
 only validates it: an invalid AS_OF answers every request with
 DataSourceUnavailableError's message, as any other bad setting does.
 
-TODO(ledgerlens): R1 - no CDK yet: no PythonFunction, Gateway target, env vars
-  (DB_ENGINE, DSQL_CLUSTER_ENDPOINT, DSQL_DB_USER, AS_OF) or dsql:DbConnect grant
-  on the cluster ARN (dsql:DbConnectAdmin only if DSQL_DB_USER=admin). The tool
-  can't be deployed or called by the agent until the CDK spec lands.
+TODO(ledgerlens): R1 - deployed alone by the data stack (ledgerlens-list-credit-cards)
+  to test it against the database; no Gateway target yet, so the agent can't call it.
 TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
   depends on a Cedar policy matching it to the token's customer_id claim; neither
   the policy nor the claim exists yet (product design sections 5 and 10).

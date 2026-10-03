@@ -207,6 +207,28 @@ export class DataConstruct extends Construct {
       }),
     })
 
+    // A Gateway tool deployed alone, to test it against the database. It moves to the
+    // agent stack with the Gateway; it reads as ll_read, the role the read check proves.
+    new PythonFunction(this, "ListCreditCardsFn", {
+      functionName: "ledgerlens-list-credit-cards",
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      entry: path.join(__dirname, "..", "..", "gateway", "tools", "list_credit_cards"),
+      index: "list_credit_cards_lambda/delivery/handler.py",
+      handler: "handler",
+      role: this.toolsRole,
+      vpc: this.vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      securityGroups: [this.toolsSecurityGroup],
+      timeout: cdk.Duration.seconds(30),
+      environment: { DSQL_CLUSTER_ENDPOINT: this.privateHost, AS_OF: props.config.data.as_of },
+      logGroup: new logs.LogGroup(this, "ListCreditCardsLogs", {
+        logGroupName: `/aws/lambda/${props.config.stack_name_base}-list-credit-cards`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+
     // Stages 1-4 in order (spec 4.2); RUN_ID is the execution name
     const stage = (name: string) =>
       new tasks.CodeBuildStartBuild(this, name, {
