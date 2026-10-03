@@ -48,7 +48,7 @@ def test_invalid_max_rows_is_rejected(raw: str) -> None:
 
 def test_dsql_settings_read_endpoint_and_region_and_default_the_user() -> None:
     assert DsqlSettings.from_env(DSQL_ENV) == DsqlSettings(
-        cluster_endpoint=ENDPOINT, region="us-east-1", db_user="ledgerlens_readonly"
+        cluster_endpoint=ENDPOINT, region="us-east-1", db_user="ll_read"
     )
 
 
@@ -67,7 +67,7 @@ def test_dsql_settings_trim_every_value_and_read_the_user() -> None:
 def test_a_blank_db_user_falls_back_to_the_read_only_role() -> None:
     settings = DsqlSettings.from_env({**DSQL_ENV, "DSQL_DB_USER": "   "})
 
-    assert settings.db_user == "ledgerlens_readonly"
+    assert settings.db_user == "ll_read"
 
 
 @pytest.mark.parametrize(

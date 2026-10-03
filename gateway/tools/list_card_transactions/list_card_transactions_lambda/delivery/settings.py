@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Final
 
 DEFAULT_MAX_ROWS: Final = 25
-DEFAULT_DSQL_DB_USER: Final = "ledgerlens_readonly"
+DEFAULT_DSQL_DB_USER: Final = "ll_read"  # SELECT-only role mapped to ledgerlens-tools
 # Public DSQL endpoints carry their region: <cluster id>.dsql.<region>.on.aws.
 _PUBLIC_ENDPOINT: Final = re.compile(r"[^.]+\.dsql\.([a-z0-9-]+)\.on\.aws")
 

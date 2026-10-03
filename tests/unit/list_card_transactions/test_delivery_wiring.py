@@ -58,7 +58,7 @@ def test_build_settings_reads_the_environment() -> None:
 
 def test_build_dsql_settings_reads_the_environment() -> None:
     assert build_dsql_settings(ENV) == DsqlSettings(
-        cluster_endpoint=ENDPOINT, region="us-east-1", db_user="ledgerlens_readonly"
+        cluster_endpoint=ENDPOINT, region="us-east-1", db_user="ll_read"
     )
 
 

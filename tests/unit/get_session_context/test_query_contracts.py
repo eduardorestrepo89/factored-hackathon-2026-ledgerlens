@@ -246,8 +246,12 @@ def test_open_cases_are_the_ones_open_at_as_of() -> None:
     text = flat_sql("session_open_cases")
 
     assert "k.creation_date <= %(as_of)s" in text
-    assert "(k.closing_date IS NULL OR k.closing_date > %(as_of)s)" in text
-    assert "NOT IN" not in text.upper()
+    # closing_date decides when it is set; without one, a Resolved or Closed
+    # status still means closed (the data has such rows)
+    assert (
+        "(k.closing_date > %(as_of)s OR (k.closing_date IS NULL "
+        "AND k.status NOT IN ('Resolved', 'Closed')))"
+    ) in text
     assert ("(%(as_of)s::date - deduplicated.creation_date::date) AS days_open") in text
     assert (
         "ORDER BY deduplicated.sla_breached DESC NULLS LAST, "

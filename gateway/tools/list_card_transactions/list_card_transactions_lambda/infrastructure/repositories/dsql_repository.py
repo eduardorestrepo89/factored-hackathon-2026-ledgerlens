@@ -1,7 +1,7 @@
 """DatabaseRepository adapter for Aurora DSQL through psycopg 3.
 
 TODO(ledgerlens): R6 - the DB role is the only write guard. DSQL rejects
-  default_transaction_read_only, so ledgerlens_readonly must have SELECT-only
+  default_transaction_read_only, so ll_read must keep SELECT-only
   grants. If it is misconfigured, nothing else stops writes.
 TODO(ledgerlens): R10 - no per-query timeout: DSQL rejects statement_timeout. A
   slow query runs until the Lambda times out (DSQL caps a transaction at 300 s),
