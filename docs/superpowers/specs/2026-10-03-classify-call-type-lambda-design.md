@@ -41,6 +41,7 @@ The tool ranks up to 3 likely reasons the customer is contacting the bank right 
 | Status asymmetry | `transaction_fraud_detection` ignores status: a declined attempt can still be fraud. Classify's fraud reasons require `Approved`, because the reason for the call is money that left. A declined charge is already `DECLINED_TRANSACTION`, with its own higher-urgency wording. This is deliberate, not a contradiction. |
 | Taxonomy | The 11 reasons in §3.1. They replace §7.2's 7. |
 | Construction | Four candidate queries, with weights, decay and ranking in Python. The evidence object is built in the presenter. |
+| P05 acceptance | **FOREIGN_TRANSACTION only** (user, 2026-10-03). Its code-14 decline is 80 h old, outside the 72 h window, and the window stays at 72 h to match `get_session_context`. |
 
 ### Out of scope
 - **Calling the tool automatically at session start** (product design §6). That's an agent change and gets its own follow-up. Until then the agent calls the tool itself.
