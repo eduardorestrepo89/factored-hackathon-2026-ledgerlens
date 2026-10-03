@@ -316,20 +316,6 @@ export class BackendConstruct extends Construct {
       })
     )
 
-    // Add Code Interpreter permissions
-    agentRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: "CodeInterpreterAccess",
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "bedrock-agentcore:StartCodeInterpreterSession",
-          "bedrock-agentcore:StopCodeInterpreterSession",
-          "bedrock-agentcore:InvokeCodeInterpreter",
-        ],
-        resources: [`arn:aws:bedrock-agentcore:${this.region}:aws:code-interpreter/*`],
-      })
-    )
-
     // Add OAuth2 Credential Provider access for AgentCore Runtime
     // The @requires_access_token decorator performs a two-stage process:
     // 1. GetOauth2CredentialProvider - Looks up provider metadata (ARN, vendor config, grant types)
@@ -697,27 +683,11 @@ export class BackendConstruct extends Construct {
   }
 
   private createAgentCoreGateway(config: AppConfig): void {
-    // Create sample tool Lambda
-    const toolLambda = new lambda.Function(this, "SampleToolLambda", {
-      runtime: lambda.Runtime.PYTHON_3_13,
-      handler: "sample_tool_lambda.handler",
-      code: lambda.Code.fromAsset(path.join(__dirname, "../../gateway/tools/sample_tool")), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      timeout: cdk.Duration.seconds(30),
-      logGroup: new logs.LogGroup(this, "SampleToolLambdaLogGroup", {
-        logGroupName: `/aws/lambda/${config.stack_name_base}-sample-tool`,
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
-    })
-
     // Create comprehensive IAM role for gateway
     const gatewayRole = new iam.Role(this, "GatewayRole", {
       assumedBy: new iam.ServicePrincipal("bedrock-agentcore.amazonaws.com"),
       description: "Role for AgentCore Gateway with comprehensive permissions",
     })
-
-    // Lambda invoke permission
-    toolLambda.grantInvoke(gatewayRole)
 
     // Bedrock permissions (region-agnostic)
     gatewayRole.addToPolicy(
@@ -778,9 +748,6 @@ export class BackendConstruct extends Construct {
         ],
       })
     )
-
-    // Load tool specification from JSON file
-    const toolSpecPath = path.join(__dirname, "../../gateway/tools/sample_tool/tool_spec.json") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
 
     // Cognito OAuth2 configuration for gateway
     const cognitoIssuer = `https://cognito-idp.${this.region}.amazonaws.com/${this.userPool.userPoolId}`
@@ -892,15 +859,32 @@ export class BackendConstruct extends Construct {
       description: "AgentCore Gateway with MCP protocol and JWT authentication",
     })
 
-    // Create Gateway Target using L2 addLambdaTarget().
-    // This grants the gateway role invoke permission and adds the resource-based
-    // Lambda permission the CreateGatewayTarget dry-run validation requires.
-    const gatewayTarget = gateway.addLambdaTarget("GatewayTarget", {
-      gatewayTargetName: "sample-tool-target",
-      description: "Sample tool Lambda target",
-      lambdaFunction: toolLambda,
-      toolSchema: agentcore.ToolSchema.fromLocalAsset(toolSpecPath),
-      // credentialProviderConfigurations defaults to [GatewayCredentialProvider.iamRole()]
+    // One Gateway target per LedgerLens read tool. The tool Lambdas live in the data
+    // stack (data-construct.ts), next to the database, named ledgerlens-<slug>, so the
+    // data stack deploys first. addLambdaTarget() grants the gateway role invoke
+    // permission; sameEnvironment lets CDK add permissions to the imported function.
+    // Target names are <slug>-target, so each tool's Cedar action is
+    // "<slug>-target___<tool>" (gateway/policies/policy.cedar).
+    // ponytail: imported by name; move the Lambdas here if the two stacks ever deploy apart.
+    const toolTargets = [
+      { tool: "list_credit_cards", id: "ListCreditCards" },
+      { tool: "list_card_transactions", id: "ListCardTransactions" },
+      { tool: "get_session_context", id: "GetSessionContext" },
+    ].map(({ tool, id }) => {
+      const slug = tool.replace(/_/g, "-")
+      const toolFunction = lambda.Function.fromFunctionAttributes(this, `${id}Fn`, {
+        functionArn: `arn:aws:lambda:${this.region}:${this.account}:function:ledgerlens-${slug}`,
+        sameEnvironment: true,
+      })
+      return gateway.addLambdaTarget(`${id}Target`, {
+        gatewayTargetName: `${slug}-target`,
+        description: `LedgerLens ${tool} tool`,
+        lambdaFunction: toolFunction,
+        toolSchema: agentcore.ToolSchema.fromLocalAsset(
+          path.join(__dirname, "../../gateway/tools", tool, "tool_spec.json") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        ),
+        // credentialProviderConfigurations defaults to [GatewayCredentialProvider.iamRole()]
+      })
     })
 
     // Ensure proper creation order
@@ -926,14 +910,11 @@ export class BackendConstruct extends Construct {
     // JWT claims. You can define custom claim names and match them in Cedar.
     //
     // The Cedar action name format is: "<TargetName>___<tool_name>" (triple underscore).
-    // Tool name comes from tool_spec.json: "text_analysis_tool"
-    // Target name is "sample-tool-target"
+    // Tool names come from each tool's tool_spec.json; target names are <slug>-target.
     //
-    // THREE POLICY VERSIONS FOR DEMO TESTING:
-    // - Version 1: Guest has full access — all departments can use tools
-    // - Version 2: Guest denied — only finance/engineering can use tools
-    //
-    // To switch versions: edit gateway/policies/policy.cedar, then run `cdk deploy`
+    // gateway/policies/policy.cedar permits the LedgerLens tools only for a token with
+    // a customer_id claim, and forbids any call whose customer_id input differs from it.
+    // To change the rules: edit policy.cedar, then run `cdk deploy`.
     //
     // CEDAR POLICY SYNTAX NOTES:
     // - Each create_policy call creates one policy containing one Cedar statement.
@@ -1031,12 +1012,13 @@ export class BackendConstruct extends Construct {
         // Policy name format: {PolicyEngineName}_cp_{timestamp}
         // The AgentCore API enforces a 48-character limit on policy names.
         PolicyEngineName: `${config.stack_name_base.replace(/-/g, "_")}_policy_engine`,
-        Description: "Department-based tool access control for AgentCore Policy demo",
+        Description: "Per-customer tool access control for LedgerLens",
       },
     })
 
-    // Policy must be created after the Gateway and its target are ready
-    cedarPolicy.node.addDependency(gatewayTarget)
+    // Policy must be created after the Gateway and its targets are ready: CreatePolicy
+    // fails on an action whose target doesn't exist yet.
+    toolTargets.forEach((target) => cedarPolicy.node.addDependency(target))
 
     // Store AgentCore Gateway URL in SSM for AgentCore Runtime access
     new ssm.StringParameter(this, "GatewayUrlParam", {
@@ -1061,23 +1043,13 @@ export class BackendConstruct extends Construct {
       description: "AgentCore Gateway ARN",
     })
 
-    new cdk.CfnOutput(this, "GatewayTargetId", {
-      value: gatewayTarget.targetId,
-      description: "AgentCore Gateway Target ID",
-    })
-
-    new cdk.CfnOutput(this, "ToolLambdaArn", {
-      description: "ARN of the sample tool Lambda",
-      value: toolLambda.functionArn,
-    })
-
     new cdk.CfnOutput(this, "PolicyEngineId", {
       description: "ID of the Policy Engine for Cedar policies",
       value: cedarPolicy.getAttString("PolicyEngineId"),
     })
 
     new cdk.CfnOutput(this, "CedarPolicyId", {
-      description: "ID of the Cedar policy for department-based access control",
+      description: "ID of the Cedar policy for per-customer access control",
       value: cedarPolicy.getAttString("PolicyId"),
     })
   }
