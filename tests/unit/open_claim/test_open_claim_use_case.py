@@ -290,6 +290,32 @@ def test_a_failed_estimate_never_fails_the_written_claims(
     assert "Resolution estimate failed" in caplog.text
 
 
+class _ExplodingEstimateProvider(FakeQueryProvider):
+    """Serves the claim queries, then fails unexpectedly on the estimate."""
+
+    def get(self, name: str) -> str:
+        """Raise a non-port error for the estimate query only."""
+        if name == ESTIMATE:
+            raise RuntimeError("unexpected adapter failure")
+        return super().get(name)
+
+
+def test_an_unexpected_estimate_failure_never_fails_the_written_claims(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    use_case, repository = make_use_case(
+        default_results(), query_provider=_ExplodingEstimateProvider()
+    )
+    caplog.set_level(logging.WARNING)
+
+    result = open_claim(use_case)
+
+    assert result.resolution_estimate is None
+    assert len(result.claims) == 1
+    assert len(repository.params_of(INSERT)) == 1
+    assert "Resolution estimate failed" in caplog.text
+
+
 def test_a_missing_estimate_sql_file_gives_no_estimate() -> None:
     provider = FakeQueryProvider(names=(TXS, INSERT))
     use_case, _ = make_use_case(default_results(), query_provider=provider)

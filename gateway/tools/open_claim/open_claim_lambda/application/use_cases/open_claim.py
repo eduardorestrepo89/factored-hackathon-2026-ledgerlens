@@ -202,7 +202,8 @@ class OpenClaimUseCase:
                 median_days=_days(rows[0], "median_days"),
                 p90_days=_days(rows[0], "p90_days"),
             )
-        except (DataAccessError, KeyError, TypeError, ValueError):
+        # Any failure, port error or not: the claims are already written (spec 4.2).
+        except Exception:
             logger.warning(
                 "Resolution estimate failed; the claims stay open without it",
                 exc_info=True,
