@@ -3,6 +3,11 @@
 -- A customer's card transactions, newest first, one row per transaction_id.
 -- Used by ListCardTransactionsUseCase.
 --
+-- Credit cards only, matched exactly on product_type = 'Tarjeta Crédito' (the
+-- dataset's Spanish value), the same filter list_credit_cards uses. Without it,
+-- accounts, loans and debit cards come back under last-4s the agent can't match
+-- to any card it was shown.
+--
 -- Parameters (psycopg named placeholders):
 --   customer_id  text     required
 --   date_from    date     required (the use case applies the 30-day default)
@@ -45,6 +50,7 @@ FROM (
     FROM transactions AS t
     JOIN products AS p ON p.product_id = t.product_id
     WHERE t.customer_id = %(customer_id)s
+      AND p.product_type = 'Tarjeta Crédito'
       AND t.process_date BETWEEN %(date_from)s::date AND %(date_to)s::date
       AND (%(card_last4)s::text IS NULL
            OR RIGHT(p.product_number, 4) = %(card_last4)s::text)
