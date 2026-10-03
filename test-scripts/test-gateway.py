@@ -11,7 +11,8 @@ aws_client_metadata, as the agent's does, so the pre-token Lambda adds the
 user's customer_id claim and Cedar applies the per-customer rules.
 
 Usage:
-    python test-scripts/test-gateway.py                        # unlinked token
+    python test-scripts/test-gateway.py --user-sub <unmapped>  # unlinked login
+    python test-scripts/test-gateway.py                        # no user claims
     python test-scripts/test-gateway.py --user-sub <sub>       # list the tools
     python test-scripts/test-gateway.py --user-sub <sub> --customer-id <id>
 """
@@ -165,7 +166,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--user-sub",
         help="Cognito sub to act as; its customer_id comes from the pre-token "
-        "Lambda's USER_CUSTOMER_IDS_MAP. Omit it to test an unlinked token.",
+        "Lambda's USER_CUSTOMER_IDS_MAP. A sub that isn't in the map tests an "
+        "unlinked login (blank customer_id); omitting it gives a token with no "
+        "user claims at all.",
     )
     parser.add_argument(
         "--customer-id",
@@ -194,7 +197,7 @@ def main():
     print(f"Gateway URL: {gateway_url}")
 
     print_section("Authentication")
-    who = f"user {args.user_sub}" if args.user_sub else "no user (unlinked token)"
+    who = f"user {args.user_sub}" if args.user_sub else "no user (no user claims)"
     print(f"Fetching a machine token for {who}...")
     access_token = fetch_access_token(
         gateway_params["machine_client_id"], client_secret, token_url, args.user_sub

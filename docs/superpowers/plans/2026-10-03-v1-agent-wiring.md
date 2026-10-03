@@ -1723,7 +1723,7 @@ set_persona CLI-50OIF5EIYSWK   # P05
 
 - **Start a new chat after every switch.** The old chat's memory still holds the previous persona's data.
 - **Who can switch:** only someone with AWS credentials. The person chatting never can.
-- **After a redeploy:** the login goes back to P03, the persona committed in `infra-cdk/lib/cognito-construct.ts`.
+- **After a redeploy:** the login goes back to the persona committed in `USER_CUSTOMER_IDS_MAP` in `infra-cdk/lib/cognito-construct.ts`. Commit the demo login's sub there, mapped to P03, right after creating it: until then a redeploy resets the map to placeholders and the login becomes unlinked.
 
 | Persona | Customer id | Use case | v1 note |
 |---|---|---|---|
@@ -1739,7 +1739,7 @@ set_persona CLI-50OIF5EIYSWK   # P05
 | P10 | CLI-Z3V3SBS18YWQ | Card not active | |
 
 **Smoke scripts** (`AWS_PROFILE=ledgerlens`, with `uv run --no-project --with-requirements test-scripts/requirements.txt python ...`):
-- `test-scripts/test-gateway.py --user-sub "$SUB" [--customer-id <id>]`: the Gateway and Cedar, without the agent.
+- `test-scripts/test-gateway.py --user-sub "$SUB" [--customer-id <id>]`: the Gateway and Cedar, without the agent. A sub that isn't in the map tests an unlinked login.
 - `test-scripts/test-agent.py`: chats with the deployed agent as the demo login.
 
 ````
@@ -1888,14 +1888,15 @@ GW="uv run --no-project --quiet --with-requirements test-scripts/requirements.tx
 $GW --user-sub "$SUB"                                     # G1
 $GW --user-sub "$SUB" --customer-id CLI-70U0WJ1NH1MN      # G2
 $GW --user-sub "$SUB" --customer-id CLI-1GL7QBDG3QG0      # G3
-$GW                                                       # G4
+$GW --user-sub 00000000-0000-0000-0000-000000000000      # G4: an unmapped sub, blank claim
+$GW                                                       # G4 extra: no user claims at all
 ```
 
 Expected:
 - **G1:** `3 tools listed`, ending `___list_credit_cards`, `___list_card_transactions` and `___get_session_context`.
 - **G2:** P03's cards, and `Tool call successful`.
 - **G3:** a refusal and `The call was refused or failed` (exit 1).
-- **G4:** `0 tools listed`.
+- **G4:** `0 tools listed` for both runs.
 
 **Contingency V5:** if G1 lists 0 tools while G4's behavior is right:
 1. Check that the pre-token Lambda's log shows a non-blank `customer_id` for `$SUB`: `MSYS_NO_PATHCONV=1 aws logs tail /aws/lambda/ledgerlens-bank-assistant-pretoken-v3 --since 15m`.

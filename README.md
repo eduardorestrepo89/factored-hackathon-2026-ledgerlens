@@ -165,7 +165,7 @@ set_persona CLI-50OIF5EIYSWK   # P05
 
 - **Start a new chat after every switch.** The old chat's memory still holds the previous persona's data.
 - **Who can switch:** only someone with AWS credentials. The person chatting never can.
-- **After a redeploy:** the login goes back to P03, the persona committed in `infra-cdk/lib/cognito-construct.ts`.
+- **After a redeploy:** the login goes back to the persona committed in `USER_CUSTOMER_IDS_MAP` in `infra-cdk/lib/cognito-construct.ts`. Commit the demo login's sub there, mapped to P03, right after creating it: until then a redeploy resets the map to placeholders and the login becomes unlinked.
 
 | Persona | Customer id | Use case | v1 note |
 |---|---|---|---|
@@ -181,7 +181,7 @@ set_persona CLI-50OIF5EIYSWK   # P05
 | P10 | CLI-Z3V3SBS18YWQ | Card not active | |
 
 **Smoke scripts** (`AWS_PROFILE=ledgerlens`, with `uv run --no-project --with-requirements test-scripts/requirements.txt python ...`):
-- `test-scripts/test-gateway.py --user-sub "$SUB" [--customer-id <id>]`: the Gateway and Cedar, without the agent.
+- `test-scripts/test-gateway.py --user-sub "$SUB" [--customer-id <id>]`: the Gateway and Cedar, without the agent. A sub that isn't in the map tests an unlinked login.
 - `test-scripts/test-agent.py`: chats with the deployed agent as the demo login.
 
 
