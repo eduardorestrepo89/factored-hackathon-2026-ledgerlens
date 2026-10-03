@@ -15,10 +15,15 @@ The use case and its whole graph (settings, connector, connection, adapters) are
 built once, when the module loads, by dependencies_builder; a warm container
 reuses them. The handler builds nothing itself.
 
+AS_OF (optional) is read once into CLOCK; "today" for the default date window
+is CLOCK.now() on every call, so a warm container never freezes the real clock.
+An invalid AS_OF answers every request with DataSourceUnavailableError's
+message.
+
 TODO(ledgerlens): R1 - no CDK yet: no PythonFunction, Gateway target, env vars
-  (DB_ENGINE, DSQL_CLUSTER_ENDPOINT, DSQL_DB_USER) or dsql:DbConnect grant on the
-  cluster ARN (dsql:DbConnectAdmin only if DSQL_DB_USER=admin). The tool can't be
-  deployed or called by the agent until the CDK spec lands.
+  (DB_ENGINE, DSQL_CLUSTER_ENDPOINT, DSQL_DB_USER, AS_OF) or dsql:DbConnect grant
+  on the cluster ARN (dsql:DbConnectAdmin only if DSQL_DB_USER=admin). The tool
+  can't be deployed or called by the agent until the CDK spec lands.
 TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
   depends on a Cedar policy matching it to the token's customer_id claim; neither
   the policy nor the claim exists yet (product design sections 5 and 10).
@@ -27,10 +32,10 @@ TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
 import json
 import logging
 import os
-from datetime import datetime, timezone
 from typing import Any, Final
 
 from list_card_transactions_lambda.delivery.dependencies.dependencies_builder import (
+    build_clock,
     build_list_card_transactions_use_case,
 )
 from list_card_transactions_lambda.delivery.presenters.card_transactions import (
@@ -59,6 +64,7 @@ _WRONG_TOOL_MESSAGE: Final = (
 
 
 USE_CASE = build_list_card_transactions_use_case(os.environ)
+CLOCK = build_clock(os.environ)
 
 
 def handler(event: object, context: object) -> dict[str, Any]:
@@ -77,11 +83,9 @@ def handler(event: object, context: object) -> dict[str, Any]:
         return {"error": _WRONG_TOOL_MESSAGE}
 
     try:
-        if USE_CASE is None:
+        if USE_CASE is None or CLOCK is None:
             raise DataSourceUnavailableError()
-        filters = TransactionFilters.from_raw(
-            event, today=datetime.now(timezone.utc).date()
-        )
+        filters = TransactionFilters.from_raw(event, today=CLOCK.now().date())
         body = present_card_transactions(USE_CASE.execute(filters))
     except DomainError as err:
         logger.warning(

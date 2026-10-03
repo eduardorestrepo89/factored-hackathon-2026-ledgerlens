@@ -11,6 +11,7 @@ retry once on a lost connection).
 The module is organised in blocks:
 
 - Settings: environment variables to typed settings.
+- Clock: AS_OF to the tool's notion of "now".
 - Connection: the engine-specific connector (built without connecting).
 - Adapters: the engine-specific database repository and query provider.
 - Use case: build_list_credit_cards_use_case, which builds the tool's whole
@@ -37,6 +38,7 @@ from list_credit_cards_lambda.application.use_cases.list_credit_cards import (
     ListCreditCardsUseCase,
 )
 from list_credit_cards_lambda.delivery.settings import (
+    ClockSettings,
     ConfigurationError,
     DatabaseEngine,
     DatabaseSettings,
@@ -79,6 +81,23 @@ def build_dsql_settings(env: Mapping[str, str]) -> DsqlSettings:
         ConfigurationError: A required variable is missing or a value is invalid.
     """
     return DsqlSettings.from_env(env)
+
+
+# --- Clock -------------------------------------------------------------------
+
+
+def build_clock(env: Mapping[str, str]) -> ClockSettings | None:
+    """Read AS_OF, the tool's fixed "now" for demos. Never raises.
+
+    Returns:
+        The clock settings, or None when AS_OF is invalid. Every request then
+        gets DataSourceUnavailableError's message.
+    """
+    try:
+        return ClockSettings.from_env(env)
+    except ConfigurationError:
+        logger.exception("Invalid AS_OF for list_credit_cards")
+        return None
 
 
 # --- Connection --------------------------------------------------------------

@@ -1,7 +1,10 @@
 """Tests for the Lambda settings read from environment variables."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from list_card_transactions_lambda.delivery.settings import (
+    ClockSettings,
     ConfigurationError,
     DatabaseEngine,
     DatabaseSettings,
@@ -108,3 +111,70 @@ def test_a_custom_endpoint_host_skips_the_region_check() -> None:
     env = {"DSQL_CLUSTER_ENDPOINT": "dsql.internal.example", "AWS_REGION": "us-west-2"}
 
     assert DsqlSettings.from_env(env).cluster_endpoint == "dsql.internal.example"
+
+
+UTC = timezone.utc
+
+
+def test_as_of_is_unset_by_default() -> None:
+    assert ClockSettings.from_env({}) == ClockSettings(as_of=None)
+
+
+@pytest.mark.parametrize("raw", ["", "   "])
+def test_a_blank_as_of_uses_the_real_clock(raw: str) -> None:
+    assert ClockSettings.from_env({"AS_OF": raw}).as_of is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-03-14", datetime(2026, 3, 14, tzinfo=UTC)),
+        ("2026-03-14T10:30:00", datetime(2026, 3, 14, 10, 30, tzinfo=UTC)),
+        ("2026-03-14T10:30:00-05:00", datetime(2026, 3, 14, 15, 30, tzinfo=UTC)),
+        ("2026-03-14T10:30:00Z", datetime(2026, 3, 14, 10, 30, tzinfo=UTC)),
+        (" 2026-03-14T10:30:00Z ", datetime(2026, 3, 14, 10, 30, tzinfo=UTC)),
+    ],
+)
+def test_as_of_is_parsed_as_utc(raw: str, expected: datetime) -> None:
+    as_of = ClockSettings.from_env({"AS_OF": raw}).as_of
+
+    assert as_of == expected
+    assert as_of is not None
+    assert as_of.tzinfo == UTC
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "yesterday",
+        "2026-13-01",
+        "14/03/2026",
+        "now",
+        # Valid ISO, but converting to UTC overflows datetime.min.
+        "0001-01-01T00:00:00+01:00",
+    ],
+)
+def test_invalid_as_of_is_rejected(raw: str) -> None:
+    with pytest.raises(
+        ConfigurationError, match="AS_OF must be an ISO 8601 date or timestamp"
+    ):
+        ClockSettings.from_env({"AS_OF": raw})
+
+
+def test_now_returns_as_of_when_set() -> None:
+    as_of = datetime(2026, 3, 14, 10, 30, tzinfo=UTC)
+
+    assert ClockSettings(as_of=as_of).now() == as_of
+
+
+def test_now_is_the_real_utc_time_when_unset() -> None:
+    clock = ClockSettings(as_of=None)
+
+    before = datetime.now(UTC)
+    first = clock.now()
+    second = clock.now()
+    after = datetime.now(UTC)
+
+    assert before <= first <= second <= after
+    assert first.tzinfo == UTC
+    assert after - before < timedelta(seconds=5)

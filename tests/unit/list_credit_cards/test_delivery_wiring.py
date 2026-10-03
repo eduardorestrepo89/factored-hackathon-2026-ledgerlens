@@ -1,5 +1,7 @@
 """Tests for the dependency wiring of the list_credit_cards tool."""
 
+from datetime import datetime, timezone
+
 import list_credit_cards_lambda.utils.connectors.dsql as dsql_module
 import pytest
 from list_credit_cards_lambda.application.ports.errors import (
@@ -12,6 +14,7 @@ from list_credit_cards_lambda.delivery.dependencies import dependencies_builder
 from list_credit_cards_lambda.delivery.dependencies.dependencies_builder import (
     QUERIES_ROOT,
     SQL_DIALECTS,
+    build_clock,
     build_connector,
     build_database_repository,
     build_dsql_settings,
@@ -20,6 +23,7 @@ from list_credit_cards_lambda.delivery.dependencies.dependencies_builder import 
     build_settings,
 )
 from list_credit_cards_lambda.delivery.settings import (
+    ClockSettings,
     ConfigurationError,
     DatabaseEngine,
     DatabaseSettings,
@@ -178,3 +182,20 @@ def test_use_case_build_with_bad_configuration_returns_none(
     env: dict[str, str],
 ) -> None:
     assert build_list_credit_cards_use_case(env) is None
+
+
+def test_build_clock_reads_as_of() -> None:
+    assert build_clock({"AS_OF": "2026-03-14"}) == ClockSettings(
+        as_of=datetime(2026, 3, 14, tzinfo=timezone.utc)
+    )
+
+
+def test_build_clock_without_as_of_uses_the_real_clock() -> None:
+    assert build_clock({}) == ClockSettings(as_of=None)
+
+
+def test_build_clock_with_a_bad_as_of_returns_none(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert build_clock({"AS_OF": "yesterday"}) is None
+    assert "Invalid AS_OF for list_credit_cards" in caplog.text

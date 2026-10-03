@@ -2,6 +2,7 @@
 
 import importlib
 import json
+from datetime import date, datetime, timezone
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -16,7 +17,10 @@ from list_card_transactions_lambda.delivery.dependencies.dependencies_builder im
     build_database_repository,
     build_query_provider,
 )
-from list_card_transactions_lambda.delivery.settings import DatabaseEngine
+from list_card_transactions_lambda.delivery.settings import (
+    ClockSettings,
+    DatabaseEngine,
+)
 from list_card_transactions_lambda.domain.errors import DataSourceUnavailableError
 
 from .fakes import FakeConnector, make_row
@@ -44,6 +48,7 @@ def module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
         "DSQL_CLUSTER_ENDPOINT",
         "DSQL_DB_USER",
         "AWS_REGION",
+        "AS_OF",
     ):
         monkeypatch.delenv(name, raising=False)
     import list_card_transactions_lambda.delivery.handler as handler_module
@@ -191,3 +196,58 @@ def test_cold_start_failure_then_failed_retry_returns_unavailable(
     response = module.handler(EVENT, make_context())
 
     assert response == {"error": DataSourceUnavailableError.MESSAGE}
+
+
+def sent_params(connector: FakeConnector) -> Any:
+    """Return the params of the first query the connector executed."""
+    return connector.connections[-1].cursors[0].executed[0][1]
+
+
+def test_default_date_to_is_the_as_of_date(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = FakeConnector([])
+    wire(module, monkeypatch, connector)
+    as_of = datetime(2026, 3, 14, 10, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(module, "CLOCK", ClockSettings(as_of=as_of))
+
+    response = module.handler({"customer_id": "CUST-1"}, make_context())
+
+    assert "content" in response
+    assert sent_params(connector)["date_to"] == date(2026, 3, 14)
+    assert sent_params(connector)["date_from"] == date(2026, 2, 12)
+
+
+def test_without_as_of_date_to_is_today(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = FakeConnector([])
+    wire(module, monkeypatch, connector)
+
+    before = datetime.now(timezone.utc).date()
+    module.handler({"customer_id": "CUST-1"}, make_context())
+    after = datetime.now(timezone.utc).date()
+
+    assert module.CLOCK == ClockSettings(as_of=None)
+    assert sent_params(connector)["date_to"] in {before, after}
+
+
+def test_missing_clock_returns_data_source_unavailable(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = FakeConnector([make_row()])
+    wire(module, monkeypatch, connector)
+    monkeypatch.setattr(module, "CLOCK", None)
+
+    response = module.handler(EVENT, make_context())
+
+    assert response == {"error": DataSourceUnavailableError.MESSAGE}
+    assert connector.connections == []
+
+
+def test_a_bad_as_of_env_var_leaves_the_clock_unset(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AS_OF", "yesterday")
+
+    assert importlib.reload(module).CLOCK is None

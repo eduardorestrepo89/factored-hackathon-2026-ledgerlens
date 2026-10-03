@@ -3,6 +3,7 @@
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Final
 
@@ -77,6 +78,35 @@ class DsqlSettings:
             region=region,
             db_user=env.get("DSQL_DB_USER", "").strip() or DEFAULT_DSQL_DB_USER,
         )
+
+
+@dataclass(frozen=True)
+class ClockSettings:
+    """The tool's notion of "now".
+
+    Attributes:
+        as_of: Fixed UTC "now" from AS_OF, or None to use the real clock.
+    """
+
+    as_of: datetime | None
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str]) -> "ClockSettings":
+        """Read AS_OF, an optional ISO 8601 date or timestamp used as "now".
+
+        Demos set it to a moment inside the historical dataset. Production
+        leaves it unset.
+
+        Raises:
+            ConfigurationError: The value isn't an ISO 8601 date or timestamp.
+        """
+        return cls(as_of=_as_of(env))
+
+    def now(self) -> datetime:
+        """Return as_of when set, else datetime.now(timezone.utc). Always aware UTC."""
+        if self.as_of is not None:
+            return self.as_of
+        return datetime.now(timezone.utc)
 
 
 def _engine(env: Mapping[str, str]) -> DatabaseEngine:
@@ -156,3 +186,27 @@ def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
     if value <= 0:
         raise ConfigurationError(f"{name} must be greater than zero, got {value}")
     return value
+
+
+def _as_of(env: Mapping[str, str]) -> datetime | None:
+    """Parse AS_OF as aware UTC; blank or missing means the real clock.
+
+    A bare date is midnight UTC, a timestamp without an offset is UTC, and one
+    with an offset (or Z) is converted to UTC.
+
+    Raises:
+        ConfigurationError: The value isn't an ISO 8601 date or timestamp.
+    """
+    raw = env.get("AS_OF", "").strip()
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        # Near datetime.min/max the shift to UTC overflows: treat it as invalid.
+        return value.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
+        raise ConfigurationError(
+            f"AS_OF must be an ISO 8601 date or timestamp, got {raw!r}"
+        ) from exc

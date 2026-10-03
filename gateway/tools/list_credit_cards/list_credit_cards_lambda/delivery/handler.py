@@ -16,10 +16,14 @@ The use case and its whole graph (settings, connector, connection, adapters) are
 built once, when the module loads, by dependencies_builder; a warm container
 reuses them. The handler builds nothing itself.
 
+AS_OF (optional) is read once into CLOCK. This tool has no time window, so it
+only validates it: an invalid AS_OF answers every request with
+DataSourceUnavailableError's message, as any other bad setting does.
+
 TODO(ledgerlens): R1 - no CDK yet: no PythonFunction, Gateway target, env vars
-  (DB_ENGINE, DSQL_CLUSTER_ENDPOINT, DSQL_DB_USER) or dsql:DbConnect grant on the
-  cluster ARN (dsql:DbConnectAdmin only if DSQL_DB_USER=admin). The tool can't be
-  deployed or called by the agent until the CDK spec lands.
+  (DB_ENGINE, DSQL_CLUSTER_ENDPOINT, DSQL_DB_USER, AS_OF) or dsql:DbConnect grant
+  on the cluster ARN (dsql:DbConnectAdmin only if DSQL_DB_USER=admin). The tool
+  can't be deployed or called by the agent until the CDK spec lands.
 TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
   depends on a Cedar policy matching it to the token's customer_id claim; neither
   the policy nor the claim exists yet (product design sections 5 and 10).
@@ -32,6 +36,7 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 from list_credit_cards_lambda.delivery.dependencies.dependencies_builder import (
+    build_clock,
     build_list_credit_cards_use_case,
 )
 from list_credit_cards_lambda.delivery.presenters.credit_cards import (
@@ -57,6 +62,7 @@ _WRONG_TOOL_MESSAGE: Final = (
 
 
 USE_CASE = build_list_credit_cards_use_case(os.environ)
+CLOCK = build_clock(os.environ)
 
 
 def handler(event: object, context: object) -> dict[str, Any]:
@@ -75,7 +81,7 @@ def handler(event: object, context: object) -> dict[str, Any]:
         return {"error": _WRONG_TOOL_MESSAGE}
 
     try:
-        if USE_CASE is None:
+        if USE_CASE is None or CLOCK is None:
             raise DataSourceUnavailableError()
         body = present_credit_cards(USE_CASE.execute(_customer_id(event)))
     except DomainError as err:

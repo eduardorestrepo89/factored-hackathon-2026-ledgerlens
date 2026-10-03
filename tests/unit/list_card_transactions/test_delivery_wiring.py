@@ -16,6 +16,7 @@ from list_card_transactions_lambda.delivery.dependencies import dependencies_bui
 from list_card_transactions_lambda.delivery.dependencies.dependencies_builder import (
     QUERIES_ROOT,
     SQL_DIALECTS,
+    build_clock,
     build_connector,
     build_database_repository,
     build_dsql_settings,
@@ -27,6 +28,7 @@ from list_card_transactions_lambda.delivery.presenters.card_transactions import 
     present_card_transactions,
 )
 from list_card_transactions_lambda.delivery.settings import (
+    ClockSettings,
     ConfigurationError,
     DatabaseEngine,
     DatabaseSettings,
@@ -264,3 +266,20 @@ def test_presenter_handles_an_empty_result() -> None:
         "count": 0,
         "truncated": False,
     }
+
+
+def test_build_clock_reads_as_of() -> None:
+    assert build_clock({"AS_OF": "2026-03-14"}) == ClockSettings(
+        as_of=datetime(2026, 3, 14, tzinfo=timezone.utc)
+    )
+
+
+def test_build_clock_without_as_of_uses_the_real_clock() -> None:
+    assert build_clock({}) == ClockSettings(as_of=None)
+
+
+def test_build_clock_with_a_bad_as_of_returns_none(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert build_clock({"AS_OF": "yesterday"}) is None
+    assert "Invalid AS_OF for list_card_transactions" in caplog.text

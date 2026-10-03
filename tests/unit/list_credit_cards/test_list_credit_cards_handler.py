@@ -17,7 +17,7 @@ from list_credit_cards_lambda.delivery.dependencies.dependencies_builder import 
     build_database_repository,
     build_query_provider,
 )
-from list_credit_cards_lambda.delivery.settings import DatabaseEngine
+from list_credit_cards_lambda.delivery.settings import ClockSettings, DatabaseEngine
 from list_credit_cards_lambda.domain.errors import (
     CardLookupError,
     DataSourceUnavailableError,
@@ -52,6 +52,7 @@ def module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
         "DSQL_CLUSTER_ENDPOINT",
         "DSQL_DB_USER",
         "AWS_REGION",
+        "AS_OF",
     ):
         monkeypatch.delenv(name, raising=False)
     import list_credit_cards_lambda.delivery.handler as handler_module
@@ -244,3 +245,28 @@ def test_cold_start_failure_then_failed_retry_returns_unavailable(
     response = module.handler(EVENT, make_context())
 
     assert response == {"error": DataSourceUnavailableError.MESSAGE}
+
+
+def test_default_environment_uses_the_real_clock(module: ModuleType) -> None:
+    assert module.CLOCK == ClockSettings(as_of=None)
+
+
+def test_missing_clock_returns_data_source_unavailable(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = FakeConnector([make_row()])
+    wire(module, monkeypatch, connector)
+    monkeypatch.setattr(module, "CLOCK", None)
+
+    response = module.handler(EVENT, make_context())
+
+    assert response == {"error": DataSourceUnavailableError.MESSAGE}
+    assert connector.connections == []
+
+
+def test_a_bad_as_of_env_var_leaves_the_clock_unset(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AS_OF", "yesterday")
+
+    assert importlib.reload(module).CLOCK is None
