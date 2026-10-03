@@ -43,3 +43,9 @@ backend:
   #     - subnet-cccc3333dddd4444e
   #   security_group_ids:  # Optional - a default SG is created if omitted
   #     - sg-0abc1234def56789a
+
+
+# Bank "today" for the tools (docs/superpowers/specs/2026-10-02-data-pipeline-design.md, 5.3).
+# The pipeline loads every row; tools read process_date BETWEEN <from> AND as_of.
+data:
+  as_of: "2026-06-17T23:59:59"

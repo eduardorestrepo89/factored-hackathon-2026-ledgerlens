@@ -56,3 +56,14 @@ lint-cicd:
 		exit 1; \
 	fi
 	@echo -e "$(GREEN)All code quality checks passed!$(NC)"
+
+
+# Run the data pipeline once: ingest, transform, load, read check
+# (docs/superpowers/specs/2026-10-02-data-pipeline-design.md, section 4.2).
+# Run as: AWS_PROFILE=ledgerlens make load-data. Without make, run the two aws commands by hand.
+# Follow a stage's log with: aws logs tail /aws/codebuild/ledgerlens-data-load --follow
+load-data:
+	@arn=$$(aws stepfunctions list-state-machines --query "stateMachines[?name=='ledgerlens-data-pipeline'].stateMachineArn" --output text) && \
+	exe=$$(aws stepfunctions start-execution --state-machine-arn "$$arn" --query executionArn --output text) && \
+	echo "started $$exe" && \
+	echo "https://console.aws.amazon.com/states/home#/v2/executions/details/$$exe"

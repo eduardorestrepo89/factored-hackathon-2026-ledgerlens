@@ -17,7 +17,9 @@ are removed. On failure, they are retained for debugging and reused on the next
 run. The bucket has a 1-day object-expiry rule so a leftover archive can't
 linger. Does NOT remove the deployed FAST stack (use `cd infra-cdk && cdk destroy`).
 
-Usage: python scripts/deploy-with-codebuild.py
+Usage: python scripts/deploy-with-codebuild.py [STACK ...]
+  No stack names deploys every stack (cdk deploy --all). To deploy only the
+  database and its pipeline: python scripts/deploy-with-codebuild.py <stack_name_base>-data
 """
 
 import io
@@ -511,7 +513,9 @@ def get_or_create_codebuild_project(
         "    commands:\n"
         '      - echo "Source dir contents:" && ls -la $CODEBUILD_SRC_DIR/\n'
         "      - cd $CODEBUILD_SRC_DIR/infra-cdk && cdk bootstrap\n"
-        "      - cd $CODEBUILD_SRC_DIR/infra-cdk && cdk deploy --all --require-approval never\n"
+        # DEPLOY_STACKS (set per build) names the stacks to deploy; unset means all
+        "      - cd $CODEBUILD_SRC_DIR/infra-cdk && "
+        "cdk deploy ${DEPLOY_STACKS:---all} --require-approval never\n"
     )
 
     # Check if project already exists
@@ -593,7 +597,7 @@ def get_or_create_codebuild_project(
     log_success(f"CodeBuild project created: {project_name}")
 
 
-def start_codebuild(project_name: str) -> str:
+def start_codebuild(project_name: str, stacks: Optional[List[str]] = None) -> str:
     """
     Start a CodeBuild build and return the build ID.
 
@@ -604,17 +608,22 @@ def start_codebuild(project_name: str) -> str:
         The build ID string
     """
     log_info("Starting CodeBuild build...")
-    result = run_command(
-        [
-            "aws",
-            "codebuild",
-            "start-build",
-            "--project-name",
-            project_name,
-            "--output",
-            "json",
+    command = [
+        "aws",
+        "codebuild",
+        "start-build",
+        "--project-name",
+        project_name,
+        "--output",
+        "json",
+    ]
+    if stacks:
+        value = " ".join(stacks)
+        command += [
+            "--environment-variables-override",
+            f"name=DEPLOY_STACKS,value={value},type=PLAINTEXT",
         ]
-    )
+    result = run_command(command)
     build_id: str = json.loads(result.stdout)["build"]["id"]
     log_success(f"Build ID: {build_id}")
     return build_id
@@ -834,13 +843,23 @@ def teardown(resources: Dict[str, Optional[str]]) -> None:
 # --- Main ---
 
 
-def main() -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     """
     Main deployment function.
+
+    Args:
+        argv: Stack names to deploy (default: sys.argv[1:]); none means all stacks,
+            e.g. `python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant-data`
 
     Returns:
         Exit code (0 for success, 1 for failure)
     """
+    stacks = sys.argv[1:] if argv is None else argv
+    bad = [name for name in stacks if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", name)]
+    if bad:  # names go into a shell command inside CodeBuild
+        log_error(f"Not a CDK stack name: {', '.join(bad)}")
+        return 1
+
     # Track every resource this run creates so we can tear them all down on a
     # successful build, or report them for debugging if the build fails.
     resources: Dict[str, Optional[str]] = {
@@ -950,7 +969,7 @@ def main() -> int:
     )
 
     # Start build
-    build_id: str = start_codebuild(project_name=project_name)
+    build_id: str = start_codebuild(project_name=project_name, stacks=stacks)
 
     # Stream logs
     final_status: str = stream_build_logs(build_id=build_id)
