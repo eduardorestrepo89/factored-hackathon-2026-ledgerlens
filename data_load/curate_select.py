@@ -164,6 +164,15 @@ def select_clean(con, personas: dict[str, dict], per_cell: int) -> dict:
             AND customer_id NOT IN (SELECT customer_id FROM cohort))
         WHERE rank <= {per_cell}"""
     )
+    cut = con.execute(
+        "SELECT customer_id FROM persona_ids EXCEPT SELECT customer_id FROM clean"
+    ).fetchall()
+    if cut:  # personas outnumber a cell's places: a demo login must never drop silently
+        pids = {p["customer_id"]: pid for pid, p in personas.items()}
+        names = "; ".join(sorted(f"{pids[cid]} {cid}" for (cid,) in cut))
+        raise CurationError(
+            f"personas not selected: {names} (a cell has fewer places than personas)"
+        )
     funnel, passed = {}, []
     for gate in GATES:
         passed.append(gate)

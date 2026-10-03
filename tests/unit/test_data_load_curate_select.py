@@ -176,6 +176,19 @@ def test_a_persona_that_fails_a_gate_fails_the_stage_naming_it():
 
 
 @pytest.mark.unit
+def test_a_persona_cut_from_a_full_cell_fails_the_stage_naming_it():
+    con = bank()
+    good(con, "PA")
+    good(con, "PB")  # same cell as PA: with one place per cell, one persona is cut
+    personas = {"P01": {"customer_id": "PA"}, "P02": {"customer_id": "PB"}}
+    register_personas(con, personas)
+    build_profile(con)
+    no_cohort(con)
+    with pytest.raises(CurationError, match="personas not selected: P0[12] P[AB]"):
+        select_clean(con, personas, per_cell=1)
+
+
+@pytest.mark.unit
 def test_the_shipped_persona_file_pins_ten_customers():
     personas = load_personas()
     assert sorted(personas) == [f"P{n:02d}" for n in range(1, 11)]
