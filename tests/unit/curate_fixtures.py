@@ -9,6 +9,7 @@ from pathlib import Path
 import duckdb
 
 CREDIT, DEBIT = "Tarjeta Crédito", "Tarjeta Débito"
+PERSONAS = {"P01": {"customer_id": "PER"}}  # the persona world() builds
 COLUMNS = {
     "branches": "branch_id VARCHAR",
     "service_agents": "agent_id VARCHAR, assigned_branch_id VARCHAR",
@@ -138,3 +139,66 @@ def to_parquet(con, folder: Path) -> None:
         con.execute(
             f"COPY {name} TO '{(folder / name).as_posix()}.parquet' (FORMAT parquet)"
         )
+
+
+def world(folder: Path) -> Path:
+    """A persona, two clean candidates in the persona's cell and one defect customer."""
+    con = bank()
+    good(con, "PER")
+    charge(con, "T-PER-MX", "P-PER", "PER", transaction_country="Mexico")  # C1 fixes it
+    good(con, "OK1")
+    good(con, "OK2", country="Argentina")
+    good(con, "DEF", email=None)  # K17
+    charge(
+        con, "T-DEF-MX", "P-DEF", "DEF", transaction_country="Mexico"
+    )  # K09, kept raw
+    customer(
+        con, "GONE", customer_status="Closed"
+    )  # no card activity: neither clean nor cohort
+    add(
+        con,
+        "call_center_interactions",
+        interaction_id="I1",
+        customer_id="PER",
+        process_date=date(2026, 6, 1),
+    )
+    add(
+        con,
+        "call_center_interactions",
+        interaction_id="I2",
+        customer_id="GONE",
+        process_date=date(2026, 6, 1),
+    )
+    add(
+        con,
+        "call_transcripts",
+        transcript_id="R1",
+        interaction_id="I1",
+        customer_id="PER",
+    )
+    add(
+        con,
+        "call_transcripts",
+        transcript_id="R2",
+        interaction_id="I2",
+        customer_id="GONE",
+    )
+    add(
+        con,
+        "digital_events",
+        event_id="E1",
+        customer_id="PER",
+        event_date=datetime(2026, 6, 17, 9),
+        process_date=date(2026, 6, 17),
+    )
+    add(
+        con,
+        "digital_events",
+        event_id="E2",
+        customer_id=None,
+        event_date=datetime(2026, 6, 17, 9),
+        process_date=date(2026, 6, 17),
+    )
+    add(con, "branches", branch_id="B1")
+    to_parquet(con, folder)
+    return folder
