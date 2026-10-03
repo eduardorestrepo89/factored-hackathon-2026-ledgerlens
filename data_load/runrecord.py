@@ -3,7 +3,7 @@
 import json
 import re
 
-STAGES = ("ingest", "transform", "load")
+STAGES = ("ingest", "transform", "curate", "load")
 
 
 def record_key(run_id: str, stage: str) -> str:

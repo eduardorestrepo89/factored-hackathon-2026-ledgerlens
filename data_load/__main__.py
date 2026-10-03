@@ -1,10 +1,12 @@
-"""python -m data_load {ingest,transform,load,check}: the data pipeline's stages.
+"""python -m data_load {ingest,transform,curate,load,check}: the data pipeline's stages.
 
-CodeBuild runs `python -m data_load $STAGE` for stages 1-3; Step Functions sets STAGE
-and RUN_ID. Design: docs/superpowers/specs/2026-10-02-data-pipeline-design.md
+CodeBuild runs `python -m data_load $STAGE` for stages 1-4; Step Functions sets STAGE
+and RUN_ID. Design: docs/superpowers/specs/2026-10-02-data-pipeline-design.md and
+docs/superpowers/specs/2026-10-03-curate-stage-design.md
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -94,21 +96,82 @@ def cmd_transform(args) -> int:
     return 0
 
 
+def cmd_curate(args) -> int:
+    from data_load.curate import curate, download_clean
+    from data_load.transform import load_expected
+
+    expected = load_expected()  # compared only on the full data with default sizes
+    sizes = {"customers": args.customers, "per_class": args.defect_per_class}
+    if args.source:  # local rehearsal: nothing in AWS is read or written
+        written, record = curate(
+            args.source, Path(args.out), expected=expected, **sizes
+        )
+        body = json.dumps(record, indent=2, sort_keys=True, ensure_ascii=False)
+        (Path(args.out) / "curate.json").write_text(body, encoding="utf-8")
+        _print_curated(written, record)
+        return 0
+
+    run_id, bucket = require_env("RUN_ID", "TEAM_BUCKET")
+    import boto3
+
+    from data_load import runrecord
+
+    s3 = boto3.client("s3")
+    runrecord.clear(s3, bucket, run_id, "curate")
+    staged = runrecord.read(s3, bucket, run_id, "transform")["tables"]
+    clean = Path(args.out) / "clean"
+    shutil.rmtree(clean, ignore_errors=True)  # a stale file would be read as a table
+    download_clean(s3, bucket, staged, clean)
+    written, record = curate(
+        clean.as_posix(), Path(args.out) / "curated", expected=expected, **sizes
+    )
+    record = {"run_id": run_id, **record, "tables": {}}
+    for table in written:
+        key = f"curated/{run_id}/{table.path.name}"
+        s3.upload_file(str(table.path), bucket, key)
+        s3.put_object(Bucket=bucket, Key=f"{key}.sha256", Body=table.sha256.encode())
+        record["tables"][table.name] = {
+            "rows": table.rows,
+            "uri": f"s3://{bucket}/{key}",
+            "sha256": table.sha256,
+        }
+    uri = runrecord.write(s3, bucket, run_id, "curate", record)
+    _print_curated(written, record)
+    print(f"curate: record {uri}", flush=True)
+    return 0
+
+
+def _print_curated(written, record) -> None:
+    clean = record["selection"]["customers"]
+    cohort = record["defects"]["customers_selected"]
+    total = sum(t.rows for t in written)
+    print(
+        f"curated {clean:,} clean + {cohort:,} defect-cohort customers, {total:,} rows"
+    )
+    print(f"rules {record['rules']}", flush=True)
+
+
 def cmd_load(args) -> int:
     run_id, bucket, endpoint, tools_role = require_env(
         "RUN_ID", "TEAM_BUCKET", "DSQL_ENDPOINT", "TOOLS_ROLE_ARN"
     )
     import boto3
+    from botocore.exceptions import ClientError
 
     from data_load import dsql, runrecord
 
     s3 = boto3.client("s3")
     runrecord.clear(s3, bucket, run_id, "load")
-    staged = runrecord.read(s3, bucket, run_id, "transform")["tables"]
+    try:
+        staged = runrecord.read(s3, bucket, run_id, "curate")["tables"]
+    except (KeyError, ClientError) as e:  # KeyError: the unit tests' fake S3
+        if isinstance(e, ClientError) and e.response["Error"]["Code"] != "NoSuchKey":
+            raise
+        raise SystemExit(f"no curate.json for run {run_id}: run curate first") from None
     plan = load_plan()
     if set(staged) != set(plan.data_tables):
         missing = sorted(set(plan.data_tables) - set(staged))
-        raise SystemExit(f"transform.json lacks tables: {', '.join(missing)}")
+        raise SystemExit(f"curate.json lacks tables: {', '.join(missing)}")
     # largest first, so the longest load starts first
     order = sorted(staged, key=lambda t: staged[t]["rows"], reverse=True)
     uris = {table: staged[table]["uri"] for table in order}
@@ -179,7 +242,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tables", help="comma-separated subset; local runs only")
     p.set_defaults(func=cmd_transform)
 
-    p = sub.add_parser("load", help="stage 3: recreate the tables and bulk-load DSQL")
+    p = sub.add_parser(
+        "curate", help="stage 3: fix, select and write the curated Parquet"
+    )
+    p.add_argument("--source", help="local directory of clean Parquet (skips S3)")
+    p.add_argument("--out", default=str(WORK))
+    p.add_argument("--customers", type=int, default=1500, help="clean customers (x12)")
+    p.add_argument("--defect-per-class", type=int, default=20)
+    p.set_defaults(func=cmd_curate)
+
+    p = sub.add_parser("load", help="stage 4: recreate the tables and bulk-load DSQL")
     p.set_defaults(func=cmd_load)
 
     p = sub.add_parser(
