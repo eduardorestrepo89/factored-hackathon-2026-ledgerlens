@@ -48,12 +48,13 @@ What comes next? That's up to you, the developer. With your requirements in mind
 
 ## LedgerLens Database (Aurora DSQL)
 
-The organizer's LATAM Bank dataset (13 tables, 23,495,188 rows) lives in Aurora DSQL, in its own stack, `ledgerlens-bank-assistant-data`. It deploys without the agent backend or the frontend.
-- **Design:** [docs/superpowers/specs/2026-10-02-data-pipeline-design.md](docs/superpowers/specs/2026-10-02-data-pipeline-design.md).
+Aurora DSQL holds a curated slice of the organizer's LATAM Bank dataset: 1,500 coherent customers (10 pinned demo personas among them) plus a 159-customer defect cohort kept as delivered for evaluation, 270,866 rows across the 13 tables. S3 `clean/` keeps all 23,495,188 repaired rows. The database lives in its own stack, `ledgerlens-bank-assistant-data`, which deploys without the agent backend or the frontend.
+- **Design:** [docs/superpowers/specs/2026-10-02-data-pipeline-design.md](docs/superpowers/specs/2026-10-02-data-pipeline-design.md) and [docs/superpowers/specs/2026-10-03-curate-stage-design.md](docs/superpowers/specs/2026-10-03-curate-stage-design.md).
+- **Customers and personas:** [datathon/docs/analysis/2026-10-03-curated-customers.md](datathon/docs/analysis/2026-10-03-curated-customers.md).
 - **Code:** `data_load/`, `infra-cdk/lib/data-stack.ts` and `infra-cdk/lib/data-construct.ts`.
 
 **What's in it:**
-- **One schema:** `public`, holding the 13 tables as delivered, with the documented repairs R1–R6 applied in the transform (spec section 6).
+- **One schema:** `public`, holding the 13 tables with their delivered columns: the repairs R1–R6 applied in the transform (pipeline spec section 6), then the curation rules C1–C12 applied in curate (curate spec section 5) to every customer except the defect cohort.
 - **Read-only access:** only the IAM role `ledgerlens-tools` can read the data, as the database role `ll_read`, and only from inside the stack's VPC, through the private host `DsqlPrivateHost`.
 - **The loader's exception:** the loader (CodeBuild) is the only identity allowed in from outside the VPC.
 - **No laptop access:** laptops are refused, admin credentials included. Ad-hoc queries need a temporary exception in the cluster policy (spec section 7.3).
@@ -74,7 +75,7 @@ aws secretsmanager put-secret-value --profile ledgerlens --secret-id ledgerlens/
 
 Delete the file afterwards and never commit it.
 
-**Load the data (about 30 minutes, about $3.50):**
+**Load the data (about 10 minutes, under $1):**
 
 ```bash
 AWS_PROFILE=ledgerlens make load-data
@@ -83,8 +84,9 @@ arn=$(aws stepfunctions list-state-machines --profile ledgerlens --query "stateM
 aws stepfunctions start-execution --profile ledgerlens --state-machine-arn "$arn"
 ```
 
-- **Stages:** the pipeline runs ingest → transform → load → read check. Each stage writes `runs/<run-id>/<stage>.json` in the team bucket.
-- **Downtime:** a load drops and recreates the 13 tables, so the tools see missing tables for about 25 minutes. Never reload during a demo.
+- **Stages:** the pipeline runs ingest → transform → curate → load → read check. Each stage writes `runs/<run-id>/<stage>.json` in the team bucket. Curate fixes per-customer incoherence (rules C1–C12) and selects the customers; load reads `curated/<run-id>/`.
+- **Retuning the selection:** rerun `curate`, then `load`, for the same run (about 6 minutes); transform isn't rerun.
+- **Downtime:** a load drops and recreates the 13 tables, so the tools see missing tables for about 2 minutes. Never reload during a demo.
 - **Rerunning one stage** of an existing run:
 
   ```bash

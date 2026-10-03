@@ -142,7 +142,7 @@ export class DataConstruct extends Construct {
 
     const project = new codebuild.Project(this, "DataLoad", {
       projectName: "ledgerlens-data-load",
-      description: "Data pipeline stages 1-3: python -m data_load $STAGE (ingest, transform, load)",
+      description: "Data pipeline stages 1-4: python -m data_load $STAGE (ingest, transform, curate, load)",
       role: loaderRole,
       source: codebuild.Source.s3({ bucket: source.bucket, path: source.s3ObjectKey }),
       environment: {
@@ -263,6 +263,7 @@ export class DataConstruct extends Construct {
       definitionBody: sfn.DefinitionBody.fromChainable(
         stage("Ingest")
           .next(stage("Transform"))
+          .next(stage("Curate"))
           .next(stage("Load"))
           .next(new tasks.LambdaInvoke(this, "ReadCheck", { lambdaFunction: readCheck, payloadResponseOnly: true }))
       ),

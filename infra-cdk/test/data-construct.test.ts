@@ -101,7 +101,7 @@ test.each([
   expect(fn.Properties.Environment.Variables.DSQL_CLUSTER_ENDPOINT).toEqual(readCheck.Properties.Environment.Variables.DSQL_HOST)
 })
 
-test("state machine runs ingest, transform, load, then the read check", () => {
+test("state machine runs ingest, transform, curate, load, then the read check", () => {
   const machine = Object.values(t.findResources("AWS::StepFunctions::StateMachine"))[0]
   expect(machine.Properties.StateMachineName).toBe("ledgerlens-data-pipeline")
   const definition = JSON.stringify(machine.Properties.DefinitionString)
@@ -109,9 +109,11 @@ test("state machine runs ingest, transform, load, then the read check", () => {
     '\\"TimeoutSeconds\\":36000', // 10 h: above the CodeBuild timeout, so CodeBuild fails first
     '\\"StartAt\\":\\"Ingest\\"',
     '\\"Next\\":\\"Transform\\"',
+    '\\"Next\\":\\"Curate\\"',
     '\\"Next\\":\\"Load\\"',
     '\\"Next\\":\\"ReadCheck\\"',
     '\\"Name\\":\\"STAGE\\",\\"Type\\":\\"PLAINTEXT\\",\\"Value\\":\\"transform\\"',
+    '\\"Name\\":\\"STAGE\\",\\"Type\\":\\"PLAINTEXT\\",\\"Value\\":\\"curate\\"',
     '\\"Name\\":\\"RUN_ID\\",\\"Type\\":\\"PLAINTEXT\\",\\"Value.$\\":\\"$$.Execution.Name\\"',
   ]) {
     expect(definition).toContain(fragment)

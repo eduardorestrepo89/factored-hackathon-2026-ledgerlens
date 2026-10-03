@@ -1,10 +1,12 @@
 """python -m data_load: stage commands, their environment, and the load order."""
 
+import hashlib
 import json
 from pathlib import Path
 from unittest import mock
 
 import pytest
+from curate_fixtures import PERSONAS, world
 from data_load_fixtures import tx, write_transactions
 from data_load_s3 import FakeS3
 
@@ -52,6 +54,7 @@ def test_tables_subset_is_for_local_runs_only():
     [
         (["ingest"], "RUN_ID, TEAM_BUCKET, HACKATHON_SECRET_ID"),
         (["transform"], "RUN_ID, TEAM_BUCKET"),
+        (["curate"], "RUN_ID, TEAM_BUCKET"),
         (["load"], "RUN_ID, TEAM_BUCKET, DSQL_ENDPOINT, TOOLS_ROLE_ARN"),
     ],
 )
@@ -156,7 +159,7 @@ def test_ingest_takes_the_organizer_keys_from_secrets_manager(monkeypatch, capsy
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("stage", ["ingest", "transform", "load"])
+@pytest.mark.parametrize("stage", ["ingest", "transform", "curate", "load"])
 def test_a_failed_rerun_removes_the_stages_old_record(monkeypatch, stage):
     env = {
         "RUN_ID": "run-1",
@@ -238,13 +241,13 @@ def fake_load_env(monkeypatch, tables):
         "tables": {
             t: {
                 "rows": rows,
-                "uri": f"s3://team/clean/run-1/{t}.parquet",
+                "uri": f"s3://team/curated/run-1/{t}.parquet",
                 "sha256": "s",
             }
             for t, rows in tables.items()
         }
     }
-    runrecord.write(s3, "team", "run-1", "transform", record)
+    runrecord.write(s3, "team", "run-1", "curate", record)
     monkeypatch.setattr("boto3.client", lambda *a, **k: s3)
     calls = []
     monkeypatch.setattr("data_load.dsql.connect", lambda *a, **k: mock.MagicMock())
@@ -282,10 +285,87 @@ def test_load_dry_runs_every_table_largest_first_then_loads(monkeypatch):
 
 
 @pytest.mark.unit
-def test_load_refuses_an_incomplete_transform_record(monkeypatch):
+def test_load_refuses_an_incomplete_curate_record(monkeypatch):
     _, calls = fake_load_env(monkeypatch, {"branches": 350})
     with pytest.raises(
-        SystemExit, match="transform.json lacks tables: call_center_interactions"
+        SystemExit, match="curate.json lacks tables: call_center_interactions"
     ):
         main(["load"])
     assert calls == []  # stopped before touching DSQL
+
+
+@pytest.mark.unit
+def test_load_without_a_curate_record_says_to_run_curate_first(monkeypatch):
+    s3, calls = fake_load_env(monkeypatch, {"branches": 350})
+    runrecord.clear(s3, "team", "run-1", "curate")
+    with pytest.raises(
+        SystemExit, match="no curate.json for run run-1: run curate first"
+    ):
+        main(["load"])
+    assert calls == []
+
+
+@pytest.mark.unit
+def test_curate_command_writes_parquet_locally(monkeypatch, tmp_path, capsys):
+    source = world(tmp_path / "clean")
+    monkeypatch.setattr("data_load.curate_select.load_personas", lambda: PERSONAS)
+    code = main(
+        [
+            "curate",
+            "--source",
+            source.as_posix(),
+            "--out",
+            str(tmp_path / "out"),
+            "--customers",
+            "12",
+            "--defect-per-class",
+            "1",
+        ]
+    )
+    assert code == 0
+    assert (tmp_path / "out" / "customers.parquet").exists()
+    record = json.loads((tmp_path / "out" / "curate.json").read_text(encoding="utf-8"))
+    assert record["selection"]["personas"] == {"P01": "PER"}
+    assert "curated 2 clean + 1 defect-cohort customers" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_cloud_curate_downloads_checks_uploads_and_records(monkeypatch, tmp_path):
+    for name, value in {"RUN_ID": "run-1", "TEAM_BUCKET": "team"}.items():
+        monkeypatch.setenv(name, value)
+    s3 = FakeS3({("team", "clean/run-1/branches.parquet"): b"clean"})
+    sha = hashlib.sha256(b"clean").hexdigest()
+    staged = {"uri": "s3://team/clean/run-1/branches.parquet", "sha256": sha}
+    runrecord.write(s3, "team", "run-1", "transform", {"tables": {"branches": staged}})
+    monkeypatch.setattr("boto3.client", lambda *a, **k: s3)
+    seen = {}
+
+    def fake_curate(source, out_dir, expected=None, **sizes):
+        seen["files"] = sorted(p.name for p in Path(source).iterdir())
+        seen["sizes"], seen["expected"] = sizes, expected
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / "branches.parquet"
+        path.write_bytes(b"curated")
+        record = {
+            "as_of": "2026-06-17T23:59:59",
+            "rules": {"C1": {"changed": 1}},
+            "selection": {"customers": 1500},
+            "defects": {"customers_selected": 159},
+        }
+        return [Table("branches", path, 350, "c" * 64)], record
+
+    monkeypatch.setattr("data_load.curate.curate", fake_curate)
+    assert main(["curate", "--out", str(tmp_path)]) == 0
+    assert seen["files"] == ["branches.parquet"]
+    assert seen["sizes"] == {"customers": 1500, "per_class": 20}
+    assert seen["expected"] == load_expected()
+    assert s3.objects[("team", "curated/run-1/branches.parquet")] == b"curated"
+    assert s3.objects[("team", "curated/run-1/branches.parquet.sha256")] == b"c" * 64
+    record = runrecord.read(s3, "team", "run-1", "curate")
+    assert record["run_id"] == "run-1"
+    assert record["rules"] == {"C1": {"changed": 1}}
+    assert record["tables"]["branches"] == {
+        "rows": 350,
+        "uri": "s3://team/curated/run-1/branches.parquet",
+        "sha256": "c" * 64,
+    }

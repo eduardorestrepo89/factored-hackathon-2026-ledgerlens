@@ -65,6 +65,8 @@ runs/<run-id>/ingest.json, transform.json, load.json     one record per stage
 | 3 | **load** (`python -m data_load load`) | Connects as `admin` and recreates the 13 tables. Creates `ll_read` if it's missing, maps it to the tools role (`AWS IAM GRANT`, if the mapping is missing) and reapplies the grants. Runs `aurora-dsql-loader` for all 13 tables, first with `--dry-run`, then with `--on-conflict do-nothing --verify count`. Builds the 3 indexes and polls `sys.jobs` until each completes. Writes `load.json`: per table, rows loaded | A dry run or load fails; a count differs; an index job fails |
 | 4 | **read check** (Lambda `ledgerlens-dsql-read-check`) | Connects through the private endpoint as `ll_read` with the tools role. Reads one row from each of the 13 tables. Then, in a transaction it rolls back, runs `INSERT INTO branches SELECT * FROM branches WHERE false`, which must fail with SQLSTATE `42501` (insufficient privilege) | A read fails, or the insert is allowed |
 
+*Amended 2026-10-03:* a curate stage runs between transform and load; load reads `runs/<run-id>/curate.json` and `curated/<run-id>/` (`docs/superpowers/specs/2026-10-03-curate-stage-design.md`).
+
 A failed stage fails the execution; its CodeBuild log or Lambda log names the cause. To rerun one stage of an existing run:
 
 ```bash
