@@ -16,12 +16,6 @@ The use case and its whole graph are built once, when the module loads, by
 dependencies_builder; a warm container reuses them. AS_OF (optional) is read
 once into CLOCK, and CLOCK.now() is the claims' creation date on every call. An
 invalid AS_OF answers every request with DataSourceUnavailableError's message.
-
-TODO(ledgerlens): R1 - deployed by the data stack (ledgerlens-open-claim, role
-  ledgerlens-write-tools); no Gateway target or Cedar statement 3 yet (write
-  tools spec section 10), so the agent can't call it.
-TODO(ledgerlens): R5 - customer_id is trusted from the tool input until Cedar
-  statement 2 covers this tool (product design sections 5 and 10).
 """
 
 import json

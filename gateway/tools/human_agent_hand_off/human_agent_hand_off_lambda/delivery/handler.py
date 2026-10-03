@@ -12,11 +12,6 @@ Output: ``{"content": [{"type": "text", "text": <JSON>}]}`` on success, or
 
 The use case and its publisher are built once, when the module loads; a warm
 container reuses them. The function runs outside the VPC and never touches DSQL.
-
-TODO(ledgerlens): R1 - deployed by the data stack (ledgerlens-human-agent-hand-off);
-  no Gateway target yet (write tools spec section 10), so the agent can't call it.
-TODO(ledgerlens): R5 - customer_id is trusted from the tool input until Cedar
-  statement 2 covers this tool (product design sections 5 and 10).
 """
 
 import json

@@ -5,10 +5,24 @@ import * as path from "path"
 import { FastMainStack } from "../lib/fast-main-stack"
 import { ConfigManager } from "../lib/utils/config-manager"
 
-// The three read tools live in the data stack; the main stack imports them by name.
-const TOOLS = ["list_credit_cards", "list_card_transactions", "get_session_context"]
+// The tool Lambdas live in the data stack; the main stack imports them by name.
+// Tool -> Gateway target name.
+const TARGETS: Record<string, string> = {
+  list_credit_cards: "list-credit-cards-target",
+  list_card_transactions: "list-card-transactions-target",
+  get_session_context: "get-session-context-target",
+  transaction_fraud_detection: "fraud-detection-target",
+  explain_transaction: "explain-transaction-target",
+  classify_call_type: "classify-call-type-target",
+  block_credit_card: "block-credit-card-target",
+  open_claim: "open-claim-target",
+  human_agent_hand_off: "human-agent-hand-off-target",
+}
+const TOOLS = Object.keys(TARGETS)
 const slug = (tool: string) => tool.replace(/_/g, "-")
 const REPO = path.join(__dirname, "..", "..")
+const specName = (tool: string): string =>
+  JSON.parse(fs.readFileSync(path.join(REPO, "gateway", "tools", tool, "tool_spec.json"), "utf-8"))[0].name
 
 function synth(): Template {
   // skip Docker bundling of the Python Lambdas: these tests read the template only.
@@ -29,14 +43,21 @@ const policy = Object.values(t.findResources("AWS::CloudFormation::CustomResourc
   (r) => r.Properties.PolicyDocument
 )
 
-test("the Gateway has one target per read tool, pointing at the data stack's Lambda", () => {
+test("the Gateway has one target per tool, pointing at the data stack's Lambda", () => {
   const byName = Object.fromEntries(Object.values(targets).map((r) => [r.Properties.Name, r]))
-  expect(Object.keys(byName).sort()).toEqual(TOOLS.map((tool) => `${slug(tool)}-target`).sort())
+  expect(Object.keys(byName).sort()).toEqual(Object.values(TARGETS).sort())
   for (const tool of TOOLS) {
-    expect(JSON.stringify(byName[`${slug(tool)}-target`].Properties.TargetConfiguration)).toContain(
+    expect(JSON.stringify(byName[TARGETS[tool]].Properties.TargetConfiguration)).toContain(
       `arn:aws:lambda:us-east-1:111111111111:function:ledgerlens-${slug(tool)}`
     )
   }
+})
+
+test("every tool name the model sees fits Bedrock's 64-character limit", () => {
+  // The agent's MCP client adds prefix="gateway" (patterns/strands-single-agent/tools/gateway.py).
+  // One name over the limit makes Bedrock reject every request, not just that tool's.
+  const tooLong = TOOLS.map((tool) => `gateway_${TARGETS[tool]}___${specName(tool)}`).filter((n) => n.length > 64)
+  expect(tooLong).toEqual([])
 })
 
 test("the sample tool and Code Interpreter access are gone", () => {
@@ -53,12 +74,7 @@ test("every Cedar action names a deployed target and the tool in its tool_spec.j
     .filter((line) => !line.trimStart().startsWith("//"))
     .join("\n")
   const actions = [...statements.matchAll(/AgentCore::Action::"([^"]+)"/g)].map((m) => m[1])
-  const expected = TOOLS.map((tool) => {
-    const spec = JSON.parse(
-      fs.readFileSync(path.join(REPO, "gateway", "tools", tool, "tool_spec.json"), "utf-8")
-    )
-    return `${slug(tool)}-target___${spec[0].name}`
-  })
+  const expected = TOOLS.map((tool) => `${TARGETS[tool]}___${specName(tool)}`)
   expect([...new Set(actions)].sort()).toEqual(expected.sort())
 })
 
