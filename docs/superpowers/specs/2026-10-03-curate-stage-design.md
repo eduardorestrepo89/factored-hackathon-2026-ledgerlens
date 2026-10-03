@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-03
 - **Branch:** `feat/testing-db` (design); implementation branch chosen in the plan
-- **Status:** approved in brainstorming; written spec awaiting review
+- **Status:** implemented on `feat/curate-stage` (plan `docs/superpowers/plans/2026-10-03-curate-stage.md`). Counts below are the pinned full-data counts in `data_load/expected.json` → `curation`, from the 2026-10-03 rehearsal.
 - **Builds on:** `docs/superpowers/specs/2026-10-02-data-pipeline-design.md` (stages, repairs R1–R6, access). This spec adds a stage between transform and load and changes what load reads. Everything else in that spec stands.
 - **Evidence:**
   - `datathon/docs/analysis/2026-10-02-agent-data-diagnostic.md`: defects D01–D37, candidate funnel, probes AR-*.
@@ -15,7 +15,7 @@ Add a **curate** stage that turns the full repaired data (`clean/<run-id>/`, 23,
 
 1. **Fix what can be fixed honestly.** Twelve curation rules (C1–C12) make each customer's rows agree with each other. Seven derive values from other columns. Five are labelled synthetic rules.
 2. **Select about 1,500 coherent customers.** They are spread evenly over the 12 country × segment cells, including 10 pinned demo personas, one per use case.
-3. **Keep about 300 incoherent customers as delivered.** This defect cohort covers 17 defect classes, so the agent is also tested on bad data. Each customer carries evidence row IDs for later labelling.
+3. **Keep 159 incoherent customers as delivered.** This defect cohort covers 17 defect classes, so the agent is also tested on bad data. Each customer carries evidence row IDs for later labelling.
 4. **Replace `public` in Aurora DSQL with this curated set.** The full repaired data stays in S3 `clean/` for lineage and analysis.
 
 The tools, schema, grants, indexes and read check do not change.
@@ -28,10 +28,10 @@ These facts come from a throwaway prototype run on 2026-10-03. The run used the 
 |---|---|
 | The agent talks to one customer at a time, but each customer's statuses, expiry, codes and case states are independent random draws (diagnostic §3) | Fix within a customer's rows, then select customers |
 | The data is thin: about 97% of customers have no card charge in the last 3 days (diagnostic D16) | Score customers by recent activity |
-| C2's evidence: Python's float `round(amount/rate, 2)` reproduces all 1,887,552 stored `amount_usd` values. DuckDB's `round` misses 1,089 half-cents | C2 runs a Python UDF |
+| C2's evidence: Python's float `round(amount/rate, 2)` reproduces all 1,887,552 stored `amount_usd` values. DuckDB's `round` misses 1,089 half-cents | C2 computes in plain Python. A DuckDB Python UDF needs numpy and ran ~600× slower (95 s per 200,000 rows), so it was rejected |
 | C3's evidence: every named merchant has exactly one `merchant_category` (the `NULL` merchant group is excluded) | The category can be derived from the merchant |
 | A blanket card reissue turned 239 of the 510 code-54 declines from the last 30 days into false contradictions; those cards really were expired on the decline date | C8 skips any card with code-54 evidence after its original expiry: 5,171 cards, whose 1,424 pool customers aren't selectable |
-| After the C-rules and the gates (section 6.1), 15,122 customers remain, and every country × segment cell holds at least 154 | 125 per cell works |
+| After the C-rules and the gates (section 6.1), 14,999 customers remain, and every country × segment cell holds at least 154 | 125 per cell works |
 | Each of the 17 defect classes has at least 235 raw customers with card activity in the last 30 days | 20 per class works |
 | Selection by flags alone picked oddities, such as a cash Withdrawal at a POS for a "decline" persona | Personas need an evidence row: a credit-card Purchase with a merchant, on POS, App or Web, inside the tool's window |
 
@@ -40,7 +40,7 @@ These facts come from a throwaway prototype run on 2026-10-03. The run used the 
 | # | Decision | Why | Rejected |
 |---|---|---|---|
 | E1 | A **separate stage**, between transform and load | It shows as its own node in Step Functions and reruns alone in ~3 min while selection is tuned; `clean/` keeps the full repaired data | Inside transform (any retune reruns it and the full data is lost); ELT in DSQL (24-min load every time) |
-| E2 | **`public` holds only the curated set**: ~1,500 clean + ~300 defect customers, all their rows, all four dimension tables | Tools stay unchanged; load drops from ~24 to ~2 min | Curated set in public with the full data in a second schema (load stays ~27 min); a new schema (all 7 tool SQL files change) |
+| E2 | **`public` holds only the curated set**: 1,500 clean + 159 defect customers, all their rows, all four dimension tables | Tools stay unchanged; load drops from ~24 to ~2 min | Curated set in public with the full data in a second schema (load stays ~27 min); a new schema (all 7 tool SQL files change) |
 | E3 | **Rules C1–C12 run on every row**; output is filtered afterwards | Rule counts are population facts and pinned like R1–R6 | Rules on the selected subset only (counts would drift with the selection) |
 | E4 | **Synthetic rules are allowed and labelled** (C8–C12) | Without them, only 1,163 customers pass and 169 are rich (tier A/B); rare scenarios vanish | Derive and filter only |
 | E5 | **C8 is evidence-aware** | A blanket reissue would erase 239 correct "expired card" declines in 30 days | A blanket reissue; filtering every expired card (rare scenarios drop by ~65%) |
@@ -112,8 +112,8 @@ Counts are from the prototype over all rows; the rehearsal pins them in `expecte
 | C8 | `products.expiration_date` | A card (credit or debit) with `product_status = 'Active'` and `expiration_date < as_of` is **reissued**. Term t = `least(5, greatest(3, date_diff('year', opening_date, expiration_date)))`; new expiry = expiry + t × ((year(as_of) − year(expiry)) // t + 1) years, which always lands after as_of. **Exception:** a card with any Declined code-`54` transaction whose `transaction_date::DATE` is after its original `expiration_date` keeps its expiry (evidence it really was expired) | 51,493 reissued; 5,171 kept | 0 Active cards expired at as_of |
 | C9 | `transactions.transaction_status`, `response_code` | Pending with `process_date ≤ as_of − 7 days` → Approved, `'00'` (the authorization settled) | 87,740 | 0 Pending older than 7 days |
 | C10 | `transactions.response_code` | On Pending and Reversed → `NULL` | 43,006 | 0 Pending/Reversed with a code |
-| C11 | `complaints` | A case past the legal answer deadline: days = AR-CLAIM 14, CO-PQR 21, MX-UNE 42 (calendar-day equivalents of 10/15/30 business days, design v3 §9), by the customer's country. Open, In Process or Escalated with no `closing_date` and creation + days ≤ as_of → Closed; `resolution_date = closing_date = creation + days`; `resolution_days = days`; `resolution = 'Cerrado al vencer el plazo legal de respuesta (<rule id>); regla sintética C11'`. Rejected with no `closing_date` → `closing_date = creation + days`, status stays Rejected | 49,628 | 0 open cases past their deadline |
-| C12 | `complaints.currency`, `claimed_amount`, `compensation_granted` | Home currency by country: Argentina ARS, Colombia COP, México USD (contract "Mexico = USD"). Amounts are treated as USD and × book rate (350 / 4000 / 1), rounded to 2 places. `currency = NULL` when both amounts are `NULL` | 25,879 | Currency = home currency wherever an amount exists |
+| C11 | `complaints` | A case past the legal answer deadline: days = AR-CLAIM 14, CO-PQR 21, MX-UNE 42 (calendar-day equivalents of 10/15/30 business days, design v3 §9), by the customer's country. Open, In Process or Escalated with no `closing_date` and creation + days ≤ as_of → Closed; `resolution_date = closing_date = creation + days`; `resolution_days = days`; `resolution = 'Cerrado al vencer el plazo legal de respuesta (<rule id>); regla sintética C11'`. Rejected with no `closing_date` → `closing_date = creation + days`, status stays Rejected | 48,943 closed; 685 Rejected dated | 0 open cases past their deadline |
+| C12 | `complaints.currency`, `claimed_amount`, `compensation_granted` | Home currency by country: Argentina ARS, Colombia COP, México USD (contract "Mexico = USD"). Amounts are treated as USD and × book rate (350 / 4000 / 1), rounded to 2 places. `currency = NULL` when both amounts are `NULL`. Counts only rows whose values change (a Mexican case already in USD is not one) | 23,299 | Currency = home currency wherever an amount exists |
 
 ### 5.3 Kept as delivered, labelled
 
@@ -137,7 +137,7 @@ D01 (Mexican identity formats), D12 (Mexico in USD), D13 (Luhn), D14 (mortgages 
 | G7 | No Active card expired at as_of (the C8 exception cards) | products (after C8) |
 | G8 | ≥ 1 card transaction on a usable card with `process_date > as_of − 30 days` | transactions (after C-rules) |
 
-The prototype funnel: 127,700 Active → 122,183 adult → 116,054 contactable → 109,712 clean name → 41,965 usable credit card → **15,122** after G6–G8.
+The pinned funnel: 127,700 (G1) → 121,256 (G2) → 115,174 (G3) → 108,888 (G4) → 41,648 (G5) → 38,928 (G6) → 37,696 (G7) → **14,999** (G8). G2 uses exact age (`date_of_birth + 18 years <= registration_date`).
 
 ### 6.2 Score
 
@@ -207,7 +207,7 @@ Every class is computed on the **clean** values, before the C-rules. "30 d" mean
 
 1. Candidates: customers with ≥ 1 card transaction in 30 d (any card status), not personas.
 2. Classes are filled from the rarest to the most common, by candidate count. Each class takes top-scored candidates (score from 6.2 computed on clean values; ties by `md5(customer_id)`) until it has `--defect-per-class` members (default 20). A customer already selected counts toward every class it carries.
-3. The expected total is about 250–300 and at most 17 × 20 = 340.
+3. The pinned total is 159 customers (at most 17 × 20 = 340): 145 of them carry two or more classes.
 4. A class with fewer candidates than its target takes all of them; the shortfall is recorded.
 5. The clean selection (6.3) then excludes every cohort customer.
 
@@ -228,7 +228,7 @@ Every class is computed on the **clean** values, before the C-rules. "30 d" mean
 | Every cohort customer still carries each of its classes in the output | Cohort |
 | `repair.check_links`: 24 links, ownership, dates | Whole curated output |
 | Clean and cohort sets are disjoint; no `EVL-` ID | Whole output |
-| Rows per table, selected per cell and cohort per class equal `expected.json` → `curation` (full runs only) | Whole output |
+| Rule counts and rows per table equal `expected.json` → `curation` (full runs, default sizes). Rows per table change whenever the selection or the cohort changes, so per-cell and per-class counts are not pinned separately; they stay in `curate.json` | Whole output |
 
 ## 9. Run record: `runs/<run-id>/curate.json`
 
@@ -311,7 +311,7 @@ python -m data_load curate --source <tmp> --out <tmp2>                         #
 | Item | Estimate |
 |---|---|
 | Curate on CodeBuild `arm1.large` | ~3 min (download 1.2 GB, ~2 min of DuckDB) ≈ $0.05 |
-| Load | From ~24 min to ~2 min for ~1,800 customers and an estimated ~300K rows. DSQL write DPU drops by ~95% (≈ $0.15 instead of ≈ $2.97 per run) |
+| Load | From ~24 min to ~2 min for 1,659 customers and 270,866 rows. DSQL write DPU drops by ~95% (≈ $0.15 instead of ≈ $2.97 per run) |
 | Storage | From ~6.6 GB to well under 1 GB, inside the free tier |
 
 The endpoint ($7.30/month) still dominates the monthly cost.
@@ -340,4 +340,4 @@ The endpoint ($7.30/month) still dominates the monthly cost.
 
 1. **C11 is approximate:** business-day deadlines are converted to calendar days (×7/5, rounded). An exact business-day calendar per country is deferred.
 2. **The score is a draft:** its weights are not tuned. It ranks within a cell and doesn't decide eligibility.
-3. **Cohort size:** the expected ~250–300 is an estimate until the rehearsal measures the overlap.
+3. **Cohort size:** resolved by the rehearsal: 159 customers, because most carry several classes.

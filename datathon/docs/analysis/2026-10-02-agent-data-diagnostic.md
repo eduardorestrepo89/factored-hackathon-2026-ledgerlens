@@ -2,7 +2,7 @@
 
 Factored AI & Data Hackathon 2026 · analysis date 2026-10-02 · dataset v1.0.0 · `as_of` 2026-06-17
 
-Status: **diagnostic only.** It feeds the design of a curation ETL (a "gold" layer of agent-ready customers). It decides nothing; section 8 lists what the team has to decide.
+Status: **diagnostic; its decisions are resolved by the curate stage spec (2026-10-03).** The spec is `docs/superpowers/specs/2026-10-03-curate-stage-design.md` (decisions E1–E11); the curated customers are documented in [`2026-10-03-curated-customers.md`](2026-10-03-curated-customers.md).
 
 ## 0. Summary
 
@@ -13,7 +13,7 @@ Status: **diagnostic only.** It feeds the design of a curation ETL (a "gold" lay
    - 50,269 complaints are still Open, In Process or Escalated at a median age of **~545 days**, and a Resolved complaint never has a `closing_date` (D26). This is the "940 days open" case seen live;
    - 85% of products carry a `last_transaction_date` that isn't their last transaction (D11).
 2. **Each customer is thin.** About 1 card transaction a month. Only **9,265** customers have any card transaction in the last 7 days, and no customer has more than 6 credit-card transactions in the last 30 days (D16). For most customers the session-start view is empty.
-3. **Some defects can be fixed without inventing anything** (derive from other columns), **some need a team decision** (any fix invents a value), and **some can only be avoided by choosing customers.** Section 4 classifies all 38.
+3. **Some defects can be fixed without inventing anything** (derive from other columns), **some need a team decision** (any fix invents a value), and **some can only be avoided by choosing customers.** Section 4 classifies all 39 (D38 and D39 were added on 2026-10-03).
 4. **The candidate pool is small but enough.** 9,509 customers pass five hard gates (Active, adult, contactable, a usable credit card, card activity in the last 30 days). A draft richness score puts **439 in tier A** and **1,387 in tier B**. A pool-only database holds about **1.4M rows**, 6% of the full load (section 6).
 5. **Some scenarios are rare in the pool:** a fraud-flagged charge in the last 90 days (16 customers), an unrecognized-charge case in the last 90 days (68), app activity in the last 24 h (63). Selection needs per-scenario quotas, not only a top-N score.
 
@@ -153,6 +153,8 @@ The generator draws each column of each table on its own, then ties child rows t
 | D35 | `digital_events.product_id` owned by someone else | 1,094,242 | Fixed: 337,760 relinked, 1,102,562 → `NULL` | **Done** (R4) |
 | D36 | Recent app activity is rare: 897 customers in the last 24 h, 9,932 in 7 days [AR-E1] | — | The digital-signals section is empty for almost everyone | Filter / quota |
 | D37 | Registration and agent branch IDs point at no branch | 149,995 customers; 831 agents | Fixed | **Done** (R1, R2) |
+| D38 | Segment is unrelated to age: Students have a median age of 52 | 5,781 of 7,490 Students are over 35 (prototype, 2026-10-03) | Nothing the tools read | Label |
+| D39 | Digital events pair the wrong page with the event type ("Login" on "Cerrar Sesión") | Seen in the persona checks (prototype, 2026-10-03) | None: the session signal query reads page titles and actions | Label |
 
 ### 4.6 Assumptions in the tool code that the data contradicts
 
@@ -287,6 +289,12 @@ These are facts the design must respect, not the design.
 6. **Size is a free choice.** Anything from ~50 demo customers to the whole 9,509-customer pool loads in minutes, against ~24 min for the full load.
 
 ## 8. Open decisions
+
+**Resolved 2026-10-03.** The team chose "coherent by rule, labelled", with two changes:
+- C8 reissues expired cards only when no code-54 decline after the original expiry contradicts it;
+- C12 converts case amounts as well as currency.
+
+The identity cosmetics stay labelled, and gate G4 skips mixed-gender compound names. Every row below is resolved in `docs/superpowers/specs/2026-10-03-curate-stage-design.md`, and the defect cohort keeps 159 incoherent customers as delivered for evaluation.
 
 ### 8.1 Scope
 
