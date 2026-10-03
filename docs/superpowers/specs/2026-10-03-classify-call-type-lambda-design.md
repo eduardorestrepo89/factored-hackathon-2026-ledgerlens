@@ -24,12 +24,12 @@ The tool ranks up to 3 likely reasons the customer is contacting the bank right 
   | Persona | Expected |
   |---|---|
   | P07 `CLI-EX6BOAOEFZHQ` | `FRAUD_SUSPECTED` first, `ref_id` `TRX-23BIJAU4GL46ATPW9STY`, confidence 0.77 (95 − 17.74 days = 77.26) |
-  | P01 `CLI-1GL7QBDG3QG0` | `DECLINED_TRANSACTION` first |
-  | P02 `CLI-7EC6UCDZMSKV` | `PENDING_TRANSACTION` in the list |
-  | P03 `CLI-70U0WJ1NH1MN` | `REVERSED_TRANSACTION` in the list, `ref_id` `TRX-LJGEBUAOX0G4CL4RQSIU` |
-  | P05 `CLI-50OIF5EIYSWK` | `FOREIGN_TRANSACTION` in the list, `ref_id` `TRX-MQKFELIPWT098DXTN2WN` (Brazil). The code-14 decline (2026-06-14 16:03) is 80 h before `AS_OF`, outside the 72 h window, so there's **no** `DECLINED_TRANSACTION`. |
-  | P08 `CLI-GG3Z1440277M` | `OPEN_CASE_FOLLOWUP` in the list |
-  | P10 `CLI-Z3V3SBS18YWQ` | `CARD_NOT_ACTIVE` and `PAYMENT_OVERDUE` in the list |
+  | P01 `CLI-1GL7QBDG3QG0` | `DECLINED_TRANSACTION` first, `TRX-SSJAIUCVVU1L4605ZLNM`, 0.79 (code 51, 5.58 h old) |
+  | P02 `CLI-7EC6UCDZMSKV` | `PENDING_TRANSACTION` first, `TRX-M8SV89D2QGIE6WRUB79K`, 0.61. The `Closed` card 4364 adds nothing. |
+  | P03 `CLI-70U0WJ1NH1MN` | `REVERSED_TRANSACTION` first, `TRX-LJGEBUAOX0G4CL4RQSIU`, 0.26 (44.4 h old, at the 40% floor) |
+  | P05 `CLI-50OIF5EIYSWK` | `FOREIGN_TRANSACTION` first, `TRX-MQKFELIPWT098DXTN2WN` (Brazil), 0.44. The code-14 decline (2026-06-14 16:03) is 80 h before `AS_OF`, outside the 72 h window, so there's **no** `DECLINED_TRANSACTION`. |
+  | P08 `CLI-GG3Z1440277M` | `OPEN_CASE_FOLLOWUP` first, `CMP-FHCLR8TGWMBD0YFOCLYS`, 0.60 (`sla_breached` NULL counts as not breached) |
+  | P10 `CLI-Z3V3SBS18YWQ` | `CARD_NOT_ACTIVE` (7718, Blocked) 0.60, then `PAYMENT_OVERDUE` (2626, 180 days) 0.50 |
 
 - Unit tests cover every layer with no database or AWS. `ruff` is clean. Nothing imports across tool folders.
 
@@ -102,7 +102,7 @@ The enum is in this order, which is also the final tie-break:
 | `FRAUD_SUSPECTED` | `Approved` and `fraud_score > 50` | 30 days | 95 | per day | `transaction_id` |
 | `DECLINED_TRANSACTION` | `Declined` | 72 hours | 85 | per hour | `transaction_id` |
 | `UNRECOGNIZED_CHARGE_REVIEW` | `Approved` and `30 < fraud_score <= 50` | 30 days | 70 | per day | `transaction_id` |
-| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if `sla_breached` is true, else 60 | none | `complaint_id` |
+| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if `sla_breached` is true, else 60 (NULL counts as false) | none | `complaint_id` |
 | `PENDING_TRANSACTION` | `Pending` | 72 hours | 65 | per hour | `transaction_id` |
 | `REVERSED_TRANSACTION` | `Reversed` | 72 hours | 65 | per hour | `transaction_id` |
 | `CARD_NOT_ACTIVE` | `product_status` in {`Blocked`, `Suspended`} | state | 60 | none | `card_last4` |
