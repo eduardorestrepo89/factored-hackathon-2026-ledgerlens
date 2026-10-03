@@ -207,27 +207,36 @@ export class DataConstruct extends Construct {
       }),
     })
 
-    // A Gateway tool deployed alone, to test it against the database. It moves to the
-    // agent stack with the Gateway; it reads as ll_read, the role the read check proves.
-    new PythonFunction(this, "ListCreditCardsFn", {
-      functionName: "ledgerlens-list-credit-cards",
-      runtime: lambda.Runtime.PYTHON_3_13,
-      architecture: lambda.Architecture.ARM_64,
-      entry: path.join(__dirname, "..", "..", "gateway", "tools", "list_credit_cards"),
-      index: "list_credit_cards_lambda/delivery/handler.py",
-      handler: "handler",
-      role: this.toolsRole,
-      vpc: this.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      securityGroups: [this.toolsSecurityGroup],
-      timeout: cdk.Duration.seconds(30),
-      environment: { DSQL_CLUSTER_ENDPOINT: this.privateHost, AS_OF: props.config.data.as_of },
-      logGroup: new logs.LogGroup(this, "ListCreditCardsLogs", {
-        logGroupName: `/aws/lambda/${props.config.stack_name_base}-list-credit-cards`,
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
-    })
+    // Gateway tools deployed alone, to test them against the database. They move to the
+    // agent stack with the Gateway; they read as ll_read, the role the read check proves.
+    // The ids keep ListCreditCardsFn/ListCreditCardsLogs so the deployed function is not replaced.
+    const tools = [
+      { tool: "list_credit_cards", id: "ListCreditCards" },
+      { tool: "list_card_transactions", id: "ListCardTransactions" },
+      { tool: "get_session_context", id: "GetSessionContext" },
+    ]
+    for (const { tool, id } of tools) {
+      const slug = tool.replace(/_/g, "-")
+      new PythonFunction(this, `${id}Fn`, {
+        functionName: `ledgerlens-${slug}`,
+        runtime: lambda.Runtime.PYTHON_3_13,
+        architecture: lambda.Architecture.ARM_64,
+        entry: path.join(__dirname, "..", "..", "gateway", "tools", tool), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        index: `${tool}_lambda/delivery/handler.py`,
+        handler: "handler",
+        role: this.toolsRole,
+        vpc: this.vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+        securityGroups: [this.toolsSecurityGroup],
+        timeout: cdk.Duration.seconds(30),
+        environment: { DSQL_CLUSTER_ENDPOINT: this.privateHost, AS_OF: props.config.data.as_of },
+        logGroup: new logs.LogGroup(this, `${id}Logs`, {
+          logGroupName: `/aws/lambda/${props.config.stack_name_base}-${slug}`,
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+        }),
+      })
+    }
 
     // Stages 1-4 in order (spec 4.2); RUN_ID is the execution name
     const stage = (name: string) =>

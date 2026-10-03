@@ -72,16 +72,20 @@ test("read check runs in the VPC with the tools role and the private host", () =
   expect(host).toContain('"us-east-1.on.aws"')
 })
 
-test("list_credit_cards runs in the VPC as the tools role, against the private host as ll_read", () => {
+test.each([
+  ["list_credit_cards", "ledgerlens-list-credit-cards"],
+  ["list_card_transactions", "ledgerlens-list-card-transactions"],
+  ["get_session_context", "ledgerlens-get-session-context"],
+])("%s runs in the VPC as the tools role, against the private host as ll_read", (tool, functionName) => {
   const toolsId = logicalId("AWS::IAM::Role", { RoleName: "ledgerlens-tools" })
   t.hasResourceProperties("AWS::Lambda::Function", {
-    FunctionName: "ledgerlens-list-credit-cards",
-    Handler: "list_credit_cards_lambda.delivery.handler.handler",
+    FunctionName: functionName,
+    Handler: `${tool}_lambda.delivery.handler.handler`,
     Role: { "Fn::GetAtt": [toolsId, "Arn"] },
     VpcConfig: Match.objectLike({ SubnetIds: Match.anyValue() }),
     Environment: { Variables: { DSQL_CLUSTER_ENDPOINT: Match.anyValue(), AS_OF: "2026-06-17T23:59:59" } },
   })
-  const fn = Object.values(t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: "ledgerlens-list-credit-cards" } }))[0]
+  const fn = Object.values(t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: functionName } }))[0]
   const readCheck = Object.values(t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: "ledgerlens-dsql-read-check" } }))[0]
   expect(fn.Properties.Environment.Variables.DSQL_CLUSTER_ENDPOINT).toEqual(readCheck.Properties.Environment.Variables.DSQL_HOST)
 })

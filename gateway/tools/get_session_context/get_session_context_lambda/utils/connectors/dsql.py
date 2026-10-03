@@ -1,10 +1,12 @@
 """Aurora DSQL connector: psycopg connections authenticated with IAM tokens.
 
-TODO(ledgerlens): R2 - the DSQL cluster doesn't exist yet; DSQL_CLUSTER_ENDPOINT
-  has nothing real to point to until the DSQL cluster and data-load spec lands.
+DSQL_CLUSTER_ENDPOINT is the cluster's PrivateLink host (data stack output
+DsqlPrivateHost): the cluster policy refuses connections from outside the VPC.
+The token is signed for that host.
+
 TODO(ledgerlens): R6 - the DB role is the only write guard: DSQL rejects
-  default_transaction_read_only. ledgerlens_readonly must be created with
-  SELECT-only grants and mapped to the Lambda's IAM role (AWS IAM GRANT).
+  default_transaction_read_only. ll_read has SELECT-only grants and is mapped to
+  the ledgerlens-tools IAM role by the data pipeline's load stage.
 TODO(ledgerlens): R7 - mostly resolved: a cluster accepts 10,000 connections.
   What is left is the rate of 100 new connections/s (burst 1,000) during mass
   cold starts, which surfaces as "temporarily unavailable" (a failed connect isn't
