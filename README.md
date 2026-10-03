@@ -55,7 +55,10 @@ Aurora DSQL holds a curated slice of the organizer's LATAM Bank dataset: 1,500 c
 
 **What's in it:**
 - **One schema:** `public`, holding the 13 tables with their delivered columns: the repairs R1–R6 applied in the transform (pipeline spec section 6), then the curation rules C1–C12 applied in curate (curate spec section 5) to every customer except the defect cohort.
-- **Read-only access:** only the IAM role `ledgerlens-tools` can read the data, as the database role `ll_read`, and only from inside the stack's VPC, through the private host `DsqlPrivateHost`.
+- **Tool access:**
+  - The read tools connect as `ll_read` (IAM role `ledgerlens-tools`, SELECT only).
+  - `block_credit_card` and `open_claim` connect as `ll_write` (IAM role `ledgerlens-write-tools`): UPDATE on `products`, INSERT on `complaints`.
+  - Both connect only from inside the stack's VPC, through the private host `DsqlPrivateHost`.
 - **The loader's exception:** the loader (CodeBuild) is the only identity allowed in from outside the VPC.
 - **No laptop access:** laptops are refused, admin credentials included. Ad-hoc queries need a temporary exception in the cluster policy (spec section 7.3).
 
@@ -98,6 +101,13 @@ aws stepfunctions start-execution --profile ledgerlens --state-machine-arn "$arn
 
   ```bash
   aws lambda invoke --profile ledgerlens --function-name ledgerlens-dsql-read-check out.json
+  ```
+
+- **Adding a tool role to a loaded cluster:** after a data stack deploy that adds a role, run the `access` stage once. It creates the roles, maps them to their IAM roles and re-runs the grants, without touching the data:
+
+  ```bash
+  aws codebuild start-build --profile ledgerlens --project-name ledgerlens-data-load \
+    --environment-variables-override name=STAGE,value=access,type=PLAINTEXT
   ```
 
 **Check for an organizer re-upload:** this uses the `hackathon` profile for the organizer's bucket and the `ledgerlens` profile for the team bucket.

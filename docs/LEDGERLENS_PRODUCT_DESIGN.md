@@ -603,6 +603,8 @@ LIMIT 5;
 
 ### 7.7 `block_credit_card` (A2, **changes data**)
 
+Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tools-design.md) §3. The Lambda is deployed by the data stack; its Gateway target and Cedar statement 3 come later (spec §10).
+
 **tool_spec.json**
 ```json
 {
@@ -642,13 +644,15 @@ RETURNING product_id, RIGHT(product_number, 4) AS last4, product_status;
 
 ### 7.8 `open_claim` (A2, **changes data**)
 
+Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tools-design.md) §4. One claim per card and currency, with an id derived from its content, so the same claim can't be opened twice.
+
 **tool_spec description:** "Opens a dispute or fraud claim for one or more of the customer's transactions. Only call after the customer confirmed they don't recognise the transactions. Returns the claim ID and the typical resolution time for this type of claim."
 
 **Input:** `customer_id`, `transaction_ids[]`, `claim_type` (`fraud` | `dispute`), `customer_confirmed`, `customer_statement` (short text)
 
 **Queries**
 
-*Insert the claim (one row per claim; the transaction IDs go in the description until a link table exists). The transactions are de-duplicated first, and all disputed charges must be in the same currency. If they aren't, the Lambda opens one claim per currency.*
+*Insert the claim (one row per claim; the transaction IDs go in the description until a link table exists). The transactions are de-duplicated first, and all disputed charges must be in the same currency. The Lambda opens one claim per card and currency.*
 ```sql
 WITH t AS (
   SELECT DISTINCT ON (transaction_id) *
@@ -661,8 +665,8 @@ INSERT INTO complaints (complaint_id, creation_date, process_date, customer_id, 
                         reception_channel, affected_product_id, description, claimed_amount, currency,
                         priority, status, sla_breached, is_repeat_complainer)
 SELECT :new_complaint_id, now(), now()::date, :customer_id,
-       'Claim', 'Cards', CASE WHEN :claim_type = 'fraud' THEN 'Unrecognised transaction' ELSE 'Disputed charge' END,
-       'AI Assistant', MIN(t.product_id), :customer_statement || ' | tx: ' || string_agg(t.transaction_id, ','),
+       'Claim', 'Transactions', CASE WHEN :claim_type = 'fraud' THEN 'Cargo no reconocido' ELSE 'Cobro indebido' END,
+       'Web', MIN(t.product_id), :customer_statement || ' | tx: ' || string_agg(t.transaction_id, ','),
        SUM(t.amount), MIN(t.currency),
        CASE WHEN SUM(t.amount_usd) > 500 THEN 'High' ELSE 'Medium' END,
        'Open', false, false
@@ -678,7 +682,7 @@ SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY resolution_days) AS median_da
        percentile_cont(0.9) WITHIN GROUP (ORDER BY resolution_days) AS p90_days,
        COUNT(*) AS cases
 FROM complaints
-WHERE category = 'Cards'
+WHERE category = 'Transactions'
   AND subcategory = :subcategory
   AND resolution_days IS NOT NULL
   AND creation_date >= :as_of - INTERVAL '12 months'
@@ -689,6 +693,8 @@ HAVING COUNT(*) >= 20;             -- no estimate from too few cases
 ---
 
 ### 7.9 `human_agent_hand_off` (A2 + fallback)
+
+Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tools-design.md) §5. SNS only; the Lambda runs outside the VPC.
 
 **tool_spec description:** "Transfers the conversation to a human agent. Use when the customer asks for a person, after a confirmed fraud case, or when you can't resolve the request. Include a complete summary so the customer doesn't have to repeat anything."
 
@@ -705,7 +711,7 @@ HAVING COUNT(*) >= 20;             -- no estimate from too few cases
 
 **Behavior**
 - Publishes the payload to the SNS topic `ledgerlens-human-handoff`. Subscribers can be email or SMS for the demo, or a contact-center queue later.
-- Optionally inserts a `call_center_interactions` row (`channel = 'AI Assistant'`, `was_escalated = true`) so the hand-off is counted in reporting.
+- No `call_center_interactions` row: that table has no column for the summary.
 
 ---
 
@@ -967,10 +973,10 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 **Infrastructure (`infra-cdk/`)**
 - [ ] Create an Aurora DSQL cluster. No VPC, DB secret or RDS Proxy is needed: the tools reach the cluster endpoint over TLS with IAM tokens. Add a PrivateLink endpoint only if traffic must stay private.
-- [ ] Create the SNS topic `ledgerlens-human-handoff`.
+- [x] Create the SNS topic `ledgerlens-human-handoff` (data stack).
 - [ ] Create 9 tool Lambdas (Python 3.13, ARM64), each with `gateway/tools/<tool>/tool_spec.json`. Set `DB_ENGINE=aurora_dsql`, `DSQL_CLUSTER_ENDPOINT` and `DSQL_DB_USER`. Keep the Lambda timeout well under the agent's tool timeout, because DSQL has no per-query timeout.
 - [x] Call `gateway.addLambdaTarget(...)` once per tool, replacing `sample-tool-target`. Done for the three read tools, imported from the data stack by name.
-- [ ] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`), publish to SNS (hand-off only).
+- [x] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`). The read tools use `ledgerlens-tools` (DSQL role `ll_read`); `block_credit_card` and `open_claim` use `ledgerlens-write-tools` (`ll_write`); only the hand-off role may publish to SNS.
 - [x] Pre-token Lambda: look up `customer_id` in `USER_CUSTOMER_IDS_MAP` and add it as a claim (blank when not found).
 - [x] Pre-token Lambda CDK (`cognito-construct.ts`): set `USER_CUSTOMER_IDS_MAP` to the blank template from section 5.2.
 - [x] Cedar custom resource: create one policy per statement in `gateway/policies/policy.cedar`.
