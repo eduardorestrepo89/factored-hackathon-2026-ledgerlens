@@ -4,11 +4,14 @@ import * as codebuild from "aws-cdk-lib/aws-codebuild"
 import * as dsql from "aws-cdk-lib/aws-dsql"
 import * as ec2 from "aws-cdk-lib/aws-ec2"
 import * as iam from "aws-cdk-lib/aws-iam"
+import * as kms from "aws-cdk-lib/aws-kms"
 import * as lambda from "aws-cdk-lib/aws-lambda"
 import * as logs from "aws-cdk-lib/aws-logs"
 import * as s3 from "aws-cdk-lib/aws-s3"
 import * as s3assets from "aws-cdk-lib/aws-s3-assets"
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager"
+import * as sns from "aws-cdk-lib/aws-sns"
+import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions"
 import * as sfn from "aws-cdk-lib/aws-stepfunctions"
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks"
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha"
@@ -26,8 +29,9 @@ export interface DataConstructProps {
 }
 
 /**
- * Aurora DSQL, readable only by the tools role from inside the VPC, plus the staged
- * pipeline that loads it (docs/superpowers/specs/2026-10-02-data-pipeline-design.md).
+ * Aurora DSQL, open only to the tool roles from inside the VPC, the staged pipeline that
+ * loads it (docs/superpowers/specs/2026-10-02-data-pipeline-design.md), the Gateway tool
+ * Lambdas and the hand-off topic (docs/superpowers/specs/2026-10-03-write-tools-design.md).
  */
 export class DataConstruct extends Construct {
   public readonly clusterEndpoint: string
@@ -37,6 +41,7 @@ export class DataConstruct extends Construct {
   public readonly stateMachineArn: string
   public readonly vpc: ec2.IVpc
   public readonly toolsRole: iam.Role
+  public readonly writeToolsRole: iam.Role
   public readonly toolsSecurityGroup: ec2.SecurityGroup
 
   constructor(scope: Construct, id: string, props: DataConstructProps) {
@@ -70,6 +75,15 @@ export class DataConstruct extends Construct {
       roleName: "ledgerlens-tools",
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
       description: "Tool Lambdas: read-only DSQL access as ll_read, from the VPC only",
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaVPCAccessExecutionRole"),
+      ],
+    })
+    // block_credit_card and open_claim connect as ll_write (write tools spec section 8)
+    this.writeToolsRole = new iam.Role(this, "WriteToolsRole", {
+      roleName: "ledgerlens-write-tools",
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+      description: "Write tool Lambdas: DSQL access as ll_write, from the VPC only",
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaVPCAccessExecutionRole"),
       ],
@@ -117,9 +131,9 @@ export class DataConstruct extends Construct {
     this.privateHost = cdk.Fn.join(".", [cluster.attrIdentifier, serviceId, stack.region, "on.aws"])
 
     // Layer 1 (spec 7.1): the tools may connect, never as admin
-    this.toolsRole.addToPolicy(
-      new iam.PolicyStatement({ actions: ["dsql:DbConnect"], resources: [cluster.attrResourceArn] })
-    )
+    for (const role of [this.toolsRole, this.writeToolsRole]) {
+      role.addToPolicy(new iam.PolicyStatement({ actions: ["dsql:DbConnect"], resources: [cluster.attrResourceArn] }))
+    }
 
     const teamBucket = new s3.Bucket(this, "StagingBucket", {
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -142,7 +156,7 @@ export class DataConstruct extends Construct {
 
     const project = new codebuild.Project(this, "DataLoad", {
       projectName: "ledgerlens-data-load",
-      description: "Data pipeline stages 1-4: python -m data_load $STAGE (ingest, transform, curate, load)",
+      description: "Data pipeline: python -m data_load $STAGE (ingest, transform, curate, load; access on demand)",
       role: loaderRole,
       source: codebuild.Source.s3({ bucket: source.bucket, path: source.s3ObjectKey }),
       environment: {
@@ -156,6 +170,7 @@ export class DataConstruct extends Construct {
         TEAM_BUCKET: { value: teamBucket.bucketName },
         DSQL_ENDPOINT: { value: cluster.attrEndpoint },
         TOOLS_ROLE_ARN: { value: this.toolsRole.roleArn },
+        WRITE_TOOLS_ROLE_ARN: { value: this.writeToolsRole.roleArn },
         HACKATHON_SECRET_ID: { value: SECRET_NAME }, // the name, never the value
       },
       buildSpec: codebuild.BuildSpec.fromObject({
@@ -210,15 +225,18 @@ export class DataConstruct extends Construct {
       }),
     })
 
-    // Gateway tools deployed alone, to test them against the database. They move to the
-    // agent stack with the Gateway; they read as ll_read, the role the read check proves.
+    // Gateway tool Lambdas, imported by name by the agent stack. The read tools read as
+    // ll_read, the role the read check proves. The write tools connect as ll_write (their
+    // DSQL_DB_USER default) with their own IAM role, which the load and access stages map.
     // The ids keep ListCreditCardsFn/ListCreditCardsLogs so the deployed function is not replaced.
-    const tools = [
+    const tools: { tool: string; id: string; role?: iam.IRole }[] = [
       { tool: "list_credit_cards", id: "ListCreditCards" },
       { tool: "list_card_transactions", id: "ListCardTransactions" },
       { tool: "get_session_context", id: "GetSessionContext" },
+      { tool: "block_credit_card", id: "BlockCreditCard", role: this.writeToolsRole },
+      { tool: "open_claim", id: "OpenClaim", role: this.writeToolsRole },
     ]
-    for (const { tool, id } of tools) {
+    for (const { tool, id, role = this.toolsRole } of tools) {
       const slug = tool.replace(/_/g, "-")
       new PythonFunction(this, `${id}Fn`, {
         functionName: `ledgerlens-${slug}`,
@@ -229,7 +247,7 @@ export class DataConstruct extends Construct {
         handler: "handler",
         // local test runs leave bytecode caches in the tool folder; don't ship them
         bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
-        role: this.toolsRole,
+        role,
         vpc: this.vpc,
         vpcSubnets: subnets,
         allowPublicSubnet: true,
@@ -243,6 +261,35 @@ export class DataConstruct extends Construct {
         }),
       })
     }
+
+    // The hand-off tool only publishes to SNS: it runs outside the VPC (which has no route
+    // out) and never touches DSQL. The topic uses the AWS-managed key, whose key policy lets
+    // SNS use it for publishers in the account, so the function needs only sns:Publish.
+    const handOffTopic = new sns.Topic(this, "HumanHandOffTopic", {
+      topicName: "ledgerlens-human-handoff",
+      masterKey: kms.Alias.fromAliasName(this, "SnsManagedKey", "alias/aws/sns"),
+    })
+    if (props.config.admin_user_email) {
+      // the recipient confirms the subscription once, from the email SNS sends
+      handOffTopic.addSubscription(new subscriptions.EmailSubscription(props.config.admin_user_email))
+    }
+    const handOff = new PythonFunction(this, "HumanAgentHandOffFn", {
+      functionName: "ledgerlens-human-agent-hand-off",
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      entry: path.join(__dirname, "..", "..", "gateway", "tools", "human_agent_hand_off"), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      index: "human_agent_hand_off_lambda/delivery/handler.py",
+      handler: "handler",
+      bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
+      timeout: cdk.Duration.seconds(10),
+      environment: { HANDOFF_TOPIC_ARN: handOffTopic.topicArn },
+      logGroup: new logs.LogGroup(this, "HumanAgentHandOffLogs", {
+        logGroupName: `/aws/lambda/${props.config.stack_name_base}-human-agent-hand-off`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+    handOffTopic.grantPublish(handOff)
 
     // Stages 1-4 in order (spec 4.2); RUN_ID is the execution name
     const stage = (name: string) =>
