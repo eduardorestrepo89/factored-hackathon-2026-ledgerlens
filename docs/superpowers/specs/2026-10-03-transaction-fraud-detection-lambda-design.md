@@ -201,11 +201,11 @@ class TransactionFraudDetectionUseCase:
 **Card sweep** (`request.card_last4` set):
 1. `fraud_card_exists` with `customer_id`, `card_last4`. No row → `CardNotFoundError`. Without this check a mistyped last4 would look like a clean card.
 2. `fraud_card_sweep` with `customer_id`, `card_last4`, `as_of`, `review_above = REVIEW_ABOVE`, `limit = max_rows + 1`.
-   - Each row carries `checked`, the window's total row count (a window function), so one query returns both.
-   - When no row comes back, `checked` is 0 and `flagged` is empty. The card exists, but nothing scored above 30.
-   - `checked` comes from the first row, when there is one.
-3. Each row gets `assess()`. The SQL already dropped rows at 30 or below, so every flagged item is `fraud` or `review`.
-4. `truncated` is set when `max_rows + 1` rows come back. The extra row is dropped.
+   - The query always returns at least one row. Each row carries `checked`, the window's total count, so one query returns both.
+   - When nothing in the window scored above 30, the one row is **count-only**: its transaction columns are NULL and `checked` is the real count (0 for a card with no charges). Without this, a clean card with 3 charges would report `checked 0`.
+   - `checked` comes from the first row. A row with a NULL `transaction_id` is count-only and isn't an item. No row at all is treated as `checked 0`.
+3. Each item row gets `assess()`. The SQL already dropped rows at 30 or below, so every flagged item is `fraud` or `review`.
+4. `truncated` is set when `max_rows + 1` item rows come back. The extra row is dropped.
 
 **Errors** (in both modes, any query):
 - `DataSourceConnectionError` → `DataSourceUnavailableError`.
@@ -338,19 +338,25 @@ WITH window_tx AS (
       AND t.transaction_date <= %(as_of)s
     ORDER BY t.transaction_id, t.transaction_date DESC NULLS LAST
 ),
-counted AS (
-    SELECT window_tx.*, COUNT(*) OVER () AS checked
-    FROM window_tx
+totals AS (
+    SELECT COUNT(*) AS checked FROM window_tx
+),
+flagged AS (
+    SELECT * FROM window_tx
+    WHERE fraud_score > %(review_above)s::numeric
+    ORDER BY fraud_score DESC, transaction_date DESC NULLS LAST, transaction_id
+    LIMIT %(limit)s
 )
-SELECT transaction_id, transaction_date, card_last4, merchant_name, amount,
-       currency, transaction_status, fraud_score, checked
-FROM counted
-WHERE fraud_score > %(review_above)s::numeric
-ORDER BY fraud_score DESC, transaction_date DESC NULLS LAST, transaction_id
-LIMIT %(limit)s
+SELECT f.transaction_id, f.transaction_date, f.card_last4, f.merchant_name,
+       f.amount, f.currency, f.transaction_status, f.fraud_score, totals.checked
+FROM totals
+LEFT JOIN flagged AS f ON TRUE
+ORDER BY f.fraud_score DESC NULLS LAST, f.transaction_date DESC NULLS LAST,
+         f.transaction_id
 ```
 - The window filters on `transaction_date`, and the lower bound is inclusive. `process_date` is only there for partition pruning (product design §8.1). Its extra day covers charges processed a day later.
-- `checked` counts every de-duplicated charge in the window, including those with no score. It's computed before the score filter.
+- `checked` counts every de-duplicated charge in the window, including those with no score. `totals` always has one row, and the `LEFT JOIN` keeps it when nothing is flagged: that gives the count-only row (§4).
+- The outer `ORDER BY` repeats the flagged order, because a join doesn't keep a CTE's order.
 - `review_above` comes from the domain constant, so the band lives in one place in this tool.
 - A card that has two products with the same last 4 digits (one replaced, say) is swept across both. That's correct, since the customer sees one last4.
 
@@ -437,7 +443,7 @@ The folder is a package. `conftest.py` puts `gateway/tools/transaction_fraud_det
 |---|---|
 | `test_fraud_bands.py` | `FRAUD_ABOVE == Decimal("50")` and `REVIEW_ABOVE == Decimal("30")` (pinned literals); every row of the §3.1 table, including exactly 50.00, 50.01, 30.00, 30.01 and `None`; `NEXT_STEPS` text per verdict, with `None` for `no_fraud`. |
 | `test_fraud_check_request.py` | Every row of the §3.2 table; stripping and uppercasing; `" 4497 "` accepted; `"449"`, `"44a7"`, `"٤٤٩٧"` (non-ASCII digits) rejected; unknown keys ignored; a non-object event. |
-| `test_transaction_fraud_detection_use_case.py` | Each mode sends exactly the §4 params, with naive UTC `as_of` (an aware `-05:00` input is converted). `review_above` is the domain constant. No transaction row → `TransactionNotFoundError`. No card row → `CardNotFoundError`, and the sweep query never runs. Sweep with no rows → `checked 0`, empty `flagged`. `checked` comes from the rows. Truncation (26 → 25, `truncated`). Each port error → its domain error. A bad row (`fraud_score` a string, `checked` missing) → `FraudCheckDataIntegrityError`. `max_rows < 1` and naive `as_of` rejected. |
+| `test_transaction_fraud_detection_use_case.py` | Each mode sends exactly the §4 params, with naive UTC `as_of` (an aware `-05:00` input is converted). `review_above` is the domain constant. No transaction row → `TransactionNotFoundError`. No card row → `CardNotFoundError`, and the sweep query never runs. Sweep with no rows → `checked 0`, empty `flagged`. A count-only row (NULL `transaction_id`, `checked 3`) → `checked 3`, empty `flagged`. `checked` comes from the rows. Truncation (26 → 25, `truncated`). Each port error → its domain error. A bad row (`fraud_score` a string, `checked` missing) → `FraudCheckDataIntegrityError`. `max_rows < 1` and naive `as_of` rejected. |
 | `test_fraud_assessment_presenter.py` | Both shapes; 2-decimal half-up amounts; `None` → `null`; `next_step` per verdict; **a recursive walk finds no `fraud_score`, `score` or `is_fraud` key**. |
 | `test_transaction_fraud_detection_handler.py` | Success in both modes; `CLOCK.now()` reaches the use case; validation errors → `{"error": message}`; domain error → message; unexpected exception → generic message; wrong tool name; `USE_CASE` or `CLOCK` `None` → unavailable message. |
 | `test_query_contracts.py` | For each of the 3 SQL files: placeholders match the use case's params exactly; no stray `%`; no `SET`; every mapped column selected; **`is_fraud` appears in no SQL file**; `'Tarjeta Crédito'` is present, NFC UTF-8, no BOM; the sweep orders by `fraud_score DESC` and filters `> %(review_above)s`. `tool_spec.json` is valid, named `transaction_fraud_detection`, requires only `customer_id`, has exactly the three properties, and its description names `fraud`, `review`, `no_fraud`, `not_scored`, `checked` and "30 days". |

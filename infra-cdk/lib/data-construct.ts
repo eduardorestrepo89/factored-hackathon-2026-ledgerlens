@@ -217,6 +217,8 @@ export class DataConstruct extends Construct {
       { tool: "list_credit_cards", id: "ListCreditCards" },
       { tool: "list_card_transactions", id: "ListCardTransactions" },
       { tool: "get_session_context", id: "GetSessionContext" },
+      { tool: "transaction_fraud_detection", id: "TransactionFraudDetection" },
+      { tool: "explain_transaction", id: "ExplainTransaction" },
     ]
     for (const { tool, id } of tools) {
       const slug = tool.replace(/_/g, "-")
