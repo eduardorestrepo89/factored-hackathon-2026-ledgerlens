@@ -146,3 +146,37 @@ def test_the_estimate_uses_similar_claims_from_enough_history() -> None:
     ) in text
     # The header comment names the column on purpose; the statement never reads it.
     assert "compensation_granted" not in statements(sql("resolution_estimate"))[0]
+
+
+def tool_spec() -> dict:
+    """Load the single tool definition from tool_spec.json."""
+    import json
+
+    specs = json.loads((TOOL_ROOT / "tool_spec.json").read_text(encoding="utf-8"))
+    assert isinstance(specs, list) and len(specs) == 1
+    return specs[0]
+
+
+def test_tool_spec_name_inputs_and_required_fields() -> None:
+    spec = tool_spec()
+    properties = spec["inputSchema"]["properties"]
+
+    assert spec["name"] == "open_claim"
+    assert spec["inputSchema"]["required"] == [
+        "customer_id",
+        "transaction_ids",
+        "claim_type",
+        "customer_statement",
+        "customer_confirmed",
+    ]
+    assert properties["transaction_ids"]["maxItems"] == 10
+    assert set(properties["claim_type"]["enum"]) == set(SUBCATEGORIES)
+    assert properties["customer_confirmed"]["type"] == "boolean"
+
+
+def test_tool_spec_description_forbids_promising_an_outcome() -> None:
+    description = tool_spec()["description"]
+
+    assert "Only call after the customer confirmed" in description
+    assert "one claim per card and currency" in description
+    assert "Never promise a refund or an outcome." in description
