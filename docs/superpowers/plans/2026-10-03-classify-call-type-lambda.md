@@ -13,7 +13,7 @@
 
 The use case runs four candidate queries in sequence, each in its own `try`. A failed source makes only its reasons `unavailable`, and only a failure of all four fails the call. The presenter builds the evidence object for each reason.
 
-**Tech Stack:** Python 3.13 (`.venv`), pytest, ruff, psycopg 3, TypeScript CDK with jest, and Git Bash on Windows.
+**Tech Stack:** Python 3.12+ (`.venv`; the Lambda runtime is 3.13, and `ruff.toml` targets py311, so no `type` statements), pytest, ruff 0.14.1 (pinned in `requirements-dev.txt`), psycopg 3, TypeScript CDK with jest, and Git Bash on Windows.
 
 **Spec:** `docs/superpowers/specs/2026-10-03-classify-call-type-lambda-design.md`
 
@@ -23,11 +23,13 @@ The use case runs four candidate queries in sequence, each in its own `try`. A f
   - `PY=.venv/Scripts/python`.
   - Run from the repo root in Git Bash, and add `</dev/null` to every `$PY` command.
   - Use `"$BASH"`, not plain `bash`.
+  - `$PY` must have pytest, ruff and psycopg. Task 1 Step 0 checks this. If one is missing, stop and ask the user before installing anything. On 2026-10-03 the `.venv` was rebuilt as Python 3.12 without them.
 - **Git**
   - Never run `git commit` or `git add`.
   - Never stage `infra-cdk/config.yaml`, `frontend/public/aws-exports.json` or `frontend/.env`.
   - No push and no merge.
-  - The working tree already holds the uncommitted `transaction_fraud_detection` and `explain_transaction` work: their tool and test folders, plans and specs, their §7.5 and §7.6 hunks in `docs/LEDGERLENS_PRODUCT_DESIGN.md`, and their hunks in both `infra-cdk` files. Leave all of it as it is.
+  - `transaction_fraud_detection` and `explain_transaction` are committed (`51c9c15`). The write tools (`block_credit_card`, `open_claim`, `human_agent_hand_off`) are on this branch. Don't touch their folders. Leave the untracked `.superpowers/` and `datathon/` files alone.
+  - If you create a git worktree, use `git -c core.longpaths=true worktree add ...`. Some repo paths are longer than Windows' 260-character limit, and without the flag the checkout fails with "Filename too long".
 - **Names**
   - Asset folder: `gateway/tools/classify_call_type/`
   - Package: `classify_call_type_lambda`
@@ -47,18 +49,19 @@ The use case runs four candidate queries in sequence, each in its own `try`. A f
   - No `%` appears except in placeholders, comments included: write "40 percent", never the sign.
   - No `SET` statement.
   - UTF-8, NFC, no BOM. Write the files with the Write tool, never with PowerShell.
-  - Every SQL file gets the header given in Task 6. The copied card and case bodies drop `LIMIT %(limit)s`.
+  - Every SQL file gets the header given in Task 6. The copied card and case bodies drop `LIMIT %(limit)s`, and the word `LIMIT` appears nowhere in those two files, comments included: a contract test checks the whole text.
 - **Exact values:** the weights, windows, messages, `tool_spec.json`, SQL and evidence keys are given in full in the tasks below, copied from spec §3.1, §5, §6 and §8. Use them verbatim.
   - Unexpected-error message: `Unexpected internal error ranking call reasons. Greet the customer and ask how you can help.`
   - Handler success log line: `"%s returned reasons=%s (unavailable=%s)"`. It never logs evidence, confidences, ids or scores.
-- **Deploy is deferred.** It runs in one joint deploy with `transaction_fraud_detection` and `explain_transaction`. Don't run Task 12 during this plan.
+- **Deploy is deferred.** Task 12 needs the user's go-ahead, and it waits for any review of the branch to finish. Don't run it during this plan.
+- **CDK precondition:** merge `4f5d50d` dropped `block_credit_card` and `open_claim` from the CDK `tools` array, so 2 CDK tests fail on this tree, and a deploy would delete both functions. Task 10 Step 1 checks that the user has restored them. This plan doesn't fix them.
 - **Suite command** (the ignores keep duckdb-only data-load tests out):
 
   ```bash
   .venv/Scripts/python -m pytest tests/unit -q -p no:cacheprovider --ignore=tests/unit/test_data_load_cli.py --ignore=tests/unit/test_data_load_curate.py --ignore=tests/unit/test_data_load_curate_rules.py --ignore=tests/unit/test_data_load_curate_select.py --ignore=tests/unit/test_data_load_ddl.py --ignore=tests/unit/test_data_load_repair.py --ignore=tests/unit/test_data_load_transform.py --ignore=tests/unit/test_dsql_read_check.py -k "not test_dsql_driver_imports" </dev/null
   ```
 
-  The baseline before this plan (with fraud and explain built) is `1491 passed, 1 deselected`.
+  The baseline is recorded in Task 1 Step 0. The old `1491 passed, 1 deselected` predates the write tools and the rebuilt `.venv`, so don't use it.
 
 ### Plan rulings on the spec
 1. **`days_left`** needs `as_of`'s date, but the presenter only gets the classification. **`CallClassification` gets a third field, `as_of_date: date`**: the date of `as_of` as naive UTC, the same date detection uses. `days_left = (expiration_date - as_of_date).days`. It is `None` when the expiration date is NULL.
@@ -66,7 +69,7 @@ The use case runs four candidate queries in sequence, each in its own `try`. A f
 3. **Decimal age:** `_seconds(delta) = Decimal(delta.days * 86400 + delta.seconds) + Decimal(delta.microseconds) / 1_000_000`. Never use `total_seconds()`, which returns a float.
    - Half-up is pinned where it differs from half-even: DECLINED 8.5 h old scores 76.5, which gives 0.77.
    - P07's charge (2026-05-31 06:09:15 to 2026-06-17 23:59:59 = 17.7436 days) scores 77.2564, which gives 0.77.
-4. **Tie between cases:** spec §3.2 is read literally. Cases have no decay and no event time, so equal-weight cases tie on the **lowest `complaint_id`**. The §6.3 SQL sort (breached first, then newest) only orders the rows, and Python decides. If P08 has several open, non-breached cases, this rule decides its acceptance `ref_id` (see Task 12).
+4. **Tie between cases** (reversed by the final review): equal-weight cases go to the **newest `creation_date`**, then the lowest `complaint_id`, as spec §6.3 says ("`sla_breached DESC`, then newest first"). `call_reason_cases.sql` selects `creation_date`; `CaseCandidate` carries it, and `_score_cases` passes it as the event time. `Decay.NONE` ignores it for the score, so it only breaks ties, and it is never presented. The code blocks in Tasks 1, 4, 5, 6 and 7 predate this change. The implemented files and tests (`test_tied_cases_go_to_the_newest`, `test_a_breached_case_beats_a_newer_one`, `test_an_undated_case_ranks_but_loses_a_tie_to_a_dated_one`, `test_cases_select_their_creation_date_for_the_tie_break`) are the record.
 5. **Ranking weight** is the candidate's effective weight:
    - 75 for a breached case, 60 for any other case;
    - otherwise `REASON_RULES[reason].weight`.
@@ -85,6 +88,7 @@ The use case runs four candidate queries in sequence, each in its own `try`. A f
 10. **Builder:** after the sed copy, remove `max_rows=settings.max_rows` from the constructor call. Leaving it in raises `TypeError` at import, so every cold start would crash. The settings still parse `MAX_ROWS`.
 11. **Blank countries:** FOREIGN by country needs both folded countries to be non-empty. `"  "` folds to `""` and is treated like NULL, so it is never foreign.
 12. **Immutable tables:** `REASON_RULES` and `SOURCE_REASONS` are wrapped in `types.MappingProxyType`, so runtime code can't edit the pinned weights (explain's deferred minor T3).
+13. **Wrong-tool message:** spec §8 lists every handler change from the get_session_context copy, and this message isn't one of them. It stays as copied: "This function only serves the 'classify_call_type' tool. Don't retry; offer a hand-off to a human agent." It only shows up when the Gateway is misconfigured.
 
 ## Review Focus
 1. **An aware non-UTC `as_of`** (for example −05:00) with a decline exactly 72 h before it, measured in UTC. It must be included, and every query must get the naive-UTC instant. *Pinned by Task 5, `test_non_utc_as_of_is_converted_before_the_window_check`.*
@@ -107,7 +111,7 @@ The use case runs four candidate queries in sequence, each in its own `try`. A f
 | `delivery/handler.py` + `test_classify_call_type_handler.py` | 9 |
 | `infra-cdk/lib/data-construct.ts`, `infra-cdk/test/data-construct.test.ts` | 10 |
 | `docs/LEDGERLENS_PRODUCT_DESIGN.md` §7.2 (CRLF) + full suite | 11 |
-| joint deploy + acceptance (deferred) | 12 |
+| deploy + acceptance (deferred) | 12 |
 
 All production paths below are relative to `gateway/tools/classify_call_type/classify_call_type_lambda/` unless they start with `gateway/`, `tests/`, `infra-cdk/` or `docs/`.
 
@@ -145,6 +149,20 @@ All production paths below are relative to `gateway/tools/classify_call_type/cla
   - `classify_responses(**overrides: Outcome) -> dict[str, Outcome]`: one transaction row and one card row, and `[]` for cases and app events.
   - `make_any_row() -> dict[str, Any]`: the four rows merged. Use it over `FakeConnector`, which serves the same rows to every query.
   - Copied unchanged: `FakeCursor`, `FakeConnection`, `FakeConnector(*outcomes, max_age=None, clock=time.monotonic)`, `FakeClock`, `FakeDsqlTokenClient`.
+
+- [ ] **Step 0: Check the environment and record the baseline**
+
+```bash
+PY=.venv/Scripts/python
+$PY --version </dev/null
+$PY -m pytest --version </dev/null
+$PY -m ruff --version </dev/null
+$PY -c "import psycopg; print(psycopg.__version__)" </dev/null
+```
+
+Expected: Python 3.12 or later, a pytest version, `ruff 0.14.1` and a psycopg 3 version. If any command fails, stop and ask the user to restore the dev environment. Don't install packages yourself.
+
+Then run the suite command from Global Constraints and write down its last line (passed, failed, deselected) as **the baseline**. Task 11 compares against it. Failures already present here aren't this plan's to fix: list them for the user and go on.
 
 - [ ] **Step 1: Copy the production files**
 
@@ -431,7 +449,7 @@ done
 - [ ] **Step 5: Run the copied tests**
 
 Run: `$PY -m pytest tests/unit/classify_call_type -q -p no:cacheprovider </dev/null 2>&1 | tail -2`
-Expected: all pass, 0 failed. These tests cover copied code, so they pass at once. They prove the copy, not new behaviour. If a copied repository test fails because it reads a column `make_row` doesn't have, read that test: it must only need *a* row, so pass the column it reads as an override in that one test and record a ruling.
+Expected: `95 passed`, 0 failed. These tests cover copied code, so they pass at once. They prove the copy, not new behaviour. If a copied repository test fails because it reads a column `make_row` doesn't have, read that test: it must only need *a* row, so pass the column it reads as an override in that one test and record a ruling.
 
 - [ ] **Step 6: Check isolation and lint**
 
@@ -914,9 +932,7 @@ _DAYS_30: Final = timedelta(days=30)
 
 REASON_RULES: Final[Mapping[CallReason, ReasonRule]] = MappingProxyType(
     {
-        CallReason.FRAUD_SUSPECTED: ReasonRule(
-            Decimal("95"), _DAYS_30, Decay.PER_DAY
-        ),
+        CallReason.FRAUD_SUSPECTED: ReasonRule(Decimal("95"), _DAYS_30, Decay.PER_DAY),
         CallReason.DECLINED_TRANSACTION: ReasonRule(
             Decimal("85"), _HOURS_72, Decay.PER_HOUR
         ),
@@ -1038,7 +1054,7 @@ Expected: nothing.
 ```python
 """Tests for detecting, scoring and ranking call reasons (spec section 3)."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -1305,9 +1321,10 @@ _SECOND = timedelta(seconds=1)
 def test_transaction_rules(
     overrides: dict[str, Any], expected: tuple[CallReason, ...]
 ) -> None:
-    age = overrides.pop("age", timedelta(hours=1))
+    fields = dict(overrides)  # never mutate the shared parametrize dict
+    age = fields.pop("age", timedelta(hours=1))
 
-    assert transaction_reasons(_tx(age, **overrides), AS) == expected
+    assert transaction_reasons(_tx(age, **fields), AS) == expected
 
 
 # --- card rules -------------------------------------------------------------
@@ -1615,9 +1632,8 @@ from classify_call_type_lambda.domain.entities.candidates import (
 )
 from classify_call_type_lambda.domain.value_objects.call_reasons import CallReason
 
-type Candidate = (
-    TransactionCandidate | CardCandidate | CaseCandidate | AppEventCandidate
-)
+# A plain alias, not a ``type`` statement: ruff.toml targets py311.
+Candidate = TransactionCandidate | CardCandidate | CaseCandidate | AppEventCandidate
 
 
 @dataclass(frozen=True)
@@ -3253,7 +3269,7 @@ The body is `session_credit_cards.sql`'s de-duplication, narrowed to the four co
 -- The card candidates of ClassifyCallTypeUseCase: the customer's credit cards in
 -- every status, one row per product_id at its latest state. Python decides
 -- CARD_NOT_ACTIVE, PAYMENT_OVERDUE and CARD_EXPIRING. A failure here only makes
--- the card reasons unavailable. There is no LIMIT: a customer has a handful of
+-- the card reasons unavailable. There is no row cap: a customer has a handful of
 -- cards. The deduplication is the one in get_session_context's
 -- session_credit_cards.sql (copies, not shared code).
 --
@@ -3302,7 +3318,7 @@ The body is `session_open_cases.sql`'s open-at-`as_of` filter and de-duplication
 -- as_of, SLA breaches first, then the newest. Every row is OPEN_CASE_FOLLOWUP;
 -- Python picks the best (a breached case, then the lowest complaint_id), so the
 -- order here is only for reading. A failure here only makes OPEN_CASE_FOLLOWUP
--- unavailable. There is no LIMIT: a customer has few open cases. The filter is the
+-- unavailable. There is no row cap: a customer has few open cases. The filter is the
 -- one in get_session_context's session_open_cases.sql (copies, not shared code).
 --
 -- Parameters (psycopg named placeholders):
@@ -3973,3 +3989,1342 @@ Run: `$PY -m ruff format gateway/tools/classify_call_type tests/unit/classify_ca
 Expected: `ruff check` is clean. Re-run the tests if formatting changed anything.
 
 ---
+
+### Task 8: The dependency builder
+
+**Files:**
+- Create: `delivery/dependencies/dependencies_builder.py` (sed copy of the get_session_context builder, then two changes)
+- Test: `tests/unit/classify_call_type/test_delivery_wiring.py`
+
+**Interfaces:**
+- Consumes:
+  - `ClassifyCallTypeUseCase(database_repository=..., query_provider=...)` from Task 5. It takes no `max_rows`.
+  - The four SQL files from Task 6, found under `QUERIES_ROOT / "postgresql"`.
+  - The copied `delivery/settings.py`, adapters and connectors from Task 1.
+  - `CallClassification` from Task 4 and `CallReason` from Task 3.
+  - From `fakes.py`: `FakeConnector`, `make_any_row`, `CUSTOMER_ID`, `TRANSACTION_ID`, `AS_OF`, `AS_OF_SQL`, `QUERY_NAMES`.
+- Produces, in `classify_call_type_lambda.delivery.dependencies.dependencies_builder`, for Task 9:
+  - `build_classify_call_type_use_case(env: Mapping[str, str]) -> ClassifyCallTypeUseCase | None`. It never raises.
+  - `build_clock(env: Mapping[str, str]) -> ClockSettings | None`. It never raises.
+  - `build_database_repository(engine, connector) -> DatabaseRepository`.
+  - `build_query_provider(engine) -> QueryProvider`.
+  - Also `QUERIES_ROOT`, `SQL_DIALECTS`, `build_settings`, `build_dsql_settings`, `build_connector`, all unchanged from the copy.
+
+- [ ] **Step 1: Write the failing tests**
+
+`tests/unit/classify_call_type/test_delivery_wiring.py`:
+
+```python
+"""Tests for the dependency wiring of the classify_call_type tool."""
+
+from decimal import Decimal
+
+import classify_call_type_lambda.utils.connectors.dsql as dsql_module
+import pytest
+from classify_call_type_lambda.application.ports.errors import (
+    DataSourceConnectionError,
+)
+from classify_call_type_lambda.application.use_cases.classify_call_type import (
+    ClassifyCallTypeUseCase,
+)
+from classify_call_type_lambda.delivery.dependencies import dependencies_builder
+from classify_call_type_lambda.delivery.dependencies.dependencies_builder import (
+    QUERIES_ROOT,
+    SQL_DIALECTS,
+    build_classify_call_type_use_case,
+    build_clock,
+    build_connector,
+    build_database_repository,
+    build_dsql_settings,
+    build_query_provider,
+    build_settings,
+)
+from classify_call_type_lambda.delivery.settings import (
+    ClockSettings,
+    ConfigurationError,
+    DatabaseEngine,
+    DatabaseSettings,
+    DsqlSettings,
+)
+from classify_call_type_lambda.domain.entities.call_classification import (
+    CallClassification,
+)
+from classify_call_type_lambda.domain.value_objects.call_reasons import CallReason
+from classify_call_type_lambda.infrastructure.repositories.dsql_repository import (
+    DsqlRepository,
+)
+from classify_call_type_lambda.utils.connectors.dsql import DsqlConnector
+
+from .fakes import (
+    AS_OF,
+    AS_OF_SQL,
+    CUSTOMER_ID,
+    QUERY_NAMES,
+    TRANSACTION_ID,
+    FakeConnector,
+    make_any_row,
+)
+
+pytestmark = pytest.mark.unit
+
+ENDPOINT = "abc123.dsql.us-east-1.on.aws"
+ENV = {"DSQL_CLUSTER_ENDPOINT": ENDPOINT, "AWS_REGION": "us-east-1"}
+SETTINGS = DatabaseSettings(engine=DatabaseEngine.AURORA_DSQL, max_rows=25)
+# make_any_row, ranked: the flagged charge, P08's open case and the app error.
+ANY_ROW_RANKING = [
+    (CallReason.FRAUD_SUSPECTED, Decimal("0.77"), TRANSACTION_ID),
+    (CallReason.OPEN_CASE_FOLLOWUP, Decimal("0.60"), "CMP-FHCLR8TGWMBD0YFOCLYS"),
+    (CallReason.FAILED_APP_ACTION, Decimal("0.58"), "EVT-0001"),
+]
+
+
+def ranking(result: CallClassification) -> list[tuple[CallReason, Decimal, str]]:
+    """Return (reason, confidence, ref_id) of every ranked reason."""
+    return [(item.reason, item.confidence, item.ref_id) for item in result.reasons]
+
+
+def test_build_settings_reads_the_environment() -> None:
+    assert build_settings(ENV) == SETTINGS
+
+
+def test_build_dsql_settings_reads_the_environment() -> None:
+    assert build_dsql_settings(ENV) == DsqlSettings(
+        cluster_endpoint=ENDPOINT, region="us-east-1", db_user="ll_read"
+    )
+
+
+def test_build_clock_reads_as_of() -> None:
+    assert build_clock({"AS_OF": "2026-06-17T23:59:59"}) == ClockSettings(as_of=AS_OF)
+
+
+def test_build_clock_without_as_of_uses_the_real_clock() -> None:
+    assert build_clock({}) == ClockSettings(as_of=None)
+
+
+def test_build_clock_with_a_bad_as_of_returns_none(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert build_clock({"AS_OF": "yesterday"}) is None
+    assert "Invalid AS_OF for classify_call_type" in caplog.text
+
+
+def test_build_connector_returns_a_dsql_connector_without_touching_aws(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_boto3(*args: object, **kwargs: object) -> object:
+        raise AssertionError("boto3 client created while building the connector")
+
+    monkeypatch.setattr(dsql_module.boto3, "client", no_boto3)
+
+    assert isinstance(build_connector(SETTINGS, ENV), DsqlConnector)
+
+
+def test_build_connector_reads_the_dsql_settings() -> None:
+    with pytest.raises(ConfigurationError, match="DSQL_CLUSTER_ENDPOINT"):
+        build_connector(SETTINGS, {"AWS_REGION": "us-east-1"})
+
+
+def test_aurora_dsql_runs_the_postgresql_sql_dialect() -> None:
+    assert SQL_DIALECTS == {DatabaseEngine.AURORA_DSQL: "postgresql"}
+    provider = build_query_provider(DatabaseEngine.AURORA_DSQL)
+
+    assert provider is build_query_provider(DatabaseEngine.AURORA_DSQL)
+    assert "DISTINCT ON" in provider.get("call_reason_transactions")
+
+
+def test_every_engine_has_a_dialect_folder_with_every_query() -> None:
+    for engine in DatabaseEngine:
+        for name in QUERY_NAMES:
+            assert (QUERIES_ROOT / SQL_DIALECTS[engine] / f"{name}.sql").is_file()
+
+
+def test_queries_root_is_this_tools_own_folder() -> None:
+    assert QUERIES_ROOT.parent.name == "classify_call_type_lambda"
+
+
+def test_build_query_provider_rejects_an_engine_without_a_dialect() -> None:
+    with pytest.raises(ConfigurationError):
+        build_query_provider("oracle")  # type: ignore[arg-type]
+
+
+def test_build_database_repository_wraps_the_connector_for_the_engine() -> None:
+    database_repository = build_database_repository(
+        DatabaseEngine.AURORA_DSQL, FakeConnector()
+    )
+
+    assert isinstance(database_repository, DsqlRepository)
+
+
+def test_build_database_repository_rejects_an_unknown_engine() -> None:
+    with pytest.raises(ConfigurationError):
+        build_database_repository("oracle", FakeConnector())  # type: ignore[arg-type]
+
+
+def use_fake_connector(
+    monkeypatch: pytest.MonkeyPatch, connector: FakeConnector
+) -> None:
+    """Make the builder hand out ``connector`` instead of a real DSQL one."""
+    monkeypatch.setattr(
+        dependencies_builder, "build_connector", lambda _settings, _env: connector
+    )
+
+
+def executed(connector: FakeConnector) -> list[tuple[str, dict[str, object]]]:
+    """Return (sql, params) of every query, in order, on the last connection."""
+    return [
+        (sql, dict(params))
+        for cursor in connector.connections[-1].cursors
+        for sql, params in cursor.executed
+    ]
+
+
+def test_use_case_is_wired_with_real_adapters_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeConnector([make_any_row()])
+    use_fake_connector(monkeypatch, connector)
+
+    use_case = build_classify_call_type_use_case(ENV)
+    assert isinstance(use_case, ClassifyCallTypeUseCase)
+    result = use_case.execute(CUSTOMER_ID, AS_OF)
+
+    assert ranking(result) == ANY_ROW_RANKING
+    assert result.unavailable == ()
+    # The eager cold-start connection is the one every query runs on.
+    assert len(connector.connections) == 1
+    queries = executed(connector)
+    assert len(queries) == 4
+    assert "FROM transactions AS t" in queries[0][0]
+    assert "FROM products AS p" in queries[1][0]
+    assert "FROM complaints AS k" in queries[2][0]
+    assert "FROM digital_events AS e" in queries[3][0]
+    assert [params for _sql, params in queries] == [
+        {
+            "customer_id": CUSTOMER_ID,
+            "as_of": AS_OF_SQL,
+            "review_above": Decimal("30"),
+            "limit": 201,
+        },
+        {"customer_id": CUSTOMER_ID},
+        {"customer_id": CUSTOMER_ID, "as_of": AS_OF_SQL},
+        {"customer_id": CUSTOMER_ID, "as_of": AS_OF_SQL},
+    ]
+
+
+def test_max_rows_is_still_parsed_but_unused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeConnector([make_any_row()])
+    use_fake_connector(monkeypatch, connector)
+
+    use_case = build_classify_call_type_use_case({**ENV, "MAX_ROWS": "1"})
+
+    assert use_case is not None
+    assert ranking(use_case.execute(CUSTOMER_ID, AS_OF)) == ANY_ROW_RANKING
+
+
+def test_use_case_build_opens_the_connection_eagerly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeConnector()
+    use_fake_connector(monkeypatch, connector)
+
+    build_classify_call_type_use_case(ENV)
+
+    assert len(connector.connections) == 1
+
+
+def test_use_case_build_survives_a_failed_cold_start_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = FakeConnector(
+        DataSourceConnectionError("no route to host"), [make_any_row()]
+    )
+    use_fake_connector(monkeypatch, connector)
+
+    use_case = build_classify_call_type_use_case(ENV)
+
+    assert use_case is not None
+    assert use_case.execute(CUSTOMER_ID, AS_OF).unavailable == ()
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {},
+        {**ENV, "DB_ENGINE": "oracle"},
+        {**ENV, "DB_ENGINE": "postgresql"},
+        {**ENV, "MAX_ROWS": "0"},
+        {"AWS_REGION": "us-east-1"},
+        {"DSQL_CLUSTER_ENDPOINT": ENDPOINT},
+        {**ENV, "DSQL_CLUSTER_ENDPOINT": f"https://{ENDPOINT}"},
+    ],
+)
+def test_use_case_build_with_bad_configuration_returns_none(
+    env: dict[str, str],
+) -> None:
+    assert build_classify_call_type_use_case(env) is None
+```
+
+`make_any_row` is the same merged row for all four queries (`FakeConnector` serves every query the same rows). Ranked, it gives `FRAUD_SUSPECTED` 0.77, `OPEN_CASE_FOLLOWUP` 0.60 and `FAILED_APP_ACTION` 0.58, as its docstring in `fakes.py` says.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `$PY -m pytest tests/unit/classify_call_type/test_delivery_wiring.py -q -p no:cacheprovider </dev/null 2>&1 | tail -3`
+Expected: a collection error, `ImportError: cannot import name 'dependencies_builder' from 'classify_call_type_lambda.delivery.dependencies'`.
+
+- [ ] **Step 3: Copy the builder and make the two changes**
+
+```bash
+SRC=gateway/tools/get_session_context/get_session_context_lambda/delivery/dependencies/dependencies_builder.py
+DST=gateway/tools/classify_call_type/classify_call_type_lambda/delivery/dependencies/dependencies_builder.py
+sed -e 's/get_session_context/classify_call_type/g' \
+    -e 's/GetSessionContextUseCase/ClassifyCallTypeUseCase/g' \
+    -e '/max_rows=settings.max_rows,/d' \
+    "$SRC" > "$DST"
+grep -n "max_rows\|GetSessionContext\|get_session_context" "$DST"
+grep -n "def build_classify_call_type_use_case\|ClassifyCallTypeUseCase(" "$DST"
+```
+
+Expected:
+- The first grep prints nothing.
+- The second grep prints the `def build_classify_call_type_use_case(` line and the `use_case = ClassifyCallTypeUseCase(` line.
+
+Ruling 10 explains why the `max_rows=` line goes. `DatabaseSettings` still parses `MAX_ROWS`, so a bad value still makes the build return `None`. The `{**ENV, "MAX_ROWS": "0"}` case checks this.
+
+`delivery/dependencies/__init__.py` came over in Task 1. If it's missing, stop: Task 1 is incomplete.
+
+- [ ] **Step 4: Run them to verify they pass**
+
+Run: `$PY -m pytest tests/unit/classify_call_type/test_delivery_wiring.py -q -p no:cacheprovider </dev/null 2>&1 | tail -3`
+Expected: `24 passed`.
+
+- [ ] **Step 5: Check isolation and lint**
+
+```bash
+grep -rnE "(get_session_context|list_credit_cards|list_card_transactions|transaction_fraud_detection|explain_transaction)_lambda" gateway/tools/classify_call_type tests/unit/classify_call_type
+$PY -m ruff format --check gateway/tools/classify_call_type tests/unit/classify_call_type </dev/null
+$PY -m ruff check gateway/tools/classify_call_type tests/unit/classify_call_type </dev/null
+```
+
+Expected: the grep prints nothing and both ruff commands are clean.
+
+---
+
+### Task 9: The handler
+
+**Files:**
+- Create: `delivery/handler.py`
+- Test: `tests/unit/classify_call_type/test_classify_call_type_handler.py`
+
+**Interfaces:**
+- Consumes:
+  - From Task 8: `build_classify_call_type_use_case`, `build_clock`, `build_database_repository` and `build_query_provider`.
+  - From Task 7: `present_call_classification`.
+  - From Task 2: `DomainError`, `DataSourceUnavailableError` and `CallReasonLookupError`.
+  - From Task 5: `ClassifyCallTypeUseCase.execute(customer_id: object, as_of: datetime)`.
+  - From `fakes.py`: `FakeClassifyRepository`, `FakeQueryProvider`, `FakeConnector`, `classify_responses`, `make_any_row`, `Outcome`, `CUSTOMER_ID`, `TRANSACTION_ID`, `AS_OF`, `AS_OF_SQL`, `QUERY_NAMES`.
+- Produces: `classify_call_type_lambda.delivery.handler.handler(event: object, context: object) -> dict[str, Any]`. Its handler string is `classify_call_type_lambda/delivery/handler.handler`, which the CDK loop in Task 10 derives from the tool name. The module also has:
+  - `TOOL_NAME = "classify_call_type"`
+  - `UNEXPECTED_ERROR_MESSAGE`
+  - `USE_CASE` and `CLOCK`, both built when the module loads.
+
+- [ ] **Step 1: Write the failing tests**
+
+`tests/unit/classify_call_type/test_classify_call_type_handler.py`:
+
+```python
+"""Tests for the classify_call_type Lambda handler."""
+
+import importlib
+import json
+import logging
+from datetime import datetime, timezone
+from types import ModuleType, SimpleNamespace
+from typing import Any
+
+import psycopg
+import pytest
+from classify_call_type_lambda.application.ports.errors import (
+    DataSourceConnectionError,
+    QueryExecutionError,
+)
+from classify_call_type_lambda.application.use_cases.classify_call_type import (
+    ClassifyCallTypeUseCase,
+)
+from classify_call_type_lambda.delivery.dependencies.dependencies_builder import (
+    build_database_repository,
+    build_query_provider,
+)
+from classify_call_type_lambda.delivery.settings import ClockSettings, DatabaseEngine
+from classify_call_type_lambda.domain.errors import (
+    CallReasonLookupError,
+    DataSourceUnavailableError,
+)
+
+from .fakes import (
+    AS_OF,
+    AS_OF_SQL,
+    CUSTOMER_ID,
+    QUERY_NAMES,
+    TRANSACTION_ID,
+    FakeClassifyRepository,
+    FakeConnector,
+    FakeQueryProvider,
+    Outcome,
+    classify_responses,
+    make_any_row,
+)
+
+pytestmark = pytest.mark.unit
+
+EVENT = {"customer_id": CUSTOMER_ID}
+INVALID_CUSTOMER_ID = (
+    "Invalid value for 'customer_id': is required and must be a non-empty "
+    "string. Ask the customer to confirm and retry."
+)
+CARD_REASONS = ["CARD_NOT_ACTIVE", "PAYMENT_OVERDUE", "CARD_EXPIRING"]
+# Spec section 5: P07's flagged charge as the agent sees it.
+P07_BODY = {
+    "reasons": [
+        {
+            "reason": "FRAUD_SUSPECTED",
+            "confidence": 0.77,
+            "ref_id": TRANSACTION_ID,
+            "evidence": {
+                "transaction_date": "2026-05-31T06:09:15",
+                "card_last4": "4497",
+                "merchant_name": "Estación de Servicio",
+                "amount": "288.69",
+                "currency": "USD",
+                "transaction_status": "Approved",
+            },
+        }
+    ],
+    "unavailable": [],
+}
+
+
+def make_context(
+    tool_name: str = "classify-call-type-target___classify_call_type",
+) -> SimpleNamespace:
+    """Build a Lambda context carrying the Gateway tool name."""
+    return SimpleNamespace(
+        client_context=SimpleNamespace(custom={"bedrockAgentCoreToolName": tool_name})
+    )
+
+
+@pytest.fixture
+def module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """Import the handler module fresh, with no DB env vars (no AWS calls)."""
+    for name in (
+        "DB_ENGINE",
+        "MAX_ROWS",
+        "DSQL_CLUSTER_ENDPOINT",
+        "DSQL_DB_USER",
+        "AWS_REGION",
+        "AS_OF",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    import classify_call_type_lambda.delivery.handler as handler_module
+
+    return importlib.reload(handler_module)
+
+
+def wire(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    responses: dict[str, Outcome] | None = None,
+) -> FakeClassifyRepository:
+    """Point the handler at a use case over a fake repository and a fixed clock."""
+    database_repository = FakeClassifyRepository(
+        classify_responses() if responses is None else responses
+    )
+    use_case = ClassifyCallTypeUseCase(
+        database_repository=database_repository, query_provider=FakeQueryProvider()
+    )
+    monkeypatch.setattr(module, "USE_CASE", use_case)
+    monkeypatch.setattr(module, "CLOCK", ClockSettings(as_of=AS_OF))
+    return database_repository
+
+
+def wire_connector(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch, connector: Any
+) -> None:
+    """Point the handler at real adapters over a fake connector and a fixed clock."""
+    use_case = ClassifyCallTypeUseCase(
+        database_repository=build_database_repository(
+            DatabaseEngine.AURORA_DSQL, connector
+        ),
+        query_provider=build_query_provider(DatabaseEngine.AURORA_DSQL),
+    )
+    monkeypatch.setattr(module, "USE_CASE", use_case)
+    monkeypatch.setattr(module, "CLOCK", ClockSettings(as_of=AS_OF))
+
+
+def text(response: dict[str, Any]) -> str:
+    """Return the JSON text of a success response."""
+    content = response["content"]
+    assert content[0]["type"] == "text"
+    return content[0]["text"]
+
+
+def body(response: dict[str, Any]) -> dict[str, Any]:
+    """Decode the JSON text of a success response."""
+    return json.loads(text(response))
+
+
+def reason_names(response: dict[str, Any]) -> list[str]:
+    """Return the ranked reason names of a success response."""
+    return [item["reason"] for item in body(response)["reasons"]]
+
+
+def test_success_returns_gateway_content_with_the_reasons(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire(module, monkeypatch)
+
+    response = module.handler(EVENT, make_context())
+
+    assert body(response) == P07_BODY
+    # ensure_ascii=False: accents reach the agent as they are.
+    assert "Estación de Servicio" in text(response)
+    # DEC-10: neither the score's name nor its value leaves the Lambda.
+    assert "score" not in text(response)
+    assert "62.00" not in text(response)
+
+
+def test_success_over_real_adapters(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire_connector(module, monkeypatch, FakeConnector([make_any_row()]))
+
+    response = module.handler(EVENT, make_context())
+
+    assert reason_names(response) == [
+        "FRAUD_SUSPECTED",
+        "OPEN_CASE_FOLLOWUP",
+        "FAILED_APP_ACTION",
+    ]
+    assert body(response)["unavailable"] == []
+
+
+def test_bare_customer_id_and_as_of_reach_every_query(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_repository = wire(module, monkeypatch)
+
+    module.handler({"customer_id": " cli-ex6boaoefzhq "}, make_context())
+
+    assert database_repository.queries == list(QUERY_NAMES)
+    calls = database_repository.calls
+    assert [params["customer_id"] for _name, params in calls] == [CUSTOMER_ID] * 4
+    assert [params.get("as_of") for _name, params in calls] == [
+        AS_OF_SQL,
+        None,
+        AS_OF_SQL,
+        AS_OF_SQL,
+    ]
+
+
+def test_unknown_event_keys_are_ignored(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_repository = wire(module, monkeypatch)
+
+    response = module.handler({**EVENT, "as_of": "2020-01-01"}, make_context())
+
+    assert "content" in response
+    assert database_repository.calls[0][1]["as_of"] == AS_OF_SQL
+
+
+def test_a_failed_source_comes_back_unavailable(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire(
+        module,
+        monkeypatch,
+        classify_responses(call_reason_cards=QueryExecutionError("boom")),
+    )
+
+    response = module.handler(EVENT, make_context())
+
+    assert reason_names(response) == ["FRAUD_SUSPECTED"]
+    assert body(response)["unavailable"] == CARD_REASONS
+
+
+def test_now_is_read_on_every_call(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_repository = wire(module, monkeypatch)
+    times = iter(
+        [
+            datetime(2026, 6, 17, 23, 59, 59, tzinfo=timezone.utc),
+            datetime(2026, 6, 18, 8, 30, tzinfo=timezone.utc),
+        ]
+    )
+    monkeypatch.setattr(module, "CLOCK", SimpleNamespace(now=lambda: next(times)))
+
+    module.handler(EVENT, make_context())
+    module.handler(EVENT, make_context())
+
+    sent = [
+        params["as_of"]
+        for name, params in database_repository.calls
+        if name == "call_reason_transactions"
+    ]
+    assert sent == [datetime(2026, 6, 17, 23, 59, 59), datetime(2026, 6, 18, 8, 30)]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        None,
+        [],
+        "customer_id=CLI-EX6BOAOEFZHQ",
+        {},
+        {"customer_id": None},
+        {"customer_id": ""},
+        {"customer_id": "   "},
+        {"customer_id": 42},
+        {"customer_id": True},
+        {"customer_id": ["CLI-EX6BOAOEFZHQ"]},
+    ],
+)
+def test_invalid_customer_id_returns_the_input_error_without_a_query(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch, event: object
+) -> None:
+    database_repository = wire(module, monkeypatch)
+
+    response = module.handler(event, make_context())
+
+    assert response == {"error": INVALID_CUSTOMER_ID}
+    assert database_repository.calls == []
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (DataSourceConnectionError("down"), DataSourceUnavailableError.MESSAGE),
+        (QueryExecutionError("boom"), CallReasonLookupError.MESSAGE),
+    ],
+    ids=["unavailable", "lookup"],
+)
+def test_all_four_sources_failing_returns_its_message(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    message: str,
+) -> None:
+    database_repository = wire(
+        module, monkeypatch, {name: error for name in QUERY_NAMES}
+    )
+
+    assert module.handler(EVENT, make_context()) == {"error": message}
+    assert database_repository.queries == list(QUERY_NAMES)
+
+
+def test_query_failure_over_real_adapters_returns_the_lookup_message(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    error = psycopg.errors.UndefinedTable('relation "transactions" does not exist')
+    wire_connector(module, monkeypatch, FakeConnector(error))
+
+    response = module.handler(EVENT, make_context())
+
+    assert response == {"error": CallReasonLookupError.MESSAGE}
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        make_context("other-target___text_analysis_tool"),
+        make_context("session-target___get_session_context"),
+        None,
+        SimpleNamespace(client_context=None),
+        SimpleNamespace(client_context=SimpleNamespace(custom={})),
+        SimpleNamespace(client_context=SimpleNamespace(custom=None)),
+        make_context(42),  # type: ignore[arg-type]
+    ],
+)
+def test_wrong_or_missing_tool_name_returns_an_error(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch, context: object
+) -> None:
+    database_repository = wire(module, monkeypatch)
+
+    response = module.handler(EVENT, context)
+
+    assert set(response) == {"error"}
+    assert "classify_call_type" in response["error"]
+    assert database_repository.calls == []
+
+
+def test_tool_name_without_a_target_prefix_is_accepted(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire(module, monkeypatch)
+
+    assert "content" in module.handler(EVENT, make_context("classify_call_type"))
+
+
+def test_unexpected_exception_returns_a_generic_message_without_internals(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("password=hunter2 host=db.internal")
+
+    monkeypatch.setattr(module, "USE_CASE", SimpleNamespace(execute=explode))
+    monkeypatch.setattr(module, "CLOCK", ClockSettings(as_of=AS_OF))
+
+    response = module.handler(EVENT, make_context())
+
+    assert response == {"error": module.UNEXPECTED_ERROR_MESSAGE}
+    assert module.UNEXPECTED_ERROR_MESSAGE == (
+        "Unexpected internal error ranking call reasons. "
+        "Greet the customer and ask how you can help."
+    )
+    assert "hunter2" not in response["error"]
+
+
+def test_missing_configuration_returns_data_source_unavailable(
+    module: ModuleType,
+) -> None:
+    assert module.USE_CASE is None
+
+    response = module.handler(EVENT, make_context())
+
+    assert response == {"error": DataSourceUnavailableError.MESSAGE}
+
+
+def test_missing_clock_returns_data_source_unavailable(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_repository = wire(module, monkeypatch)
+    monkeypatch.setattr(module, "CLOCK", None)
+
+    response = module.handler(EVENT, make_context())
+
+    assert response == {"error": DataSourceUnavailableError.MESSAGE}
+    assert database_repository.calls == []
+
+
+def test_default_environment_uses_the_real_clock(module: ModuleType) -> None:
+    assert module.CLOCK == ClockSettings(as_of=None)
+
+
+def test_a_bad_as_of_env_var_leaves_the_clock_unset(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AS_OF", "yesterday")
+
+    assert importlib.reload(module).CLOCK is None
+
+
+def test_cold_start_failure_then_failed_retry_returns_unavailable(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wire_connector(
+        module, monkeypatch, FakeConnector(DataSourceConnectionError("down"))
+    )
+
+    response = module.handler(EVENT, make_context())
+
+    assert response == {"error": DataSourceUnavailableError.MESSAGE}
+
+
+def test_success_log_names_the_reasons_but_no_customer_data(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    wire(
+        module,
+        monkeypatch,
+        classify_responses(call_reason_cards=QueryExecutionError("boom")),
+    )
+    caplog.set_level(logging.INFO)
+
+    module.handler(EVENT, make_context())
+
+    assert (
+        "classify_call_type returned reasons=['FRAUD_SUSPECTED'] "
+        "(unavailable=['CARD_NOT_ACTIVE', 'PAYMENT_OVERDUE', 'CARD_EXPIRING'])"
+    ) in caplog.text
+    for private in (
+        CUSTOMER_ID,
+        TRANSACTION_ID,
+        "Estación",
+        "288.69",
+        "0.77",
+        "62.00",
+    ):
+        assert private not in caplog.text
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `$PY -m pytest tests/unit/classify_call_type/test_classify_call_type_handler.py -q -p no:cacheprovider </dev/null 2>&1 | tail -3`
+Expected: every test errors with `ModuleNotFoundError: No module named 'classify_call_type_lambda.delivery.handler'`, raised from the `module` fixture.
+
+- [ ] **Step 3: Write the handler**
+
+`delivery/handler.py` follows get_session_context's handler with the changes in spec §8: the tool name, the presenter call, the log line and the unexpected-error text. It's new, so write the whole file; don't sed-copy it. The wrong-tool message is kept as copied (ruling 13).
+
+```python
+"""Lambda handler for the ``classify_call_type`` Gateway tool.
+
+Handler string: ``classify_call_type_lambda/delivery/handler.handler``.
+
+Input: the tool arguments as the event (see
+``gateway/tools/classify_call_type/tool_spec.json``); the tool name arrives in
+``context.client_context.custom["bedrockAgentCoreToolName"]`` with a
+``<target>___`` prefix, as in ``gateway/tools/sample_tool``. ``customer_id`` is
+passed to the use case bare, exactly as it came; the use case cleans it.
+
+Output: ``{"content": [{"type": "text", "text": <JSON>}]}`` on success, or
+``{"error": <agent-facing message>}``. Only a failure of all four candidate
+queries is an error; a failed query makes its reasons ``unavailable`` and the
+others are still ranked. Raw exception text is never returned: it could leak
+SQL, hosts or driver details to the model. The log names the reasons and
+``unavailable`` only, never evidence, confidences or scores.
+
+The use case and its whole graph (settings, connector, connection, adapters) are
+built once, when the module loads, by dependencies_builder; a warm container
+reuses them. The handler builds nothing itself.
+
+AS_OF (optional) is read once into CLOCK; "now" is CLOCK.now() on every call,
+so a warm container never freezes the real clock. An invalid AS_OF answers every
+request with DataSourceUnavailableError's message.
+
+TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
+  depends on a Cedar policy matching it to the token's customer_id claim; neither
+  the policy nor the claim exists yet (product design sections 5 and 10).
+"""
+
+import json
+import logging
+import os
+from collections.abc import Mapping
+from typing import Any, Final
+
+from classify_call_type_lambda.delivery.dependencies.dependencies_builder import (
+    build_classify_call_type_use_case,
+    build_clock,
+)
+from classify_call_type_lambda.delivery.presenters.call_classification import (
+    present_call_classification,
+)
+from classify_call_type_lambda.domain.errors import (
+    DataSourceUnavailableError,
+    DomainError,
+)
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+TOOL_NAME: Final = "classify_call_type"
+_TOOL_NAME_DELIMITER: Final = "___"
+UNEXPECTED_ERROR_MESSAGE: Final = (
+    "Unexpected internal error ranking call reasons. "
+    "Greet the customer and ask how you can help."
+)
+_WRONG_TOOL_MESSAGE: Final = (
+    f"This function only serves the '{TOOL_NAME}' tool. "
+    "Don't retry; offer a hand-off to a human agent."
+)
+
+
+USE_CASE = build_classify_call_type_use_case(os.environ)
+CLOCK = build_clock(os.environ)
+
+
+def handler(event: object, context: object) -> dict[str, Any]:
+    """Rank the likely reasons the customer is calling, for the agent.
+
+    Args:
+        event: Tool arguments passed directly by the AgentCore Gateway.
+        context: Lambda context with the tool name in client_context.custom.
+
+    Returns:
+        A Gateway ``content`` response, or ``{"error": message}``.
+    """
+    tool_name = _tool_name(context)
+    if tool_name != TOOL_NAME:
+        logger.error("Unexpected tool name %r for %s", tool_name, TOOL_NAME)
+        return {"error": _WRONG_TOOL_MESSAGE}
+
+    try:
+        if USE_CASE is None or CLOCK is None:
+            raise DataSourceUnavailableError()
+        body = present_call_classification(
+            USE_CASE.execute(_customer_id(event), as_of=CLOCK.now())
+        )
+    except DomainError as err:
+        logger.warning(
+            "%s returned an error: %s", TOOL_NAME, err.message, exc_info=True
+        )
+        return {"error": err.message}
+    except Exception:
+        logger.exception("Unexpected error in %s", TOOL_NAME)
+        return {"error": UNEXPECTED_ERROR_MESSAGE}
+
+    logger.info(
+        "%s returned reasons=%s (unavailable=%s)",
+        TOOL_NAME,
+        [item["reason"] for item in body["reasons"]],
+        body["unavailable"],
+    )
+    return {"content": [{"type": "text", "text": json.dumps(body, ensure_ascii=False)}]}
+
+
+def _customer_id(event: object) -> object:
+    """Return the event's customer_id as it came, or None for a non-object event.
+
+    The use case validates and cleans it, so a bad value becomes the
+    customer_id InvalidInputError message.
+    """
+    if not isinstance(event, Mapping):
+        return None
+    return event.get("customer_id")
+
+
+def _tool_name(context: object) -> str | None:
+    """Return the tool name without its ``<target>___`` prefix, or None if absent."""
+    try:
+        full_name = context.client_context.custom["bedrockAgentCoreToolName"]  # type: ignore[attr-defined]
+    except (AttributeError, KeyError, TypeError):
+        return None
+    if not isinstance(full_name, str):
+        return None
+    return full_name.rpartition(_TOOL_NAME_DELIMITER)[2]
+```
+
+The get_session_context docstring has an R1 TODO saying there is no CDK yet. It's dropped here because Task 10 adds the CDK. The copied `requirements.txt` keeps its own R1 line ("no Gateway target points at it yet"), which is still true: the Gateway target is out of scope (spec §1).
+
+- [ ] **Step 4: Run them to verify they pass**
+
+Run: `$PY -m pytest tests/unit/classify_call_type/test_classify_call_type_handler.py -q -p no:cacheprovider </dev/null 2>&1 | tail -3`
+Expected: `34 passed`.
+
+- [ ] **Step 5: Run the tool's tests, check isolation and lint**
+
+```bash
+$PY -m pytest tests/unit/classify_call_type -q -p no:cacheprovider </dev/null 2>&1 | tail -2
+grep -rnE "(get_session_context|list_credit_cards|list_card_transactions|transaction_fraud_detection|explain_transaction)_lambda" gateway/tools/classify_call_type tests/unit/classify_call_type
+grep -rn "is_fraud" gateway/tools/classify_call_type
+grep -rln "fraud_score" gateway/tools/classify_call_type --include=*.sql
+$PY -m ruff format --check gateway/tools/classify_call_type tests/unit/classify_call_type </dev/null
+$PY -m ruff check gateway/tools/classify_call_type tests/unit/classify_call_type </dev/null
+```
+
+Expected:
+- `381 passed`, 0 failed.
+- The first two greps print nothing. The third prints only `call_reason_transactions.sql`.
+- Both ruff commands are clean.
+
+---
+
+### Task 10: CDK
+
+**Files:**
+- Modify: `infra-cdk/lib/data-construct.ts`, the `tools` array near line 232.
+- Modify: `infra-cdk/test/data-construct.test.ts`, line 65 and the read-tools `test.each` table near line 86.
+
+**Interfaces:**
+- Consumes: the tool folder from Tasks 1–9. The `PythonFunction` loop bundles `gateway/tools/<tool>/` and uses the handler `<tool>_lambda.delivery.handler.handler`.
+- Produces: the CDK function `ledgerlens-classify-call-type`, which is deployed in Task 12.
+
+- [ ] **Step 1: Check the precondition**
+
+Merge `4f5d50d` dropped the two write tools from the `tools` array and set the VPC count to 6, but kept their `test.each` rows. On that tree the CDK suite fails twice (`block_credit_card ...` and `open_claim ... runs in the VPC as the write tools role`), and a deploy would delete both functions.
+
+Run: `grep -n 'tool: "block_credit_card"\|tool: "open_claim"' infra-cdk/lib/data-construct.ts`
+Expected: two lines, each with `role: this.writeToolsRole`. If they're missing, stop and ask the user to restore them first. Don't fix them in this plan.
+
+Then run: `cd infra-cdk && npx jest test/data-construct.test.ts 2>&1 | grep -E "Tests:"; cd ..`
+Expected: `0 failed`. Record the count it prints.
+
+- [ ] **Step 2: Change the test first**
+
+In `infra-cdk/test/data-construct.test.ts`, change:
+
+```ts
+  expect(vpcFns).toHaveLength(8) // the read check and the seven DSQL tools
+```
+
+to:
+
+```ts
+  expect(vpcFns).toHaveLength(9) // the read check and the eight DSQL tools
+```
+
+Then add a row to the read-tools `test.each` table, after the `explain_transaction` row:
+
+```ts
+  ["classify_call_type", "ledgerlens-classify-call-type"],
+```
+
+The read-tools table checks the `ledgerlens-tools` role, which connects as `ll_read`. Classify only reads, so it belongs there, not in the write-tools table.
+
+- [ ] **Step 3: Run the CDK test to see it fail**
+
+Run: `cd infra-cdk && npx jest test/data-construct.test.ts 2>&1 | grep -E "●|Tests:" | sort -u; cd ..`
+Expected: 2 failures.
+- The VPC count test: expected 9, received 8.
+- The new `classify_call_type` row: no function is named `ledgerlens-classify-call-type`.
+
+- [ ] **Step 4: Add the tool to the stack**
+
+In `infra-cdk/lib/data-construct.ts`, add one entry to the `tools` array, after `explain_transaction` and before the write tools:
+
+```ts
+      { tool: "classify_call_type", id: "ClassifyCallType" },
+```
+
+It takes the default role, `this.toolsRole`. The loop already sets the function name, VPC, role, `DSQL_CLUSTER_ENDPOINT`, `AS_OF` and the log group.
+
+- [ ] **Step 5: Run the CDK tests to see them pass**
+
+Run: `cd infra-cdk && npx jest 2>&1 | tail -6; cd ..`
+Expected: every test suite passes, 0 failed.
+
+- [ ] **Step 6: Show the diff**
+
+Run: `git diff -- infra-cdk/lib/data-construct.ts infra-cdk/test/data-construct.test.ts`
+
+Expected: exactly three changed lines:
+- the `classify_call_type` entry;
+- its test row;
+- the count going from 8 to 9.
+
+Then run `git status --short -- infra-cdk`. It must list only those two files. If `infra-cdk/config.yaml` appears, it was modified before this plan; leave it and never stage it.
+
+---
+
+### Task 11: Product design doc and the full suite
+
+**Files:**
+- Modify: `docs/LEDGERLENS_PRODUCT_DESIGN.md` §7.2, which uses CRLF line endings.
+
+**Interfaces:**
+- Consumes:
+  - the `tool_spec.json` description and the four SQL files from Task 6;
+  - the output shape from Task 7;
+  - the taxonomy from Task 3 (spec §3.1).
+- Produces: documentation only. It covers spec §10's doc fixes.
+
+- [ ] **Step 1: Replace §7.2, keeping CRLF**
+
+Save this script to the scratchpad as `fix_7_2.py` and run it with `$PY <scratchpad>/fix_7_2.py </dev/null` from the repo root.
+
+It replaces everything from the `### 7.2` heading up to, but not including, the `---` line before `### 7.3`. It looks up both ends by text, so it doesn't depend on line numbers. The purpose line and the diagram note are kept and updated; the taxonomy, output, query and tool_spec are replaced (spec §10). The tool spec description and the SQL come from the tool's own files, so the doc can't drift from them. The SQL is shown without its header comments.
+
+```python
+"""Replace product design section 7.2 with the classify_call_type design."""
+
+import json
+from pathlib import Path
+
+DOC = Path("docs/LEDGERLENS_PRODUCT_DESIGN.md")
+TOOL = Path("gateway/tools/classify_call_type")
+QUERIES = TOOL / "classify_call_type_lambda/queries/postgresql"
+
+description = json.loads((TOOL / "tool_spec.json").read_text(encoding="utf-8"))[0][
+    "description"
+]
+
+
+def sql_body(name: str) -> list[str]:
+    """Return the query's lines without its leading comment header."""
+    lines = (QUERIES / f"{name}.sql").read_text(encoding="utf-8").splitlines()
+    first = next(i for i, line in enumerate(lines) if not line.startswith("--"))
+    return lines[first:]
+
+
+OUTPUT = {
+    "reasons": [
+        {
+            "reason": "FRAUD_SUSPECTED",
+            "confidence": 0.77,
+            "ref_id": "TRX-23BIJAU4GL46ATPW9STY",
+            "evidence": {
+                "transaction_date": "2026-05-31T06:09:15",
+                "card_last4": "4497",
+                "merchant_name": "Estación de Servicio",
+                "amount": "288.69",
+                "currency": "USD",
+                "transaction_status": "Approved",
+            },
+        }
+    ],
+    "unavailable": [],
+}
+
+NEW = [
+    "### 7.2 `classify_call_type` (A1, bootstrap)",
+    "",
+    "**Purpose:** rank up to 3 likely reasons for contact, each with a confidence, "
+    "the record it points to and evidence. This is the core of A1. The reasons are "
+    "hypotheses for the agent's opening line, not facts.",
+    "",
+    "> The diagram calls this `Classify_call_type`. Tool names use `snake_case` "
+    "here for consistency.",
+    "",
+    "**Spec:** [2026-10-03-classify-call-type-lambda-design.md]"
+    "(superpowers/specs/2026-10-03-classify-call-type-lambda-design.md)",
+    "",
+    f'**tool_spec description:** "{description}"',
+    "",
+    "**Input:** `customer_id`. The tool isn't called automatically at session start "
+    "yet; until that follow-up ships, the agent calls it at the start of the "
+    "conversation.",
+    "",
+    "**Output** (P07's flagged charge; `confidence` is a number with 2 decimals, "
+    "amounts are 2-decimal strings)",
+    "```json",
+    *json.dumps(OUTPUT, indent=2, ensure_ascii=False).splitlines(),
+    "```",
+    "",
+    "- `evidence` is a structured object whose keys depend on the reason "
+    "(`DECLINED_TRANSACTION` adds `response_code`; `FOREIGN_TRANSACTION` adds "
+    "`transaction_country`, `home_country` and `card_currency`; `CARD_EXPIRING` "
+    "has `days_left`). The agent words it in the customer's language.",
+    "- `unavailable` names the reasons whose query failed; the other reasons are "
+    "still ranked. Only a failure of all four queries is an error.",
+    "- No key in the output contains `fraud` or `score`. The stored `fraud_score` "
+    "only picks the band and never leaves the Lambda; `is_fraud` is never read "
+    "(DEC-10).",
+    "",
+    "**Reason taxonomy** (credit cards only; the order is the final tie-break)",
+    "",
+    "| Reason | Signal | Window | Weight | Decay | `ref_id` |",
+    "|---|---|---|---:|---|---|",
+    "| `FRAUD_SUSPECTED` | `Approved` and `fraud_score > 50` | 30 days | 95 | per day "
+    "| `transaction_id` |",
+    "| `DECLINED_TRANSACTION` | `Declined` | 72 hours | 85 | per hour "
+    "| `transaction_id` |",
+    "| `UNRECOGNIZED_CHARGE_REVIEW` | `Approved` and `30 < fraud_score <= 50` "
+    "| 30 days | 70 | per day | `transaction_id` |",
+    "| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if "
+    "`sla_breached`, else 60 (NULL counts as false) | none | `complaint_id` |",
+    "| `PENDING_TRANSACTION` | `Pending` | 72 hours | 65 | per hour "
+    "| `transaction_id` |",
+    "| `REVERSED_TRANSACTION` | `Reversed` | 72 hours | 65 | per hour "
+    "| `transaction_id` |",
+    "| `CARD_NOT_ACTIVE` | `product_status` in {`Blocked`, `Suspended`} | state "
+    "| 60 | none | `card_last4` |",
+    "| `FAILED_APP_ACTION` | Digital event with `event_type = 'Error'` | 24 hours "
+    "| 60 | per hour | `event_id` |",
+    "| `FOREIGN_TRANSACTION` | `Approved`, and the country differs from the home "
+    "country (accent- and case-folded) or the currency differs from the card's "
+    "| 72 hours | 55 | per hour | `transaction_id` |",
+    "| `PAYMENT_OVERDUE` | `Active` card with `days_past_due > 0` | state | 50 "
+    "| none | `card_last4` |",
+    "| `CARD_EXPIRING` | `Active` card expiring within 30 days of `as_of` "
+    "| state | 35 | none | `card_last4` |",
+    "",
+    "Score = weight minus 1 point per hour (72 h and 24 h reasons) or per day "
+    "(30-day reasons) since the event, never below 40% of the weight; state "
+    "reasons and cases don't decay. Confidence = score / 100, rounded half up to "
+    "2 decimals. Each reason keeps its best event (highest score, then newest, "
+    "then lowest `ref_id`). Reasons rank by unrounded score, then weight, then "
+    "the order above, and the top 3 are kept. One charge can be several reasons. "
+    "A `Closed` card is no reason. The fraud reasons need `Approved`: a declined "
+    "charge is `DECLINED_TRANSACTION`.",
+    "",
+    "**Queries** (PostgreSQL dialect, psycopg placeholders). The SQL only fetches "
+    "candidates; the rules, weights and ranking live in the Lambda, and a failed "
+    "query only makes its own reasons unavailable.",
+    "",
+    "*Charges: the last 72 hours, plus approved charges of the last 30 days scored "
+    "above the review band:*",
+    "```sql",
+    *sql_body("call_reason_transactions"),
+    "```",
+    "",
+    "*Credit cards at their latest state:*",
+    "```sql",
+    *sql_body("call_reason_cards"),
+    "```",
+    "",
+    "*Cases open at `as_of`:*",
+    "```sql",
+    *sql_body("call_reason_cases"),
+    "```",
+    "",
+    "*App errors of the last 24 hours:*",
+    "```sql",
+    *sql_body("call_reason_app_events"),
+    "```",
+    "",
+]
+
+raw = DOC.read_bytes().decode("utf-8")
+assert raw.count("\n") == raw.count("\r\n"), "expected CRLF only"
+lines = raw.split("\r\n")
+start = lines.index("### 7.2 `classify_call_type` (A1, bootstrap)")
+next_heading = next(
+    i for i in range(start + 1, len(lines)) if lines[i].startswith("### 7.3")
+)
+end = max(i for i in range(start, next_heading) if lines[i] == "---")
+lines[start:end] = NEW
+DOC.write_bytes("\r\n".join(lines).encode("utf-8"))
+print(f"replaced lines {start + 1}-{end} with {len(NEW)} lines")
+```
+
+Expected: `replaced lines 344-430 with 148 lines`. The new line count depends on the SQL files; if a header changed, it may differ by a few lines.
+
+- [ ] **Step 2: Check the section and the line endings**
+
+```bash
+sed -n '/^### 7.2/,/^### 7.3/p' docs/LEDGERLENS_PRODUCT_DESIGN.md | tr -d '\r'
+file docs/LEDGERLENS_PRODUCT_DESIGN.md
+grep -c "FX_CLARIFICATION\|TRANSACTION_DISPUTE\|CARD_BLOCK_REQUEST" docs/LEDGERLENS_PRODUCT_DESIGN.md
+git diff --stat -- docs/LEDGERLENS_PRODUCT_DESIGN.md
+```
+
+Expected:
+- The section shows the new text, the 11-row taxonomy and the four SQL bodies, then `---` and the `### 7.3` heading.
+- `file` still says `with CRLF line terminators`.
+- The `grep -c` prints `0`. Those reasons were dropped or renamed (spec §10), and they only appeared in §7.2.
+- The diff touches only this file, with about 129 insertions and 68 deletions, not the whole file.
+
+Other mentions of classify elsewhere in the doc (§7 catalog row, the Cedar action, the evaluation and roadmap lines) stay as they are; they're still accurate.
+
+- [ ] **Step 3: Run the whole suite**
+
+Run the suite command from Global Constraints.
+Expected: `N passed`, where N is the baseline from Task 1 Step 0 plus 381, with the same deselected and failed counts as the baseline. The 381 are every test in `tests/unit/classify_call_type/`; confirm with `$PY -m pytest tests/unit/classify_call_type -q -p no:cacheprovider --co </dev/null | tail -1`.
+
+- [ ] **Step 4: Lint the whole tool and check the tree**
+
+```bash
+$PY -m ruff format --check gateway/tools/classify_call_type tests/unit/classify_call_type </dev/null
+$PY -m ruff check gateway/tools/classify_call_type tests/unit/classify_call_type </dev/null
+grep -rnE "(get_session_context|list_credit_cards|list_card_transactions|transaction_fraud_detection|explain_transaction)_lambda" gateway/tools/classify_call_type tests/unit/classify_call_type
+find gateway/tools/classify_call_type tests/unit/classify_call_type -name __pycache__ -prune -o -type f -print | sort
+git status --short
+```
+
+Expected:
+- Both ruff commands are clean, and the grep prints nothing.
+- `find` lists the tool's files only: no `.pyc`.
+- `git status` lists the untracked files from before this plan (`.superpowers/`, the `datathon/` notes) plus this plan's work: `gateway/tools/classify_call_type/`, `tests/unit/classify_call_type/`, `docs/LEDGERLENS_PRODUCT_DESIGN.md`, the two `infra-cdk` files and this plan. Nothing is staged.
+
+---
+
+### Task 12: Deploy and acceptance (deferred: don't run during this plan)
+
+**Don't run this task when executing this plan.** The deploy changes the real AWS account, so it needs the user's explicit go-ahead at that time. It also waits for any code review of the branch to finish: a deploy command from the user while a review is running means "next step", not "run it now".
+
+When executing this plan, finish after Task 11. Tell the user Tasks 1–11 are done, with the suite and CDK test results, and that Task 12 is waiting for their go-ahead.
+
+**Files:** none changed.
+
+**Interfaces:**
+- Consumes: everything above.
+- Produces: the deployed `ledgerlens-classify-call-type` function and the seven acceptance results.
+
+- [ ] **Step 1: Deploy the data stack**
+
+Before deploying, re-run Task 10 Step 1's grep. The write-tool entries must be in the `tools` array, or the deploy deletes `ledgerlens-block-credit-card` and `ledgerlens-open-claim`.
+
+Run: `cd infra-cdk && npx cdk deploy ledgerlens-bank-assistant-data --exclusively --require-approval never --profile ledgerlens 2>&1 | tail -15; cd ..`
+Expected: the stack update finishes with `✅  ledgerlens-bank-assistant-data`. The change set adds `ledgerlens-classify-call-type` and its log group, plus any of `transaction_fraud_detection` or `explain_transaction` not yet deployed. It doesn't replace or delete any existing function.
+
+- [ ] **Step 2: Invoke the tool for the seven personas**
+
+Use the scratchpad as `S`. The client context is built the same way as in the earlier tools' acceptance runs. The customer ids are the spec §1 personas (`data_load/personas.json`).
+
+```bash
+S="<scratchpad>"
+CC=$(printf '{"custom":{"bedrockAgentCoreToolName":"target___classify_call_type"}}' | base64 -w0)
+invoke() {
+  printf '{"customer_id":"%s"}' "$2" > "$S/$1.json"
+  aws lambda invoke --function-name ledgerlens-classify-call-type \
+    --client-context "$CC" --cli-binary-format raw-in-base64-out \
+    --payload "fileb://$S/$1.json" --profile ledgerlens --region us-east-1 \
+    "$S/$1_out.json" >/dev/null && cat "$S/$1_out.json" && echo
+}
+invoke p07 CLI-EX6BOAOEFZHQ
+invoke p01 CLI-1GL7QBDG3QG0
+invoke p02 CLI-7EC6UCDZMSKV
+invoke p03 CLI-70U0WJ1NH1MN
+invoke p05 CLI-50OIF5EIYSWK
+invoke p08 CLI-GG3Z1440277M
+invoke p10 CLI-Z3V3SBS18YWQ
+```
+
+- [ ] **Step 3: Check the results**
+
+Save this script to the scratchpad as `check_classify.py` and run `$PY <scratchpad>/check_classify.py "$S" </dev/null`. It checks spec §1's acceptance table: the first reasons with their `ref_id` and confidence, `unavailable: []`, no key containing `fraud` or `score`, nothing for P02's `Closed` card 4364, and no `DECLINED_TRANSACTION` for P05 (its decline is 80 h old).
+
+```python
+"""Check the classify_call_type acceptance outputs against spec section 1."""
+
+import json
+import sys
+from pathlib import Path
+
+OUT = Path(sys.argv[1])
+# (reason, ref_id, confidence) of the first reasons, best first.
+EXPECTED = {
+    "p07": [("FRAUD_SUSPECTED", "TRX-23BIJAU4GL46ATPW9STY", 0.77)],
+    "p01": [("DECLINED_TRANSACTION", "TRX-SSJAIUCVVU1L4605ZLNM", 0.79)],
+    "p02": [("PENDING_TRANSACTION", "TRX-M8SV89D2QGIE6WRUB79K", 0.61)],
+    "p03": [("REVERSED_TRANSACTION", "TRX-LJGEBUAOX0G4CL4RQSIU", 0.26)],
+    "p05": [("FOREIGN_TRANSACTION", "TRX-MQKFELIPWT098DXTN2WN", 0.44)],
+    "p08": [("OPEN_CASE_FOLLOWUP", "CMP-FHCLR8TGWMBD0YFOCLYS", 0.60)],
+    "p10": [("CARD_NOT_ACTIVE", "7718", 0.60), ("PAYMENT_OVERDUE", "2626", 0.50)],
+}
+
+
+def keys(value: object) -> set[str]:
+    """Return every dict key at any depth."""
+    if isinstance(value, dict):
+        return set(value) | {k for v in value.values() for k in keys(v)}
+    if isinstance(value, list):
+        return {k for v in value for k in keys(v)}
+    return set()
+
+
+def problems(name: str, response: dict) -> list[str]:
+    """Return what's wrong with one persona's response."""
+    if "content" not in response:
+        return [f"error response {response}"]
+    body = json.loads(response["content"][0]["text"])
+    reasons = body["reasons"]
+    got = [(r["reason"], r["ref_id"], r["confidence"]) for r in reasons]
+    found = []
+    if got[: len(EXPECTED[name])] != EXPECTED[name]:
+        found.append(f"reasons {got}")
+    if body["unavailable"]:
+        found.append(f"unavailable {body['unavailable']}")
+    if [key for key in keys(body) if "fraud" in key or "score" in key]:
+        found.append("a key mentions fraud or score")
+    if name == "p02" and any(r["ref_id"] == "4364" for r in reasons):
+        found.append("the Closed card 4364 is a reason")
+    if name == "p05" and any(r["reason"] == "DECLINED_TRANSACTION" for r in reasons):
+        found.append("a DECLINED_TRANSACTION outside the 72 h window")
+    return found
+
+
+failed = False
+for name in EXPECTED:
+    response = json.loads((OUT / f"{name}_out.json").read_text(encoding="utf-8"))
+    found = problems(name, response)
+    print(name, "; ".join(found) if found else "OK")
+    failed = failed or bool(found)
+sys.exit(1 if failed else 0)
+```
+
+Expected: seven lines, each `<persona> OK`, and exit code 0.
+
+If a line isn't `OK`, stop and show the user that persona's full output. Don't change the SQL, the weights or the rules to make it match. Known causes to check first and report:
+- **P08 `ref_id`:** if P08 has several open, non-breached cases, ruling 4 picks the lowest `complaint_id`, which may not be `CMP-FHCLR8TGWMBD0YFOCLYS`. Report which case won and why.
+- **A card blocked by a write-tool smoke test:** card and case states are current, even on a past `AS_OF` (risk K4). An extra `CARD_NOT_ACTIVE` above the expected reason means `block_credit_card` changed that card. Report which card.
+- **`unavailable` not empty:** a query DSQL rejects (risk R3). Report which source and its CloudWatch error; don't change the SQL without the user.
+
+- [ ] **Step 4: Report**
+
+Show the user all seven outputs in full and the check results. Then wait for their command to commit. Don't commit or push on your own.

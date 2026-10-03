@@ -235,6 +235,7 @@ export class DataConstruct extends Construct {
       { tool: "get_session_context", id: "GetSessionContext" },
       { tool: "transaction_fraud_detection", id: "TransactionFraudDetection" },
       { tool: "explain_transaction", id: "ExplainTransaction" },
+      { tool: "classify_call_type", id: "ClassifyCallType" },
       { tool: "block_credit_card", id: "BlockCreditCard", role: this.writeToolsRole },
       { tool: "open_claim", id: "OpenClaim", role: this.writeToolsRole },
     ]

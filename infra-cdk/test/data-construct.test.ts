@@ -62,7 +62,7 @@ test("uses the default VPC, creating no network of its own; the endpoint admits 
 
 test("every Lambda in the VPC runs in the endpoint's subnet", () => {
   const vpcFns = Object.values(t.findResources("AWS::Lambda::Function")).filter((f) => f.Properties.VpcConfig)
-  expect(vpcFns).toHaveLength(8) // the read check and the seven DSQL tools
+  expect(vpcFns).toHaveLength(9) // the read check and the eight DSQL tools
   for (const fn of vpcFns) expect(fn.Properties.VpcConfig.SubnetIds).toEqual(["s-12345"])
 })
 
@@ -89,6 +89,7 @@ test.each([
   ["get_session_context", "ledgerlens-get-session-context"],
   ["transaction_fraud_detection", "ledgerlens-transaction-fraud-detection"],
   ["explain_transaction", "ledgerlens-explain-transaction"],
+  ["classify_call_type", "ledgerlens-classify-call-type"],
 ])("%s runs in the VPC as the tools role, against the private host as ll_read", (tool, functionName) => {
   const toolsId = logicalId("AWS::IAM::Role", { RoleName: "ledgerlens-tools" })
   t.hasResourceProperties("AWS::Lambda::Function", {
