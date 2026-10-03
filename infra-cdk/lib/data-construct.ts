@@ -224,6 +224,8 @@ export class DataConstruct extends Construct {
         entry: path.join(__dirname, "..", "..", "gateway", "tools", tool), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         index: `${tool}_lambda/delivery/handler.py`,
         handler: "handler",
+        // local test runs leave bytecode caches in the tool folder; don't ship them
+        bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
         role: this.toolsRole,
         vpc: this.vpc,
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
