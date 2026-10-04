@@ -1,5 +1,6 @@
 import type { Message, MessageSegment } from "@/components/chat/types"
 import { bareToolName } from "@/hooks/useToolRenderer"
+import { hasKey, translate, type Lang } from "./i18n"
 
 export const HAND_OFF_TOOL = "human_agent_hand_off"
 /** Pause between the end of the goodbye and the split, so the goodbye can be read. */
@@ -74,32 +75,22 @@ export function findHandOff(messages: Message[]): HandOff | null {
 export const phaseOf = (handOff: HandOff | null, messages: Message[]): Phase =>
   !handOff ? "ai" : messages.some(m => m.role === "human") ? "joined" : "connecting"
 
-// The ticket shows these to the customer, so they never claim the bank confirmed fraud
-const REASON_LABEL: Record<HandOffReason, string> = {
-  FRAUD_CONFIRMED: "Cargo no reconocido",
-  CUSTOMER_REQUEST: "Pidió hablar con una persona",
-  UNRESOLVED: "El asistente no pudo resolverlo",
-  OUT_OF_SCOPE: "Fuera del alcance del asistente",
+export const reasonLabel = (reason: string, lang: Lang = "es"): string => {
+  const key = `reason.${reason}`
+  return hasKey(key) ? translate(lang, key) : reason
 }
 
-export const reasonLabel = (reason: string): string => REASON_LABEL[reason as HandOffReason] ?? reason
-
-export const queueFor = (reason: string): string => (reason === "FRAUD_CONFIRMED" ? "Fraudes" : "Servicio general")
-
-const NEXT_STEP: Record<HandOffReason, string> = {
-  FRAUD_CONFIRMED: "Voy a revisar si hubo otros intentos con tus tarjetas y te cuento por aquí mismo.",
-  CUSTOMER_REQUEST: "Cuéntame en qué te puedo ayudar y lo revisamos juntos.",
-  UNRESOLVED: "Voy a revisar tu caso con más detalle y te confirmo por aquí mismo.",
-  OUT_OF_SCOPE: "Esa solicitud la reviso yo. Dame un momento para validar tus datos.",
-}
+export const queueFor = (reason: string, lang: Lang = "es"): string =>
+  translate(lang, reason === "FRAUD_CONFIRMED" ? "queueFraud" : "queueGeneral")
 
 /** Two replies Laura can send as they are: a greeting that shows she has the case, then a next step. */
-export function suggestedReplies(handOff: HandOff, customerName: string): [string, string] {
-  const firstName = customerName.trim().split(/\s+/)[0]
-  const queue = queueFor(handOff.reason)
-  const hello = firstName ? `Hola ${firstName}, soy Laura, de ${queue}.` : `Hola, soy Laura, de ${queue}.`
+export function suggestedReplies(handOff: HandOff, customerName: string, lang: Lang = "es"): [string, string] {
+  const name = customerName.trim().split(/\s+/)[0]
+  const queue = queueFor(handOff.reason, lang)
+  const hello = translate(lang, name ? "helloNamed" : "hello", { name, queue })
+  const next = `next.${handOff.reason}`
   return [
-    `${hello} Ya tengo tu caso ${handOff.hand_off_id} y todo lo que hablaste con el asistente, así que no necesitas repetir nada.`,
-    NEXT_STEP[handOff.reason] ?? NEXT_STEP.CUSTOMER_REQUEST,
+    `${hello} ${translate(lang, "haveCase", { id: handOff.hand_off_id })}`,
+    translate(lang, hasKey(next) ? next : "next.CUSTOMER_REQUEST"),
   ]
 }

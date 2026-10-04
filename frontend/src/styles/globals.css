@@ -6,19 +6,17 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --color-brand-dark: hsl(197, 37%, 24%);
-  --color-brand-teal: hsl(173, 58%, 39%);
-  --color-brand-lime: hsl(43, 74%, 66%);
-  --color-brand-yellow: hsl(27, 87%, 67%);
-  --color-brand-orange: hsl(12, 76%, 61%);
-  /* Tier colors (.superdesign/design-system.md): teal = AI assistant, orange = human agent */
-  --color-ai: hsl(173 62% 26%);
-  --color-ai-bg: hsl(173 42% 90%);
-  --color-human: hsl(12 68% 42%);
-  --color-human-bg: hsl(12 80% 94%);
-  --color-page: hsl(195 22% 95%);
+  --font-sans: "Funnel Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Tier colors (.superdesign/design-system.md): cobalt = AI assistant, mango = human agent, ink = customer */
+  --color-ai: var(--ai);
+  --color-ai-bg: var(--ai-bg);
+  --color-human: var(--human);
+  --color-human-bg: var(--human-bg);
+  --color-mango: var(--mango);
+  --color-ink: var(--ink);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-page: var(--page);
+  --color-ok: var(--ok);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -27,11 +25,6 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -54,82 +47,84 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Palette: paper #F4F6FB, ink #161A33, cobalt #2E46E8 (AI), mango #F2A31B (human) */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --brand-dark: 197 37% 24%;
-  --brand-teal: 173 58% 39%;
-  --brand-lime: 43 74% 66%;
-  --brand-yellow: 27 87% 67%;
-  --brand-orange: 12 76% 61%;
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-
-  /* Font variables for Geist fonts */
-  --font-geist-sans: "Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-geist-mono: "Geist Mono", "Courier New", Consolas, Monaco, monospace;
+  --radius: 0.75rem;
+  --page: #f4f6fb;
+  --ink: #161a33;
+  --ink-foreground: #ffffff;
+  --ai: #2e46e8;
+  --ai-bg: #e9ecfe;
+  /* mango is a fill; --human is its text-safe shade */
+  --mango: #f2a31b;
+  --human: #8f5300;
+  --human-bg: #fdf0d5;
+  --ok: #12805c;
+  --background: #ffffff;
+  --foreground: #161a33;
+  --card: #ffffff;
+  --card-foreground: #161a33;
+  --popover: #ffffff;
+  --popover-foreground: #161a33;
+  --primary: #161a33;
+  --primary-foreground: #ffffff;
+  --secondary: #eceff6;
+  --secondary-foreground: #161a33;
+  --muted: #eceff6;
+  --muted-foreground: #5b6178;
+  --accent: #eceff6;
+  --accent-foreground: #161a33;
+  --destructive: #c8323f;
+  --border: #dde1ec;
+  --input: #d3d8e6;
+  --ring: #2e46e8;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #161a33;
+  --sidebar-primary: #161a33;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eceff6;
+  --sidebar-accent-foreground: #161a33;
+  --sidebar-border: #dde1ec;
+  --sidebar-ring: #2e46e8;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+  --page: #0f1226;
+  --ink: #2a3170;
+  --ink-foreground: #ffffff;
+  --ai: #93a3ff;
+  --ai-bg: #1d2350;
+  --mango: #f2a31b;
+  --human: #ffc35c;
+  --human-bg: #33270f;
+  --ok: #4fd1a0;
+  --background: #171b35;
+  --foreground: #e8eaf6;
+  --card: #171b35;
+  --card-foreground: #e8eaf6;
+  --popover: #1c2140;
+  --popover-foreground: #e8eaf6;
+  --primary: #e8eaf6;
+  --primary-foreground: #161a33;
+  --secondary: #232948;
+  --secondary-foreground: #e8eaf6;
+  --muted: #232948;
+  --muted-foreground: #9ba1be;
+  --accent: #232948;
+  --accent-foreground: #e8eaf6;
+  --destructive: #ff7a86;
+  --border: #2a3052;
+  --input: #343b62;
+  --ring: #93a3ff;
+  --sidebar: #171b35;
+  --sidebar-foreground: #e8eaf6;
+  --sidebar-primary: #e8eaf6;
+  --sidebar-primary-foreground: #161a33;
+  --sidebar-accent: #232948;
+  --sidebar-accent-foreground: #e8eaf6;
+  --sidebar-border: #2a3052;
+  --sidebar-ring: #93a3ff;
 }
 
 @layer base {
@@ -137,26 +132,101 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-page text-foreground antialiased;
+    font-optical-sizing: auto;
   }
   a {
-    @apply text-brand-yellow hover:text-brand-yellow/80 underline;
+    @apply text-ai underline underline-offset-2 hover:opacity-80;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
 
-@keyframes fade-in-up {
-  0% {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+@property --mix {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 130%;
 }
 
-.animate-fade-in-up {
-  animation: fade-in-up 2s ease-out;
+/* In a layer so Tailwind utilities (absolute, h-*, …) still win over these */
+@layer components {
+  /* Headlines and the wordmark: Funnel Display, light and tightly set; size it per use */
+  .display {
+    font-family: "Funnel Display", "Funnel Sans", system-ui, sans-serif;
+    font-weight: 400;
+    letter-spacing: -0.035em;
+    line-height: 1;
+  }
+
+  /* Case and card ids: even figures in the text face instead of a monospace */
+  .figures {
+    font-variant-numeric: tabular-nums slashed-zero;
+    letter-spacing: 0.02em;
+  }
+
+  /*
+   * The lens band, after Cruz-Diez's Physichromies: cobalt lines (the AI) give way to mango
+   * lines (a person). --mix sets where the hand-over happens along --dir: 130% is all cobalt,
+   * -30% all mango, 50% interleaved.
+   */
+  .band {
+    --dir: 90deg;
+    --pitch: 6px;
+    position: relative;
+    isolation: isolate;
+    transition: --mix 1.4s cubic-bezier(0.6, 0, 0.2, 1);
+  }
+  .band::before,
+  .band::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    z-index: -1;
+  }
+  .band::before {
+    background: repeating-linear-gradient(90deg, var(--ai) 0 2px, transparent 2px var(--pitch));
+    mask: linear-gradient(var(--dir), #000 calc(var(--mix) - 35%), transparent calc(var(--mix) + 35%));
+  }
+  .band::after {
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0 calc(var(--pitch) / 2),
+      var(--mango) calc(var(--pitch) / 2) calc(var(--pitch) / 2 + 2px),
+      transparent calc(var(--pitch) / 2 + 2px) var(--pitch)
+    );
+    mask: linear-gradient(var(--dir), transparent calc(var(--mix) - 35%), #000 calc(var(--mix) + 35%));
+  }
+  .band[data-phase="ai"] {
+    --mix: 130%;
+  }
+  .band[data-phase="connecting"] {
+    --mix: 50%;
+  }
+  .band[data-phase="joined"] {
+    --mix: -30%;
+  }
+
+  /* The hand-off ticket: a branch turn ticket with two notches and a tear line at --perf */
+  .ticket {
+    --perf: 3.25rem;
+    --notch: 9px;
+    position: relative;
+    mask:
+      radial-gradient(circle var(--notch) at 0 var(--perf), #0000 98%, #000) left / 51% 100% no-repeat,
+      radial-gradient(circle var(--notch) at 100% var(--perf), #0000 98%, #000) right / 51% 100% no-repeat;
+  }
+  .ticket::after {
+    content: "";
+    position: absolute;
+    left: calc(var(--notch) + 4px);
+    right: calc(var(--notch) + 4px);
+    top: var(--perf);
+    border-top: 2px dashed currentColor;
+    opacity: 0.25;
+  }
 }
 
 /* Hand-off split (spec §6): the ticket morphs into the desk's case card */
@@ -165,9 +235,42 @@
   animation-timing-function: ease-out;
 }
 
+/* Typing dots in the agent's line: a wave that hops and brightens each dot in turn */
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes typing-dot-fade {
+  0%, 60%, 100% {
+    opacity: 0.35;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.animate-typing-dot {
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* cross-fade only: the ticket doesn't travel */
   ::view-transition-group(handoff-ticket) {
     animation: none;
+  }
+  /* the dots pulse in place instead of hopping */
+  .animate-typing-dot {
+    animation-name: typing-dot-fade;
+  }
+  /* the band changes owner at once */
+  .band {
+    transition: none;
   }
 }

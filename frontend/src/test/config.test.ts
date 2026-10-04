@@ -171,9 +171,9 @@ describe("Configuration Verification Tests", () => {
     it("should have correct title", () => {
       const indexHtml = readFileSync(resolve(__dirname, "../../index.html"), "utf-8")
       expect(indexHtml).toContain("<title>LedgerLens</title>")
-      // Google Fonts names the family "Geist"; "Geist Sans" doesn't exist there
-      expect(indexHtml).toContain("family=Geist:wght@")
-      expect(indexHtml).not.toContain("Geist+Sans")
+      // Funnel Display sets headlines and the wordmark, Funnel Sans the rest
+      expect(indexHtml).toContain("family=Funnel+Display:wght@")
+      expect(indexHtml).toContain("family=Funnel+Sans:wght@")
     })
 
     it("should have meta description", () => {

@@ -5,6 +5,7 @@ import { useEffect, useState, PropsWithChildren } from "react"
 import { AuthProvider as OidcAuthProvider } from "react-oidc-context"
 import { WebStorageStateStore } from "oidc-client-ts"
 import { AutoSignin } from "./AutoSignin"
+import { Splash } from "./SignInScreen"
 
 interface CognitoAuthConfig {
   authority?: string
@@ -40,11 +41,7 @@ const AuthProvider = ({ children }: PropsWithChildren) => {
   }, [])
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen text-xl">
-        Loading authentication configuration...
-      </div>
-    )
+    return <Splash />
   }
 
   if (!authConfig) {

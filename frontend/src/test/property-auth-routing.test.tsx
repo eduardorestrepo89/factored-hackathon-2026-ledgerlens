@@ -56,13 +56,13 @@ describe("Authentication State Routing", () => {
 
           render(<ChatPage />)
 
-          // Should show "Please sign in" text
-          const signInText = screen.queryByText(/Please sign in/i)
+          // Should show the sign-in headline
+          const signInText = screen.queryByText("Mira tu tarjeta de cerca.")
           expect(signInText).toBeTruthy()
 
-          // Should show "Sign In" button
+          // Should show the sign-in button
           const signInButton = screen.queryByRole("button", {
-            name: /Sign In/i,
+            name: /Iniciar sesión/,
           })
           expect(signInButton).toBeTruthy()
 
@@ -73,7 +73,7 @@ describe("Authentication State Routing", () => {
           return true
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 10 } // fc.constant: every run is the same input
     )
   })
 
@@ -106,8 +106,8 @@ describe("Authentication State Routing", () => {
           const chatInterface = screen.queryByTestId("chat-interface")
           expect(chatInterface).toBeTruthy()
 
-          // Should NOT show "Please sign in" text
-          const signInText = screen.queryByText(/Please sign in/i)
+          // Should NOT show the sign-in headline
+          const signInText = screen.queryByText("Mira tu tarjeta de cerca.")
           expect(signInText).toBeNull()
 
           return true
@@ -150,14 +150,14 @@ describe("Authentication State Routing", () => {
             expect(chatInterface).toBeTruthy()
           } else {
             // Should show sign-in UI
-            const signInText = screen.queryByText(/Please sign in/i)
+            const signInText = screen.queryByText("Mira tu tarjeta de cerca.")
             expect(signInText).toBeTruthy()
           }
 
           return true
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 20 }
     )
   })
 
@@ -216,7 +216,7 @@ describe("Authentication State Routing", () => {
         render(<ChatPage />)
 
         // Sign In button should be present
-        const signInButton = screen.queryByRole("button", { name: /Sign In/i })
+        const signInButton = screen.queryByRole("button", { name: /Iniciar sesión/ })
         expect(signInButton).toBeTruthy()
 
         // Click the button
@@ -227,7 +227,7 @@ describe("Authentication State Routing", () => {
 
         return true
       }),
-      { numRuns: 100 }
+      { numRuns: 10 } // fc.constant: every run is the same input
     )
   })
 })

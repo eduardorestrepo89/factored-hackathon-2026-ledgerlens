@@ -59,7 +59,7 @@ describe("Component Integration Tests", () => {
         resolve(__dirname, "../components/auth/AuthProvider.tsx"),
         "utf-8"
       )
-      expect(authProviderContent).toContain("Loading authentication configuration")
+      expect(authProviderContent).toContain("<Splash />")
     })
 
     it("should handle auth config loading errors", () => {
@@ -90,8 +90,7 @@ describe("Component Integration Tests", () => {
     it("should render sign-in UI for unauthenticated users", () => {
       const chatPageContent = readFileSync(resolve(__dirname, "../routes/ChatPage.tsx"), "utf-8")
       expect(chatPageContent).toContain("if (!isAuthenticated)")
-      expect(chatPageContent).toContain("Please sign in")
-      expect(chatPageContent).toContain("Sign In")
+      expect(chatPageContent).toContain("<SignInScreen onSignIn={() => signIn()} />")
     })
 
     it("should render ChatInterface for authenticated users", () => {

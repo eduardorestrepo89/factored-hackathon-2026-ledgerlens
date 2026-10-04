@@ -1,28 +1,37 @@
 "use client"
 
 import { useState } from "react"
-import { Sparkles, ThumbsDown, ThumbsUp, User } from "lucide-react"
+import { ThumbsDown, ThumbsUp } from "lucide-react"
 import { Message } from "./types"
 import { FeedbackDialog } from "./FeedbackDialog"
 import { getToolRenderer } from "@/hooks/useToolRenderer"
 import { MarkdownRenderer } from "./MarkdownRenderer"
+import { LensMark } from "./ChatHeader"
+import { ConfirmCard } from "./ConfirmCard"
+import { useI18n } from "@/lib/i18n"
 
 interface ChatMessageProps {
   message: Message
   sessionId: string
   onFeedbackSubmit: (feedbackType: "positive" | "negative", comment: string) => Promise<void>
   hideFeedback?: boolean
+  typing?: boolean
 }
 
-const TAG = "flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[.06em]"
-const BUBBLE = "rounded-2xl rounded-tl-sm px-3 py-2"
+const TAG = "px-1 text-sm font-semibold"
+const BUBBLE = "rounded-[20px] rounded-tl-md px-4 py-2.5"
 
 export function ChatMessage({
   message,
   sessionId: _sessionId,
   onFeedbackSubmit,
   hideFeedback = false,
+  typing = false,
 }: ChatMessageProps) {
+  const { t } = useI18n()
+  // Dots while the agent hasn't started writing, or is thinking after a tool call
+  const segments = message.segments ?? []
+  const showDots = typing && segments[segments.length - 1]?.type !== "text"
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [selectedFeedbackType, setSelectedFeedbackType] = useState<"positive" | "negative">(
     "positive"
@@ -51,9 +60,18 @@ export function ChatMessage({
     if (message.segments && message.segments.length > 0) {
       return message.segments.map((seg, i) => {
         if (seg.type === "text") {
+          // DeepSeek writes whitespace before a tool call (the agent strips its tool marker)
+          if (!seg.content.trim()) return null
           return (
             <div key={i} className={`${BUBBLE} bg-ai-bg`}>
               <MarkdownRenderer content={seg.content} />
+            </div>
+          )
+        }
+        if (seg.type === "confirm") {
+          return (
+            <div key={seg.confirm.id} className="my-1">
+              <ConfirmCard confirm={seg.confirm} />
             </div>
           )
         }
@@ -72,7 +90,7 @@ export function ChatMessage({
       })
     }
     // Fallback: just render content as markdown
-    return message.content ? (
+    return message.content.trim() ? (
       <div className={`${BUBBLE} bg-ai-bg`}>
         <MarkdownRenderer content={message.content} />
       </div>
@@ -81,68 +99,77 @@ export function ChatMessage({
 
   const bubbleClass =
     message.role === "user"
-      ? "rounded-2xl rounded-br-sm bg-brand-dark p-3 text-white whitespace-pre-wrap"
+      ? "rounded-[20px] rounded-br-md bg-ink px-4 py-2.5 text-ink-foreground whitespace-pre-wrap"
       : message.role === "human"
         ? `${BUBBLE} bg-human-bg whitespace-pre-wrap`
-        : "flex flex-col gap-2 text-gray-800"
+        : "flex flex-col gap-2 text-foreground"
 
   return (
-    <div className={`flex flex-col gap-1 ${message.role === "user" ? "items-end" : "items-start"}`}>
-      {message.role === "assistant" && (
-        <span className={`${TAG} text-ai`}>
-          <Sparkles className="h-3 w-3" />
-          Asistente IA
-        </span>
-      )}
+    <div className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}>
+      {message.role === "assistant" && <LensMark phase="ai" className="mt-6 h-8 w-8" />}
       {message.role === "human" && (
-        <span className={`${TAG} text-human`}>
-          <User className="h-3 w-3" />
-          Laura · Persona
+        <span aria-hidden className="mt-6 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-mango font-bold text-[#161a33]">
+          L
         </span>
       )}
-      <div className={`max-w-[85%] break-words ${bubbleClass}`}>
-        {message.role === "assistant" ? renderAssistantContent() : message.content}
+      <div className={`flex min-w-0 max-w-[85%] flex-col gap-1 ${message.role === "user" ? "items-end" : "items-start"}`}>
+        {message.role === "assistant" && <span className={`${TAG} text-ai`}>LedgerLens</span>}
+        {message.role === "human" && <span className={`${TAG} text-human`}>{t("lauraTag")}</span>}
+        <div className={`break-words text-[15px] leading-relaxed ${bubbleClass}`}>
+          {message.role === "assistant" ? renderAssistantContent() : message.content}
+          {showDots && (
+            <div role="status" aria-label={t("typing")} className={`${BUBBLE} flex w-fit gap-1 bg-ai-bg py-3.5`}>
+              {[0, 150, 300].map(delay => (
+                <span
+                  key={delay}
+                  className="animate-typing-dot h-2 w-2 rounded-full bg-ai"
+                  style={{ animationDelay: `${delay}ms` }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Timestamp and Feedback buttons for assistant messages */}
+        <div className="flex items-center gap-2 px-1">
+          <div className="figures text-xs text-muted-foreground">{formatTime(message.timestamp)}</div>
+
+          {/* Show feedback buttons only for assistant messages with content */}
+          {!hideFeedback && message.role === "assistant" && message.content && (
+            <div className="flex items-center gap-1 ml-2">
+              <button
+                onClick={() => handleFeedbackClick("positive")}
+                disabled={feedbackSubmitted}
+                className="p-1 text-muted-foreground hover:text-ai hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={t("positiveFeedback")}
+                title={t("goodResponse")}
+              >
+                <ThumbsUp size={14} />
+              </button>
+              <button
+                onClick={() => handleFeedbackClick("negative")}
+                disabled={feedbackSubmitted}
+                className="p-1 text-muted-foreground hover:text-destructive hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={t("negativeFeedback")}
+                title={t("badResponse")}
+              >
+                <ThumbsDown size={14} />
+              </button>
+              {feedbackSubmitted && (
+                <span className="text-xs text-muted-foreground ml-1">{t("feedbackThanks")}</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Feedback Dialog */}
+        <FeedbackDialog
+          isOpen={isDialogOpen}
+          onClose={() => setIsDialogOpen(false)}
+          onSubmit={handleFeedbackSubmit}
+          feedbackType={selectedFeedbackType}
+        />
       </div>
-
-      {/* Timestamp and Feedback buttons for assistant messages */}
-      <div className="flex items-center gap-2 px-1">
-        <div className="text-xs text-gray-500">{formatTime(message.timestamp)}</div>
-
-        {/* Show feedback buttons only for assistant messages with content */}
-        {!hideFeedback && message.role === "assistant" && message.content && (
-          <div className="flex items-center gap-1 ml-2">
-            <button
-              onClick={() => handleFeedbackClick("positive")}
-              disabled={feedbackSubmitted}
-              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Positive feedback"
-              title="Good response"
-            >
-              <ThumbsUp size={14} />
-            </button>
-            <button
-              onClick={() => handleFeedbackClick("negative")}
-              disabled={feedbackSubmitted}
-              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Negative feedback"
-              title="Bad response"
-            >
-              <ThumbsDown size={14} />
-            </button>
-            {feedbackSubmitted && (
-              <span className="text-xs text-gray-500 ml-1">Thanks for your feedback!</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Feedback Dialog */}
-      <FeedbackDialog
-        isOpen={isDialogOpen}
-        onClose={() => setIsDialogOpen(false)}
-        onSubmit={handleFeedbackSubmit}
-        feedbackType={selectedFeedbackType}
-      />
     </div>
   )
 }

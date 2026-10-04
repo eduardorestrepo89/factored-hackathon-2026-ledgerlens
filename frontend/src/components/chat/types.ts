@@ -12,9 +12,20 @@ export interface ToolCall {
   status: ToolCallStatus
 }
 
+/** A tool call the agent paused until the customer answers Yes or No (agent tools/confirmation_hook.py). */
+export interface Confirmation {
+  id: string
+  tool: string
+  toolUseId: string
+  details: Record<string, unknown>
+  /** How it was answered: a button, or "typed" when the customer wrote instead. */
+  answer?: "yes" | "no" | "typed"
+}
+
 export type MessageSegment =
   | { type: "text"; content: string }
   | { type: "tool"; toolCall: ToolCall }
+  | { type: "confirm"; confirm: Confirmation }
 
 export interface Message {
   role: MessageRole

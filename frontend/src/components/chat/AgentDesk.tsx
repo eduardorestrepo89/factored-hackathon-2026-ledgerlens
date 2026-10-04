@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react"
-import { Check, Send, Ticket, User } from "lucide-react"
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react"
+import { Check, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { type HandOff, type Phase, queueFor, reasonLabel, suggestedReplies } from "@/lib/handoff"
+import { useI18n } from "@/lib/i18n"
 import { ChatMessages } from "./ChatMessages"
 import { HAND_OFF_TRANSITION, IdChips, PriorityPill } from "./HandOffTicket"
 import type { Message } from "./types"
@@ -16,12 +17,16 @@ interface AgentDeskProps {
   onSend: (text: string) => void
 }
 
-const LABEL = "text-[11px] font-semibold uppercase tracking-[.08em] text-muted-foreground"
+const LABEL = "text-xs font-medium text-muted-foreground"
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 
 /** The human agent's side of the split: the case, the customer's live thread and a composer. */
 export function AgentDesk({ handOff, phase, messages, customerName, sessionId, onSend }: AgentDeskProps) {
+  const { lang, t } = useI18n()
   const [draft, setDraft] = useState("")
+  // Focus the composer without scrolling the desk: the case card's top must stay in view
+  const composer = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => composer.current?.focus({ preventScroll: true }), [])
   const joined = phase === "joined"
   const sent = new Set(messages.filter(m => m.role === "human").map(m => m.content))
 
@@ -33,122 +38,131 @@ export function AgentDesk({ handOff, phase, messages, customerName, sessionId, o
   }
 
   return (
-    <section aria-label="Escritorio del agente" className="flex min-h-0 flex-col gap-2">
-      <h2 className={LABEL}>Escritorio del agente · Laura</h2>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-white">
-        <header className="flex items-center justify-between gap-3 border-b bg-page px-4 py-3">
+    <section aria-label={t("desk")} className="flex flex-col gap-2 min-[1100px]:min-h-0">
+      <h2 className="px-2 text-sm font-medium text-muted-foreground">{t("deskTitle")}</h2>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border bg-card">
+        <header className="flex items-center justify-between gap-3 border-b px-5 py-3">
           <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-human text-white">
-              <User className="h-4 w-4" />
+            <span aria-hidden className="grid h-10 w-10 place-items-center rounded-full bg-mango text-lg font-bold text-[#161a33]">
+              L
             </span>
             <div className="leading-tight">
               <p className="font-semibold">Laura Restrepo</p>
-              <p className="text-xs text-muted-foreground">Fraudes y servicio · Mesa de personas</p>
+              <p className="text-sm text-muted-foreground">{t("lauraRole")}</p>
             </div>
           </div>
           <span
-            className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[.06em] ${
-              joined ? "border-ai text-ai" : "border-human text-human"
+            className={`flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${
+              joined ? "bg-ok/10 text-ok" : "bg-human-bg text-human"
             }`}
           >
-            {joined ? "En conversación" : "Conectando…"}
+            <span className={`h-2 w-2 rounded-full ${joined ? "bg-ok" : "animate-pulse bg-mango"}`} />
+            {joined ? t("inConversation") : t("connectingDesk")}
           </span>
         </header>
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+        <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
           <article
-            style={HAND_OFF_TRANSITION}
-            className="flex flex-col gap-3 self-start rounded-xl border border-human bg-human-bg/40 p-4"
+            style={{ ...HAND_OFF_TRANSITION, "--perf": "4rem" } as CSSProperties}
+            className="ticket flex flex-col self-start rounded-3xl bg-human-bg text-human"
           >
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2 font-mono text-sm font-semibold text-human">
-                <Ticket className="h-4 w-4" />
-                {handOff.hand_off_id}
+            <div className="flex h-16 items-center justify-between gap-3 px-5">
+              <span className="flex items-center gap-2">
+                <span className="display whitespace-nowrap text-2xl">{handOff.hand_off_id}</span>
                 {!joined && (
-                  <span className="rounded bg-human px-1.5 py-0.5 font-sans text-[10px] font-bold uppercase text-white">
-                    Nuevo
-                  </span>
+                  <span className="rounded-full bg-mango px-2 py-0.5 text-xs font-bold text-[#161a33]">{t("newBadge")}</span>
                 )}
               </span>
               <PriorityPill priority={handOff.priority} />
             </div>
-            <div>
-              <h3 className="text-xl font-semibold">{customerName || handOff.customer_id}</h3>
-              <p className="text-sm text-muted-foreground">
-                Cola: {queueFor(handOff.reason)} · {reasonLabel(handOff.reason)}
-              </p>
-            </div>
-            <dl className="grid grid-cols-2 gap-3 text-sm">
+            <div className="flex flex-col gap-4 px-5 pb-5 pt-5 text-foreground">
               <div>
-                <dt className={LABEL}>Cliente</dt>
-                <dd className="font-mono">{handOff.customer_id}</dd>
+                <h3 className="display text-4xl">{customerName || handOff.customer_id}</h3>
+                <p className="mt-1.5 text-sm text-muted-foreground">
+                  {t("queueLine", { queue: queueFor(handOff.reason, lang), reason: reasonLabel(handOff.reason, lang) })}
+                </p>
               </div>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className={LABEL}>{t("customer")}</dt>
+                  <dd className="figures mt-0.5 font-medium">{handOff.customer_id}</dd>
+                </div>
+                <div>
+                  <dt className={LABEL}>{t("queuedSince")}</dt>
+                  <dd className="figures mt-0.5 font-medium">{time(handOff.at)}</dd>
+                </div>
+              </dl>
               <div>
-                <dt className={LABEL}>En cola desde</dt>
-                <dd className="font-mono">{time(handOff.at)}</dd>
+                <h4 className={LABEL}>{t("assistantSummary")}</h4>
+                <p className="mt-1 text-[15px] leading-relaxed">{handOff.summary}</p>
               </div>
-            </dl>
-            <div>
-              <h4 className={LABEL}>Resumen del asistente</h4>
-              <p className="mt-1 text-[15px] leading-relaxed">{handOff.summary}</p>
-            </div>
-            {handOff.related_ids.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <h4 className={LABEL}>IDs relacionados</h4>
-                <IdChips ids={handOff.related_ids} />
+              {handOff.related_ids.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <h4 className={LABEL}>{t("relatedIds")}</h4>
+                  <IdChips ids={handOff.related_ids} />
+                </div>
+              )}
+              <div>
+                <h4 className={LABEL}>{t("alreadyTold")}</h4>
+                <blockquote className="mt-1.5 rounded-2xl bg-card/80 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+                  {handOff.goodbye}
+                </blockquote>
               </div>
-            )}
-            <div>
-              <h4 className={LABEL}>Lo que ya se le dijo</h4>
-              <blockquote className="mt-1 border-l-2 border-human pl-3 text-sm text-muted-foreground">
-                {handOff.goodbye}
-              </blockquote>
             </div>
           </article>
 
           <div className="flex min-h-0 flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h4 className={LABEL}>Conversación del cliente</h4>
-              <span className="text-xs text-muted-foreground">Reflejada en vivo</span>
+            <div className="flex items-center justify-between px-1">
+              <h4 className={LABEL}>{t("customerThread")}</h4>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
+                {t("liveMirror")}
+              </span>
             </div>
-            <div className="min-h-[240px] flex-1 overflow-hidden rounded-xl border bg-page/60">
+            <div className="min-h-[240px] flex-1 overflow-hidden rounded-3xl bg-page">
               <ChatMessages messages={messages} sessionId={sessionId} onFeedbackSubmit={async () => {}} hideFeedback />
             </div>
 
-            <h4 className={LABEL}>Respuestas sugeridas</h4>
-            {suggestedReplies(handOff, customerName).map(reply =>
+            <h4 className={`${LABEL} px-1`}>{t("suggestedReplies")}</h4>
+            {suggestedReplies(handOff, customerName, lang).map(reply =>
               sent.has(reply) ? (
-                <p key={reply} className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-                  <Check className="mt-0.5 h-4 w-4 flex-none text-ai" />
+                <p key={reply} className="flex items-start gap-2 rounded-2xl bg-page px-4 py-3 text-sm text-muted-foreground">
+                  <Check className="mt-0.5 h-4 w-4 flex-none text-ok" />
                   {reply}
                 </p>
               ) : (
-                <div key={reply} className="flex items-start justify-between gap-3 rounded-lg border border-dashed border-human/60 p-3 text-sm">
+                <div key={reply} className="flex items-start justify-between gap-3 rounded-2xl border border-mango/60 px-4 py-3 text-sm">
                   <span>{reply}</span>
-                  <Button type="button" size="sm" variant="outline" className="border-human text-human" onClick={() => setDraft(reply)}>
-                    Usar
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full border-mango text-human hover:bg-human-bg hover:text-human"
+                    onClick={() => setDraft(reply)}
+                  >
+                    {t("use")}
                   </Button>
                 </div>
               )
             )}
 
-            <form onSubmit={send} className="flex flex-col gap-1">
-              <div className="flex items-end gap-2 rounded-xl border border-human/70 bg-white p-2 focus-within:ring-2 focus-within:ring-human/40">
+            <form onSubmit={send} className="flex flex-col gap-1.5">
+              <div className="flex items-end gap-2 rounded-[22px] border bg-card p-2 pl-4 focus-within:border-mango focus-within:ring-4 focus-within:ring-mango/20">
                 <Textarea
+                  ref={composer}
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
-                  placeholder="Escribe como Laura…"
-                  aria-label="Mensaje de Laura"
+                  placeholder={t("writeAsLaura")}
+                  aria-label={t("lauraMessage")}
                   rows={2}
-                  className="min-h-[44px] resize-none border-0 shadow-none focus-visible:ring-0"
-                  autoFocus
+                  className="min-h-[44px] resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent"
                 />
-                <Button type="submit" disabled={!draft.trim()} className="bg-human hover:bg-human/90">
-                  <Send className="mr-1 h-4 w-4" />
-                  Enviar
+                <Button type="submit" disabled={!draft.trim()} className="rounded-full bg-mango text-[#161a33] hover:bg-mango/90">
+                  <Send className="h-4 w-4" />
+                  {t("send")}
                 </Button>
               </div>
-              {!joined && <p className="text-xs text-muted-foreground">Tu primer mensaje le avisa al cliente que te uniste.</p>}
+              {!joined && <p className="px-2 text-xs text-muted-foreground">{t("firstMessageHint")}</p>}
             </form>
           </div>
         </div>
