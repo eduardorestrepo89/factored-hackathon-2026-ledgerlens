@@ -48,3 +48,23 @@ describe("ChatMessages typing", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 })
+
+describe("ChatMessages tool calls", () => {
+  it("shows no empty bubble for the whitespace a model writes before a tool call", () => {
+    // DeepSeek on Bedrock writes "\n\n<｜DSML｜function_calls" before a tool; the agent strips the marker
+    const reply: Message = {
+      role: "assistant",
+      content: "\n\nTienes dos tarjetas.",
+      timestamp: T,
+      segments: [
+        { type: "text", content: "\n\n" },
+        { type: "tool", toolCall: { toolUseId: "t1", name: "gw___list_credit_cards", input: "{}", status: "complete" } },
+        { type: "text", content: "Tienes dos tarjetas." },
+      ],
+    }
+    const { container } = render(<ChatMessages messages={[say("hola"), reply]} sessionId="s" onFeedbackSubmit={async () => {}} />)
+
+    const bubbles = [...container.querySelectorAll(".bg-ai-bg")].filter(el => el.closest("[role=status]") === null)
+    expect(bubbles.map(b => b.textContent)).toEqual(["Tienes dos tarjetas."])
+  })
+})

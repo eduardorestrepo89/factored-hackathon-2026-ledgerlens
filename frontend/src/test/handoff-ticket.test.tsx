@@ -18,7 +18,7 @@ describe("HandOffTicket", () => {
     render(<HandOffTicket name={NAME} args="{}" status="complete" result={RESULT} tagged />)
 
     expect(screen.getByText("Caso HO-7Q3KX2MA")).toBeInTheDocument()
-    expect(screen.getByText("ALTA")).toBeInTheDocument()
+    expect(screen.getByText("Prioridad alta")).toBeInTheDocument()
     expect(screen.getByText("Cargo no reconocido")).toBeInTheDocument()
     expect(screen.queryByText(/Fraude confirmado/)).toBeNull()
     expect(screen.getByText("TX-89")).toBeInTheDocument()
@@ -35,6 +35,6 @@ describe("HandOffTicket", () => {
     render(<HandOffTicket name={NAME} args="{}" status="complete" result='{"error":"down"}' tagged={false} />)
 
     expect(screen.queryByText(/Caso/)).toBeNull()
-    expect(screen.getByText(NAME)).toBeInTheDocument()
+    expect(screen.getByText("human_agent_hand_off")).toBeInTheDocument()
   })
 })

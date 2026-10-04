@@ -40,7 +40,7 @@ export function ChatMessages({
   return (
     <div
       ref={containerRef}
-      className={`h-full p-4 space-y-4 w-full ${
+      className={`h-full w-full space-y-5 p-4 sm:p-6 ${
         messages.length > 0 ? "overflow-y-auto" : "overflow-hidden"
       }`}
     >
@@ -52,7 +52,8 @@ export function ChatMessages({
         messages.map((message, index) => (
           <Fragment key={index}>
             {index === firstHuman && (
-              <p className="text-center text-[11px] font-semibold uppercase tracking-[.06em] text-muted-foreground">
+              <p className="mx-auto flex w-fit items-center gap-2 rounded-full bg-human-bg px-3 py-1 text-xs font-medium text-human">
+                <span className="h-1.5 w-1.5 rounded-full bg-mango" />
                 {t("lauraJoined", { time: time(message.timestamp) })}
               </p>
             )}

@@ -171,9 +171,8 @@ describe("Configuration Verification Tests", () => {
     it("should have correct title", () => {
       const indexHtml = readFileSync(resolve(__dirname, "../../index.html"), "utf-8")
       expect(indexHtml).toContain("<title>LedgerLens</title>")
-      // Google Fonts names the family "Geist"; "Geist Sans" doesn't exist there
-      expect(indexHtml).toContain("family=Geist:wght@")
-      expect(indexHtml).not.toContain("Geist+Sans")
+      // Bricolage needs its width axis for the condensed headlines
+      expect(indexHtml).toContain("family=Bricolage+Grotesque:opsz,wdth,wght@")
     })
 
     it("should have meta description", () => {

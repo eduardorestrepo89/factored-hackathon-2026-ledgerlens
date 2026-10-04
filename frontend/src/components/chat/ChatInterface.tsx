@@ -16,6 +16,7 @@ import { useDefaultTool, useToolRenderer } from "@/hooks/useToolRenderer"
 import { findHandOff, HAND_OFF_DELAY_MS, HAND_OFF_TOOL, phaseOf, queueFor, type HandOff } from "@/lib/handoff"
 import { useI18n } from "@/lib/i18n"
 import { HandOffTicket } from "./HandOffTicket"
+import { LensMark } from "./ChatHeader"
 import { ToolCallDisplay } from "./ToolCallDisplay"
 
 export default function ChatInterface() {
@@ -301,34 +302,38 @@ export default function ChatInterface() {
       <div className="flex-none">
         <ChatHeader onNewChat={startNewChat} canStartNewChat={hasAssistantMessages} phase={phase} />
         {error && (
-          <div className="bg-destructive/10 border-l-4 border-destructive p-4 mx-4 mt-2">
-            <p className="text-sm text-destructive">{error}</p>
+          <div role="alert" className="mx-4 mt-3 rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {error}
           </div>
         )}
       </div>
 
       {handOff ? (
         // Hand-off split: the customer's phone and the human agent's desk
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 min-[1100px]:grid-cols-[400px_minmax(0,1fr)] min-[1100px]:overflow-hidden">
-          <section aria-label="Cliente" className="flex min-h-0 flex-col gap-2">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[.08em] text-muted-foreground">
-              {t("customerApp")}
-            </h2>
-            <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden rounded-[28px] border bg-card shadow-[0_18px_40px_-28px_hsl(200_40%_10%/.45)]">
-              <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
-                <b>LATAM Bank</b>
-                <span className="rounded-full bg-human-bg px-2.5 py-0.5 text-xs font-medium text-human">
-                  {phase === "joined" ? t("lauraTag") : t("inQueue", { queue: queueFor(handOff.reason, lang) })}
-                </span>
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-y-auto p-4 sm:p-5 min-[1100px]:grid-cols-[400px_minmax(0,1fr)] min-[1100px]:overflow-hidden">
+          <section aria-label="Cliente" className="flex flex-col gap-2 min-[1100px]:min-h-0">
+            <h2 className="px-2 text-sm font-medium text-muted-foreground">{t("customerApp")}</h2>
+            {/* The phone: an ink bezel around the customer's own app */}
+            <div className="flex min-h-[560px] flex-1 flex-col rounded-[40px] bg-ink p-2 shadow-[0_30px_60px_-30px_rgb(22_26_51/.6)]">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] bg-page">
+                <div className="flex items-center justify-between gap-2 bg-card px-4 py-3">
+                  <span className="flex items-center gap-2 font-semibold">
+                    <LensMark className="h-6 w-6" phase={phase} />
+                    LATAM Bank
+                  </span>
+                  <span className="rounded-full bg-human-bg px-2.5 py-0.5 text-xs font-medium text-human">
+                    {phase === "joined" ? t("lauraTag") : t("inQueue", { queue: queueFor(handOff.reason, lang) })}
+                  </span>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <ChatMessages
+                    messages={messages}
+                    sessionId={sessionId}
+                    onFeedbackSubmit={handleFeedbackSubmit}
+                  />
+                </div>
+                <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} className="p-2 sm:p-2" />
               </div>
-              <div className="min-h-0 flex-1">
-                <ChatMessages
-                  messages={messages}
-                  sessionId={sessionId}
-                  onFeedbackSubmit={handleFeedbackSubmit}
-                />
-              </div>
-              <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} />
             </div>
           </section>
           <AgentDesk
@@ -341,31 +346,38 @@ export default function ChatInterface() {
           />
         </div>
       ) : isInitialState ? (
-        // Initial state - input in the middle
-        <>
-          <div className="grow" />
-
-          <div className="text-center mb-6">
-            <h2 className="text-2xl font-bold">{t("greeting")}</h2>
-            <p className="text-muted-foreground mt-2">{t("greetingBody")}</p>
-          </div>
-
-          <div className="px-4 mb-16 max-w-4xl mx-auto w-full">
+        // Initial state: the greeting and the composer, with three ways to start
+        <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto px-4 sm:px-6">
+          <div className="mx-auto w-full max-w-2xl py-10">
+            <h2 className="display text-6xl sm:text-8xl">{t("greeting")}</h2>
+            <p className="mt-5 max-w-[48ch] text-lg text-muted-foreground">{t("greetingBody")}</p>
             <ChatInput
               input={input}
               setInput={setInput}
               handleSubmit={handleSubmit}
               isLoading={isLoading}
+              className="mt-8 p-0 sm:p-0"
             />
+            <div role="group" aria-label={t("starters")} className="mt-4 flex flex-wrap gap-2">
+              {(["starter.1", "starter.2", "starter.3"] as const).map(key => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => sendMessage(t(key))}
+                  disabled={!client || isLoading}
+                  className="rounded-full border bg-card px-4 py-2 text-sm transition-colors hover:border-ai hover:text-ai disabled:opacity-50"
+                >
+                  {t(key)}
+                </button>
+              ))}
+            </div>
           </div>
-
-          <div className="grow" />
-        </>
+        </div>
       ) : (
         // Chat in progress - normal layout
         <>
           <div className="grow overflow-hidden">
-            <div className="max-w-4xl mx-auto w-full h-full">
+            <div className="max-w-3xl mx-auto w-full h-full">
               <ChatMessages
                 messages={messages}
                 sessionId={sessionId}
@@ -376,7 +388,7 @@ export default function ChatInterface() {
           </div>
 
           <div className="flex-none">
-            <div className="max-w-4xl mx-auto w-full">
+            <div className="max-w-3xl mx-auto w-full">
               <ChatInput
                 input={input}
                 setInput={setInput}

@@ -22,56 +22,53 @@ never repeats anything.**
   reply.
 - Judge: see that the hand-off is real (driven by the live tool call) and that it is humane.
 
-## Brand and color
-Fonts: **Geist** (UI) and **Geist Mono** (ids, amounts, timestamps, codes). No other families.
+## Brand and color (v2, 2026-10-04: "the lens")
+Concept: the **lens band**, after Cruz-Diez's Physichromies: thin vertical cobalt lines (the AI)
+interleaved with mango lines (a person). The band is the brand mark (`LensMark`), the strip under
+the header (it changes owner with the conversation: `data-phase` ai → connecting → joined) and the
+sign-in slab, where a pointer-driven lens magnifies the lines. That band is the one bold element;
+everything around it stays quiet.
 
-Brand tokens (from `frontend/src/styles/globals.css`):
-| Token | Value | Use |
-|---|---|---|
-| brand-dark | hsl(197 37% 24%) | primary actions, customer bubbles, header |
-| brand-teal | hsl(173 58% 39%) | AI assistant tier |
-| brand-lime | hsl(43 74% 66%) | highlights, router/system accents (sparingly) |
-| brand-yellow | hsl(27 87% 67%) | warnings |
-| brand-orange | hsl(12 76% 61%) | **human tier**: hand-off ticket, desk accents, human bubbles |
+Font: **Bricolage Grotesque** (Google Fonts, opsz/wdth/wght axes) for everything. Headlines use
+`.display` (75% width, weight 760, tight). Ids and amounts use `.figures` (tabular, slashed zero),
+not a monospace. No other families.
 
-Semantic surfaces (light; a dark set mirrors them):
-| Role | Light | Dark |
-|---|---|---|
-| bg | hsl(195 22% 95%) | hsl(200 26% 7%) |
-| surface | #fff | hsl(200 22% 11%) |
-| sunk | hsl(195 22% 92%) | hsl(200 22% 14%) |
-| fg | hsl(200 32% 12%) | hsl(195 20% 92%) |
-| muted | hsl(198 12% 38%) | hsl(195 10% 64%) |
-| line | hsl(195 18% 85%) | hsl(200 16% 22%) |
-| ai / ai-bg | hsl(173 62% 26%) / hsl(173 42% 90%) | hsl(173 55% 62%) / hsl(173 35% 16%) |
-| human / human-bg | hsl(12 68% 42%) / hsl(12 80% 94%) | hsl(14 88% 70%) / hsl(12 35% 18%) |
-| danger | hsl(0 62% 42%) | hsl(0 72% 68%) |
-| ok | hsl(150 52% 28%) | hsl(150 50% 62%) |
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| page | #F4F6FB | #0F1226 | app background (cool white, not cream) |
+| card / background | #FFFFFF | #171B35 | surfaces |
+| foreground / primary | #161A33 | #E8EAF6 | text, primary buttons |
+| ink | #161A33 | #2A3170 | **customer**: bubbles, phone bezel |
+| ai / ai-bg | #2E46E8 / #E9ECFE | #93A3FF / #1D2350 | **AI assistant** |
+| mango | #F2A31B | #F2A31B | **human** fills (avatars, send, band); ink text on it |
+| human / human-bg | #8F5300 / #FDF0D5 | #FFC35C / #33270F | human text / human surfaces |
+| ok | #12805C | #4FD1A0 | joined, done |
+| destructive | #C8323F | #FF7A86 | high priority, errors |
+| border | #DDE1EC | #2A3052 | lines |
 
-Tier color is meaning, not decoration: teal = AI assistant, orange = human, brand-dark = customer.
-Never use purple, pink, neon or gradients across the whole page.
+Tier color is meaning, not decoration: cobalt = AI assistant, mango = human, ink = customer.
+Never purple, pink, neon or whole-page gradients.
 
 ## Shape, spacing, depth
-- Radius: 10 px base (`--radius: 0.625rem`); bubbles 14 px with one 4 px tail corner; phone frame 28 px;
-  pills 999 px.
-- Spacing on a 4 px grid; panels 16 px padding; 16 px gaps between panes.
-- Borders 1 px `line`; shadows are soft and low (`0 18px 40px -28px hsl(200 40% 10% / .45)` on the
-  phone only).
-- Labels: 11 px, 600, uppercase, letter-spacing .08em, `muted`.
-- Numbers: tabular-nums; amounts and ids in Geist Mono.
+- Radius: 12 px base; bubbles 20 px with one 6 px tail corner; composers 22 px; desk 28 px; phone
+  40 px bezel / 32 px screen; buttons and chips are pills.
+- Spacing on a 4 px grid; panels 20 px padding.
+- Shadows only on the phone, the composer and the lens.
+- Labels: sentence case, 12–14 px, 500, `muted`. No all-caps tracked labels, no "A · B" strings.
 
 ## Components
-- **Bubble**: customer right-aligned on brand-dark; AI left on ai-bg with a small "Asistente IA" tag;
-  human left on human-bg with "Laura · Persona" tag.
-- **Tool row** (existing): collapsible row with wrench icon, tool name, spinner or check.
-- **Hand-off ticket** (new, inline in chat): orange-bordered card on human-bg: "Caso HO-7Q3K",
-  priority pill (ALTA in danger outline / Normal), reason ("Fraude confirmado"), related id chips
-  (TX-88, TX-89, C-20931) in mono, status "En cola para una persona".
-- **Case card** (desk header): customer name, product (•••• 4821, bloqueada), verified-by, queue,
-  priority pill, hand-off id, summary paragraph, related-id chips, "Lo que ya se le dijo".
-- **Suggested reply**: dashed-border row with the text and an "Usar" button.
-- **System divider**: centered 11.5 px muted text ("Laura se unió a la conversación · 03:18").
-- Icons: lucide-react only (User, Bot, ShieldCheck, Ticket, ArrowRightLeft, Send, Check, Loader2).
+- **Bubble**: customer right on ink; AI left on ai-bg with a cobalt `LensMark` avatar and a
+  "LedgerLens" tag; human left on human-bg with a mango "L" avatar and "Laura, asesora".
+- **Tool row**: pill with a check or spinner and a plain-language label per tool
+  (`tool.<name>` in i18n, e.g. "Revisando movimientos"); opens to the raw name, input and result.
+- **Hand-off ticket**: a branch turn ticket ("turno"): human-bg, two side notches and a dashed tear
+  line (`.ticket`, `--perf`); stub shows "Caso HO-…" in `.display` and the priority pill; below the
+  tear: reason, id chips, "Enviado a una persona".
+- **Case card** (desk): the same ticket, larger: id + "Nuevo", priority; customer name in
+  `.display`, reason and queue, customer id, queued since, summary, related ids, "Lo que ya se le dijo".
+- **Suggested reply**: mango-outlined row with an "Usar" pill.
+- **System divider**: centered human-bg pill ("Laura se unió a la conversación a las 03:18").
+- Icons: lucide-react only.
 
 ## Motion
 - Native View Transitions API for the layout split (no animation library).
@@ -79,12 +76,12 @@ Never use purple, pink, neon or gradients across the whole page.
 - Beat 2 (after the agent's goodbye finishes streaming + ~600 ms): chat column morphs into the phone
   frame on the left; desk slides in from the right (320 ms); the ticket morphs into the case card
   header (shared `view-transition-name: handoff-ticket`).
-- Beat 3: phone shows "Conectando con una persona…" with a soft pulsing orange dot until the human
-  agent sends the first message, then a "Laura se unió" divider and orange bubbles.
-- Respect `prefers-reduced-motion`: cross-fade only.
+- Beat 3: phone shows "Conectando con una persona…" with a soft pulsing mango dot until the human
+  agent sends the first message, then a "Laura se unió" divider and mango bubbles; the header band turns from cobalt to mango (1.4 s).
+- Respect `prefers-reduced-motion`: cross-fade only; the band changes owner at once.
 
 ## Requirements
 - Copy in Spanish (es-CO) for customer- and agent-facing text.
-- WCAG AA contrast; focus-visible rings in brand-dark/teal.
-- The desk must be readable from the back of a room: case card title 18–20 px, summary 14–15 px.
+- WCAG AA contrast; focus-visible rings in cobalt.
+- The desk must be readable from the back of a room: case card title 36 px display, summary 14–15 px.
 - No promised wait time anywhere ("Don't promise a time").

@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useState, type CSSProperties } from "react"
 import { Button } from "@/components/ui/button"
-import { Check, Moon, Plus, ShieldCheck, Sun } from "lucide-react"
+import { LogOut, Moon, Plus, Sun } from "lucide-react"
 import { useAuth } from "@/hooks/useAuth"
 import type { Phase } from "@/lib/handoff"
 import { LANGS, useI18n, type Lang } from "@/lib/i18n"
@@ -23,34 +23,54 @@ type ChatHeaderProps = {
   phase?: Phase
 }
 
-const STEP = "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.08em]"
+/** The brand mark: a round lens of cobalt and mango lines, the band in miniature. */
+export function LensMark({ className = "h-8 w-8", phase = "connecting" }: { className?: string; phase?: Phase }) {
+  return (
+    <span
+      aria-hidden
+      data-phase={phase}
+      style={{ "--pitch": "4px" } as CSSProperties}
+      className={`band block shrink-0 rounded-full bg-card ring-1 ring-border ${className}`}
+    />
+  )
+}
 
-/** Who owns the conversation: the AI assistant, then the person it handed off to. */
+/** Who owns the conversation, in words; the band under the header shows it in color. */
 function StatusTrack({ phase }: { phase: Phase }) {
   const { t } = useI18n()
   const human = phase !== "ai"
   return (
-    <div className="hidden items-center gap-3 md:flex" aria-live="polite">
-      <span className={`${STEP} text-ai`}>
-        {human ? <Check className="h-3.5 w-3.5" /> : <span className="h-2 w-2 rounded-full bg-ai" />}
-        LedgerLens AI
+    <p className="hidden items-center gap-2 text-sm font-medium md:flex" aria-live="polite">
+      <span
+        className={`h-2 w-2 rounded-full ${human ? "bg-mango" : "bg-ai"} ${phase === "connecting" ? "animate-pulse" : ""}`}
+      />
+      <span className={human ? "text-human" : "text-ai"}>
+        {phase === "ai" ? t("ownerAi") : phase === "connecting" ? t("connectingToPerson") : t("ownerHuman")}
       </span>
-      <span className="h-px w-8 bg-border" />
-      <span className={`${STEP} ${human ? "text-human" : "text-muted-foreground/60"}`}>
-        <span
-          className={`h-2 w-2 rounded-full ${human ? "bg-human" : "bg-muted-foreground/30"} ${
-            phase === "connecting" ? "animate-pulse" : ""
-          }`}
-        />
-        {human ? t("personLaura") : t("person")}
-        {phase === "connecting" && <span className="font-normal normal-case tracking-normal">{t("connecting")}</span>}
-      </span>
-    </div>
+    </p>
+  )
+}
+
+export function LanguageSelect() {
+  const { lang, setLang, t } = useI18n()
+  return (
+    <select
+      value={lang}
+      onChange={e => setLang(e.target.value as Lang)}
+      aria-label={t("language")}
+      className="h-9 cursor-pointer rounded-full border bg-card px-2 text-sm font-medium sm:px-3"
+    >
+      {LANGS.map(l => (
+        <option key={l.code} value={l.code}>
+          {l.label}
+        </option>
+      ))}
+    </select>
   )
 }
 
 /** Flips the `dark` class main.tsx set before the first paint, and remembers the choice. */
-function ThemeToggle() {
+export function ThemeToggle() {
   const { t } = useI18n()
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"))
   const toggle = () => {
@@ -64,7 +84,7 @@ function ThemeToggle() {
   }
   const label = dark ? t("lightMode") : t("darkMode")
   return (
-    <Button variant="outline" size="icon" onClick={toggle} aria-label={label} title={label}>
+    <Button variant="ghost" size="icon" className="shrink-0 rounded-full" onClick={toggle} aria-label={label} title={label}>
       {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </Button>
   )
@@ -72,56 +92,55 @@ function ThemeToggle() {
 
 export function ChatHeader({ title, onNewChat, canStartNewChat, phase = "ai" }: ChatHeaderProps) {
   const { isAuthenticated, signOut } = useAuth()
-  const { lang, setLang, t } = useI18n()
+  const { t } = useI18n()
 
   return (
-    <header className="flex h-14 w-full items-center justify-between gap-4 border-b bg-card px-4">
-      <div className="flex items-center gap-2">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-dark text-white">
-          <ShieldCheck className="h-4 w-4" />
-        </span>
-        <div className="leading-tight">
-          <h1 className="text-base font-bold">{title || "LedgerLens"}</h1>
-          <p className="text-xs text-muted-foreground">LATAM Bank</p>
+    <header className="w-full bg-card">
+      <div className="flex h-16 items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6">
+        <div className="flex items-center gap-3">
+          <LensMark />
+          <div className="leading-none">
+            <h1 className="display text-2xl">{title || "LedgerLens"}</h1>
+            <p className="mt-0.5 text-xs text-muted-foreground">LATAM Bank</p>
+          </div>
+        </div>
+        <StatusTrack phase={phase} />
+        <div className="flex items-center gap-1 sm:gap-1.5">
+          <LanguageSelect />
+          <ThemeToggle />
+          <Button
+            onClick={onNewChat}
+            variant="outline"
+            className="gap-2 rounded-full max-sm:w-9 max-sm:px-0"
+            disabled={!canStartNewChat}
+            aria-label={t("newChat")}
+          >
+            <Plus className="h-4 w-4" />
+            <span className="max-sm:sr-only">{t("newChat")}</span>
+          </Button>
+          {isAuthenticated && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full" aria-label={t("logout")} title={t("logout")}>
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("logoutTitle")}</AlertDialogTitle>
+                  <AlertDialogDescription>{t("logoutBody")}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => signOut()}>{t("logout")}</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </div>
-      <StatusTrack phase={phase} />
-      <div className="flex items-center gap-2">
-        <select
-          value={lang}
-          onChange={e => setLang(e.target.value as Lang)}
-          aria-label={t("language")}
-          className="h-9 rounded-md border bg-background px-2 text-sm"
-        >
-          {LANGS.map(l => (
-            <option key={l.code} value={l.code}>
-              {l.label}
-            </option>
-          ))}
-        </select>
-        <ThemeToggle />
-        <Button onClick={onNewChat} variant="outline" className="gap-2" disabled={!canStartNewChat}>
-          <Plus className="h-4 w-4" />
-          {t("newChat")}
-        </Button>
-        {isAuthenticated && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline">{t("logout")}</Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("logoutTitle")}</AlertDialogTitle>
-                <AlertDialogDescription>{t("logoutBody")}</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                <AlertDialogAction onClick={() => signOut()}>{t("confirm")}</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-      </div>
+      {/* The band changes owner with the conversation: cobalt for the AI, mango once a person has it */}
+      <div aria-hidden data-phase={phase} className="band h-1.5 w-full" />
     </header>
   )
 }
