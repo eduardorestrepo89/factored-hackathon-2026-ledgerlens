@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest"
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { ChatMessages } from "@/components/chat/ChatMessages"
 import type { Message } from "@/components/chat/types"
 
@@ -26,5 +26,25 @@ describe("ChatMessages scrolling", () => {
     rerender(<ChatMessages messages={[say("hola"), say("Hola, soy Laura.")]} sessionId="s" onFeedbackSubmit={async () => {}} hideFeedback />)
 
     expect(scrollTop).toHaveBeenCalledWith(480)
+  })
+})
+
+describe("ChatMessages typing", () => {
+  const reply = (content: string): Message => ({
+    role: "assistant",
+    content,
+    timestamp: T,
+    segments: content ? [{ type: "text", content }] : [],
+  })
+  const thread = (last: Message) => (
+    <ChatMessages messages={[say("hola"), last]} sessionId="s" onFeedbackSubmit={async () => {}} isLoading />
+  )
+
+  it("shows the dots in the agent's line until its text streams in", () => {
+    const { rerender } = render(thread(reply("")))
+    expect(screen.getByRole("status", { name: "Escribiendo…" })).toBeInTheDocument()
+
+    rerender(thread(reply("Hola")))
+    expect(screen.queryByRole("status")).toBeNull()
   })
 })

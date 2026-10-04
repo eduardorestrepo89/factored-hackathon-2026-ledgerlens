@@ -3,7 +3,8 @@
 import { FormEvent, KeyboardEvent, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Loader2Icon, Send } from "lucide-react"
+import { Send } from "lucide-react"
+import { useI18n } from "@/lib/i18n"
 
 interface ChatInputProps {
   input: string
@@ -20,8 +21,9 @@ export function ChatInput({
   handleSubmit,
   isLoading,
   className = "",
-  placeholder = "Escribe un mensaje…",
+  placeholder,
 }: ChatInputProps) {
+  const { t } = useI18n()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Auto-resize the textarea based on content
@@ -55,14 +57,14 @@ export function ChatInput({
     <div className={`p-4 w-full ${className}`}>
       <form
         onSubmit={handleSubmit}
-        className="flex space-x-2 w-full items-end bg-white rounded-lg shadow-lg border border-gray-200 p-3"
+        className="flex space-x-2 w-full items-end bg-card rounded-lg shadow-lg border p-3"
       >
         <Textarea
           ref={textareaRef}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t("placeholder")}
           disabled={isLoading}
           className="flex-1 min-h-[40px] max-h-[200px] resize-none py-2"
           rows={1}
@@ -70,17 +72,8 @@ export function ChatInput({
         />
 
         <Button type="submit" disabled={!input.trim() || isLoading} className="h-10">
-          {isLoading ? (
-            <>
-              <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
-              Pensando…
-            </>
-          ) : (
-            <>
-              <Send className="h-4 w-4 mr-2" />
-              Enviar
-            </>
-          )}
+          <Send className="h-4 w-4 mr-2" />
+          {t("send")}
         </Button>
       </form>
     </div>

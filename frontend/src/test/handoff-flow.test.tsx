@@ -52,8 +52,8 @@ async function startChat() {
   await waitFor(() => expect(created).toHaveBeenCalled())
 }
 
-/** Waits until the turn has finished streaming (the send button stops saying "Pensando…"). */
-const turnFinished = () => waitFor(() => expect(screen.queryByText("Pensando…")).toBeNull())
+/** Waits until the turn has finished streaming (the composer is enabled again). */
+const turnFinished = () => waitFor(() => expect(screen.getByPlaceholderText("Escribe un mensaje…")).toBeEnabled())
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 beforeEach(() => {
@@ -119,7 +119,8 @@ describe("hand-off flow", () => {
     await startChat()
 
     await user.type(screen.getByPlaceholderText("Escribe un mensaje…"), "quiero hablar con una persona{Enter}")
-    await screen.findByText("Pensando…")
+    // the agent is thinking after the tool call: the typing dots sit in its message
+    await screen.findByRole("status", { name: "Escribiendo…" })
     await user.click(screen.getByRole("button", { name: /Nueva conversación/ }))
     finish()
     await turnFinished()

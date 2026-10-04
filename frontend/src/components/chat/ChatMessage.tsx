@@ -6,15 +6,17 @@ import { Message } from "./types"
 import { FeedbackDialog } from "./FeedbackDialog"
 import { getToolRenderer } from "@/hooks/useToolRenderer"
 import { MarkdownRenderer } from "./MarkdownRenderer"
+import { useI18n } from "@/lib/i18n"
 
 interface ChatMessageProps {
   message: Message
   sessionId: string
   onFeedbackSubmit: (feedbackType: "positive" | "negative", comment: string) => Promise<void>
   hideFeedback?: boolean
+  typing?: boolean
 }
 
-const TAG = "flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[.06em]"
+const TAG = "flex items-center gap-1 text-xs font-semibold"
 const BUBBLE = "rounded-2xl rounded-tl-sm px-3 py-2"
 
 export function ChatMessage({
@@ -22,7 +24,12 @@ export function ChatMessage({
   sessionId: _sessionId,
   onFeedbackSubmit,
   hideFeedback = false,
+  typing = false,
 }: ChatMessageProps) {
+  const { t } = useI18n()
+  // Dots while the agent hasn't started writing, or is thinking after a tool call
+  const segments = message.segments ?? []
+  const showDots = typing && segments[segments.length - 1]?.type !== "text"
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [selectedFeedbackType, setSelectedFeedbackType] = useState<"positive" | "negative">(
     "positive"
@@ -84,29 +91,40 @@ export function ChatMessage({
       ? "rounded-2xl rounded-br-sm bg-brand-dark p-3 text-white whitespace-pre-wrap"
       : message.role === "human"
         ? `${BUBBLE} bg-human-bg whitespace-pre-wrap`
-        : "flex flex-col gap-2 text-gray-800"
+        : "flex flex-col gap-2 text-foreground"
 
   return (
     <div className={`flex flex-col gap-1 ${message.role === "user" ? "items-end" : "items-start"}`}>
       {message.role === "assistant" && (
         <span className={`${TAG} text-ai`}>
           <Sparkles className="h-3 w-3" />
-          Asistente IA
+          LedgerLens AI
         </span>
       )}
       {message.role === "human" && (
         <span className={`${TAG} text-human`}>
           <User className="h-3 w-3" />
-          Laura · Persona
+          {t("lauraTag")}
         </span>
       )}
       <div className={`max-w-[85%] break-words ${bubbleClass}`}>
         {message.role === "assistant" ? renderAssistantContent() : message.content}
+        {showDots && (
+          <div role="status" aria-label={t("typing")} className={`${BUBBLE} flex w-fit gap-1 bg-ai-bg`}>
+            {[0, 150, 300].map(delay => (
+              <span
+                key={delay}
+                className="animate-typing-dot h-2 w-2 rounded-full bg-ai"
+                style={{ animationDelay: `${delay}ms` }}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Timestamp and Feedback buttons for assistant messages */}
       <div className="flex items-center gap-2 px-1">
-        <div className="text-xs text-gray-500">{formatTime(message.timestamp)}</div>
+        <div className="text-xs text-muted-foreground">{formatTime(message.timestamp)}</div>
 
         {/* Show feedback buttons only for assistant messages with content */}
         {!hideFeedback && message.role === "assistant" && message.content && (
@@ -114,23 +132,23 @@ export function ChatMessage({
             <button
               onClick={() => handleFeedbackClick("positive")}
               disabled={feedbackSubmitted}
-              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Positive feedback"
-              title="Good response"
+              className="p-1 text-muted-foreground hover:text-ai hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={t("positiveFeedback")}
+              title={t("goodResponse")}
             >
               <ThumbsUp size={14} />
             </button>
             <button
               onClick={() => handleFeedbackClick("negative")}
               disabled={feedbackSubmitted}
-              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Negative feedback"
-              title="Bad response"
+              className="p-1 text-muted-foreground hover:text-destructive hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={t("negativeFeedback")}
+              title={t("badResponse")}
             >
               <ThumbsDown size={14} />
             </button>
             {feedbackSubmitted && (
-              <span className="text-xs text-gray-500 ml-1">Thanks for your feedback!</span>
+              <span className="text-xs text-muted-foreground ml-1">{t("feedbackThanks")}</span>
             )}
           </div>
         )}

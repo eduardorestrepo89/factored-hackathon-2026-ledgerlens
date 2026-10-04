@@ -14,6 +14,7 @@ import { submitFeedback } from "@/services/feedbackService"
 import { useAuth } from "react-oidc-context"
 import { useDefaultTool, useToolRenderer } from "@/hooks/useToolRenderer"
 import { findHandOff, HAND_OFF_DELAY_MS, HAND_OFF_TOOL, phaseOf, queueFor, type HandOff } from "@/lib/handoff"
+import { useI18n } from "@/lib/i18n"
 import { HandOffTicket } from "./HandOffTicket"
 import { ToolCallDisplay } from "./ToolCallDisplay"
 
@@ -32,6 +33,7 @@ export default function ChatInterface() {
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
+  const { lang, t } = useI18n()
 
   // Register default tool renderer (wildcard "*")
   useDefaultTool(({ name, args, status, result }) => (
@@ -197,7 +199,7 @@ export default function ChatInterface() {
       })
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      setError(`Failed to get response: ${errorMessage}`)
+      setError(t("responseFailed", { error: errorMessage }))
       console.error("Error invoking AgentCore:", err)
 
       // Update the assistant message with error
@@ -205,8 +207,7 @@ export default function ChatInterface() {
         const updated = [...prev]
         updated[updated.length - 1] = {
           ...updated[updated.length - 1],
-          content:
-            "I apologize, but I encountered an error processing your request. Please try again.",
+          content: t("agentError"),
         }
         return updated
       })
@@ -262,7 +263,7 @@ export default function ChatInterface() {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
       console.error("Error submitting feedback:", err)
-      setError(`Failed to submit feedback: ${errorMessage}`)
+      setError(t("feedbackFailed", { error: errorMessage }))
     }
   }
 
@@ -300,8 +301,8 @@ export default function ChatInterface() {
       <div className="flex-none">
         <ChatHeader onNewChat={startNewChat} canStartNewChat={hasAssistantMessages} phase={phase} />
         {error && (
-          <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-2">
-            <p className="text-sm text-red-700">{error}</p>
+          <div className="bg-destructive/10 border-l-4 border-destructive p-4 mx-4 mt-2">
+            <p className="text-sm text-destructive">{error}</p>
           </div>
         )}
       </div>
@@ -311,13 +312,13 @@ export default function ChatInterface() {
         <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 min-[1100px]:grid-cols-[400px_minmax(0,1fr)] min-[1100px]:overflow-hidden">
           <section aria-label="Cliente" className="flex min-h-0 flex-col gap-2">
             <h2 className="text-[11px] font-semibold uppercase tracking-[.08em] text-muted-foreground">
-              Cliente · App
+              {t("customerApp")}
             </h2>
-            <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden rounded-[28px] border bg-white shadow-[0_18px_40px_-28px_hsl(200_40%_10%/.45)]">
+            <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden rounded-[28px] border bg-card shadow-[0_18px_40px_-28px_hsl(200_40%_10%/.45)]">
               <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
                 <b>LATAM Bank</b>
                 <span className="rounded-full bg-human-bg px-2.5 py-0.5 text-xs font-medium text-human">
-                  {phase === "joined" ? "Laura · Persona" : `En cola · ${queueFor(handOff.reason)}`}
+                  {phase === "joined" ? t("lauraTag") : t("inQueue", { queue: queueFor(handOff.reason, lang) })}
                 </span>
               </div>
               <div className="min-h-0 flex-1">
@@ -345,10 +346,8 @@ export default function ChatInterface() {
           <div className="grow" />
 
           <div className="text-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-800">Hola, soy LedgerLens</h2>
-            <p className="text-gray-600 mt-2">
-              Pregúntame por tus tarjetas, tus compras o un cargo que no reconozcas.
-            </p>
+            <h2 className="text-2xl font-bold">{t("greeting")}</h2>
+            <p className="text-muted-foreground mt-2">{t("greetingBody")}</p>
           </div>
 
           <div className="px-4 mb-16 max-w-4xl mx-auto w-full">
@@ -371,6 +370,7 @@ export default function ChatInterface() {
                 messages={messages}
                 sessionId={sessionId}
                 onFeedbackSubmit={handleFeedbackSubmit}
+                isLoading={isLoading}
               />
             </div>
           </div>
@@ -382,7 +382,7 @@ export default function ChatInterface() {
                 setInput={setInput}
                 handleSubmit={handleSubmit}
                 isLoading={isLoading}
-                placeholder={handOffPending ? "Conectando con una persona…" : undefined}
+                placeholder={handOffPending ? t("connectingToPerson") : undefined}
               />
             </div>
           </div>
