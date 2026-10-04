@@ -1,7 +1,32 @@
-import { useId, useRef, type CSSProperties, type PointerEvent } from "react"
+import {
+  Component,
+  lazy,
+  Suspense,
+  useId,
+  useRef,
+  type CSSProperties,
+  type PointerEvent,
+  type PropsWithChildren,
+} from "react"
 import { Button } from "@/components/ui/button"
 import { LanguageSelect, LensMark, ThemeToggle } from "@/components/chat/ChatHeader"
 import { useI18n } from "@/lib/i18n"
+
+// three.js loads only here, in its own chunk, so the chat never downloads it
+const LensScene = lazy(() => import("./LensScene"))
+// jsdom and browsers without WebGL2 get the SVG slab
+const webgl = typeof WebGL2RenderingContext !== "undefined"
+
+/** If WebGL fails to start on this machine, show the SVG slab instead of breaking sign-in. */
+class SceneBoundary extends Component<PropsWithChildren, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  render() {
+    return this.state.failed ? <LensSlab /> : this.props.children
+  }
+}
 
 /**
  * The band's lines, drawn in SVG: cobalt lines (the AI) fade out down the slab while mango
@@ -84,20 +109,59 @@ function LensSlab() {
   )
 }
 
+const STEPS = [
+  { n: 1, title: "step.1.title", body: "step.1.body", human: false },
+  { n: 2, title: "step.2.title", body: "step.2.body", human: false },
+  { n: 3, title: "step.3.title", body: "step.3.body", human: true },
+] as const
+
+/** How it works, in order: the track runs cobalt while the AI has it and turns mango for the person. */
+function Steps() {
+  const { t } = useI18n()
+  return (
+    <ol className="grid gap-5 sm:grid-cols-3 sm:gap-3">
+      {STEPS.map(({ n, title, body, human }) => (
+        <li key={n} className="flex flex-col gap-2">
+          <span aria-hidden className={`hidden h-1 rounded-full sm:block ${human ? "bg-mango" : "bg-ai"}`} />
+          <span className="flex items-center gap-2 sm:mt-2">
+            <span
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold ${
+                human ? "bg-mango text-[#161a33]" : "bg-ai text-card"
+              }`}
+            >
+              {n}
+            </span>
+            <span className="font-medium">{t(title)}</span>
+          </span>
+          <span className="text-sm leading-relaxed text-muted-foreground">{t(body)}</span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 /** The first screen: what LedgerLens does, and the way in. */
 export function SignInScreen({ onSignIn }: { onSignIn: () => void }) {
   const { t } = useI18n()
   return (
     <main className="grid min-h-screen grid-rows-[auto_1fr] gap-4 bg-page p-4 sm:p-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:grid-rows-1 lg:gap-6">
-      <div className="h-44 lg:order-2 lg:h-auto">
-        <LensSlab />
+      <div className="h-56 sm:h-72 lg:order-2 lg:h-auto">
+        {webgl ? (
+          <SceneBoundary>
+            <Suspense fallback={<LensSlab />}>
+              <LensScene />
+            </Suspense>
+          </SceneBoundary>
+        ) : (
+          <LensSlab />
+        )}
       </div>
       <div className="flex flex-col justify-between gap-12 px-2 py-4 sm:px-6 lg:py-6">
         <div className="flex items-center justify-between gap-3">
           <span className="flex items-center gap-3">
             <LensMark />
             <span className="leading-none">
-              <span className="display block text-2xl">LedgerLens</span>
+              <span className="display block text-2xl font-medium">LedgerLens</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">LATAM Bank</span>
             </span>
           </span>
@@ -108,17 +172,17 @@ export function SignInScreen({ onSignIn }: { onSignIn: () => void }) {
         </div>
 
         <div className="max-w-2xl">
-          <h1 className="display text-balance text-[clamp(3.5rem,8vw,8.5rem)]">{t("signInTitle")}</h1>
+          <h1 className="display text-balance text-[clamp(3.25rem,7vw,7.5rem)] font-light">{t("signInTitle")}</h1>
           <p className="mt-6 max-w-[46ch] text-lg leading-relaxed text-muted-foreground">{t("signInBody")}</p>
-          <Button
-            onClick={onSignIn}
-            className="mt-10 h-12 rounded-full px-8 text-base"
-          >
+          <Button onClick={onSignIn} className="mt-10 h-12 rounded-full px-8 text-base">
             {t("signIn")}
           </Button>
         </div>
 
-        <p className="text-sm text-muted-foreground">Factored AI &amp; Data Hackathon 2026</p>
+        <div className="flex max-w-2xl flex-col gap-8">
+          <Steps />
+          <p className="text-sm text-muted-foreground">Factored AI &amp; Data Hackathon 2026</p>
+        </div>
       </div>
     </main>
   )

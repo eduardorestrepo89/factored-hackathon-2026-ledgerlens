@@ -14,6 +14,8 @@ interface ChatInputProps {
   isLoading: boolean
   className?: string
   placeholder?: string
+  /** Locked while something else needs an answer first (the consent prompt) */
+  disabled?: boolean
 }
 
 export function ChatInput({
@@ -23,9 +25,17 @@ export function ChatInput({
   isLoading,
   className = "",
   placeholder,
+  disabled = false,
 }: ChatInputProps) {
   const { t } = useI18n()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const locked = isLoading || disabled
+
+  // Back to the composer when the agent finishes, on devices with a keyboard (on touch it
+  // would pop the keyboard up after every reply)
+  useEffect(() => {
+    if (!locked && window.matchMedia?.("(pointer: fine)").matches) textareaRef.current?.focus({ preventScroll: true })
+  }, [locked])
 
   // Auto-resize the textarea based on content
   useEffect(() => {
@@ -66,7 +76,7 @@ export function ChatInput({
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? t("placeholder")}
-          disabled={isLoading}
+          disabled={locked}
           className="max-h-[200px] min-h-[40px] flex-1 resize-none border-0 bg-transparent px-0 py-2 text-base shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent"
           rows={1}
           autoFocus
@@ -74,7 +84,7 @@ export function ChatInput({
 
         <Button
           type="submit"
-          disabled={!input.trim() || isLoading}
+          disabled={!input.trim() || locked}
           size="icon"
           aria-label={t("send")}
           title={t("send")}

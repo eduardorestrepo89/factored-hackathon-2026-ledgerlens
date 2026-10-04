@@ -6,7 +6,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Funnel Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   /* Tier colors (.superdesign/design-system.md): cobalt = AI assistant, mango = human agent, ink = customer */
   --color-ai: var(--ai);
   --color-ai-bg: var(--ai-bg);
@@ -152,12 +152,12 @@
 
 /* In a layer so Tailwind utilities (absolute, h-*, …) still win over these */
 @layer components {
-  /* Headlines: Bricolage at its condensed width, set tight */
+  /* Headlines and the wordmark: Funnel Display, light and tightly set; size it per use */
   .display {
-    font-stretch: 75%;
-    font-weight: 760;
-    letter-spacing: -0.02em;
-    line-height: 0.95;
+    font-family: "Funnel Display", "Funnel Sans", system-ui, sans-serif;
+    font-weight: 400;
+    letter-spacing: -0.035em;
+    line-height: 1;
   }
 
   /* Case and card ids: even figures in the text face instead of a monospace */

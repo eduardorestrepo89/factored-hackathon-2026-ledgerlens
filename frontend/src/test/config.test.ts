@@ -171,8 +171,9 @@ describe("Configuration Verification Tests", () => {
     it("should have correct title", () => {
       const indexHtml = readFileSync(resolve(__dirname, "../../index.html"), "utf-8")
       expect(indexHtml).toContain("<title>LedgerLens</title>")
-      // Bricolage needs its width axis for the condensed headlines
-      expect(indexHtml).toContain("family=Bricolage+Grotesque:opsz,wdth,wght@")
+      // Funnel Display sets headlines and the wordmark, Funnel Sans the rest
+      expect(indexHtml).toContain("family=Funnel+Display:wght@")
+      expect(indexHtml).toContain("family=Funnel+Sans:wght@")
     })
 
     it("should have meta description", () => {

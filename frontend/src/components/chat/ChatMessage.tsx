@@ -7,6 +7,7 @@ import { FeedbackDialog } from "./FeedbackDialog"
 import { getToolRenderer } from "@/hooks/useToolRenderer"
 import { MarkdownRenderer } from "./MarkdownRenderer"
 import { LensMark } from "./ChatHeader"
+import { ConfirmCard } from "./ConfirmCard"
 import { useI18n } from "@/lib/i18n"
 
 interface ChatMessageProps {
@@ -64,6 +65,13 @@ export function ChatMessage({
           return (
             <div key={i} className={`${BUBBLE} bg-ai-bg`}>
               <MarkdownRenderer content={seg.content} />
+            </div>
+          )
+        }
+        if (seg.type === "confirm") {
+          return (
+            <div key={seg.confirm.id} className="my-1">
+              <ConfirmCard confirm={seg.confirm} />
             </div>
           )
         }

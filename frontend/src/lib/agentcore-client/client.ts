@@ -22,7 +22,9 @@ export class AgentCoreClient {
     query: string,
     sessionId: string,
     accessToken: string,
-    onEvent: StreamCallback
+    onEvent: StreamCallback,
+    // Extra body fields, e.g. the customer's Yes/No: { confirmations: [{ interruptId, approved }] }
+    extra: Record<string, unknown> = {}
   ): Promise<void> {
     if (!accessToken) throw new Error("No valid access token found.")
     if (!this.runtimeArn) throw new Error("Agent Runtime ARN not configured.")
@@ -34,6 +36,7 @@ export class AgentCoreClient {
     const traceId = `1-${Math.floor(Date.now() / 1000).toString(16)}-${crypto.randomUUID()}`
 
     const body = {
+      ...extra,
       prompt: query,
       runtimeSessionId: sessionId,
     }

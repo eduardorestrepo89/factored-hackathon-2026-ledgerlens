@@ -24,14 +24,30 @@ never repeats anything.**
 
 ## Brand and color (v2, 2026-10-04: "the lens")
 Concept: the **lens band**, after Cruz-Diez's Physichromies: thin vertical cobalt lines (the AI)
-interleaved with mango lines (a person). The band is the brand mark (`LensMark`), the strip under
-the header (it changes owner with the conversation: `data-phase` ai → connecting → joined) and the
-sign-in slab, where a pointer-driven lens magnifies the lines. That band is the one bold element;
-everything around it stays quiet.
+interleaved with mango lines (a person). The band is the strip under the header (it changes owner
+with the conversation: `data-phase` ai → connecting → joined) and the face of the card on the
+sign-in page. That band is the one bold element; everything around it stays quiet.
 
-Font: **Bricolage Grotesque** (Google Fonts, opsz/wdth/wght axes) for everything. Headlines use
-`.display` (75% width, weight 760, tight). Ids and amounts use `.figures` (tabular, slashed zero),
-not a monospace. No other families.
+Mark (`LensMark`, `public/favicon.svg`): a biconvex lens seen edge-on, split into a cobalt half
+(the AI) and a mango half (a person) by a hairline gap. Both halves solid as the logo; as an
+avatar or status, the half that doesn't own the conversation is drawn as an outline.
+
+Sign-in hero (`LensScene.tsx`, three.js via @react-three/fiber and drei, lazy-loaded): a LATAM
+Bank card whose face is the band, under a glass lens (drei `MeshTransmissionMaterial`) that rests
+over the last 4 digits, follows the pointer and magnifies. Lit by drei `Lightformer`s, no HDR
+download. Without WebGL2, or if the scene fails, the SVG slab (lines plus a CSS lens) stands in.
+
+Fonts (v3): **Funnel Display** for the wordmark and headlines (`.display`: weight 400, tracking
+-0.035em; big headlines add `font-light`, the wordmark `font-medium`) and **Funnel Sans** for
+everything else. Minimal but not plain: wide, light letterforms with their own details. Ids and
+amounts use `.figures` (tabular, slashed zero), not a monospace. No other families.
+
+Confirmations (contract: `docs/handoffs/2026-10-04-confirmation-buttons-frontend.md`): when the
+agent's `ConfirmationHook` pauses `block_credit_card`, `open_claim` or `human_agent_hand_off`, the
+runtime streams a `confirmation` event and the paused tool row becomes a `ConfirmCard` (title, one
+line, No / Sí, mango border; a person icon for a hand-off). The composer is locked until the
+customer taps; the tap is sent as `confirmations: [{interruptId, approved}]`, and only Sí runs the
+call.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
