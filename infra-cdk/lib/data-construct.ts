@@ -4,14 +4,11 @@ import * as codebuild from "aws-cdk-lib/aws-codebuild"
 import * as dsql from "aws-cdk-lib/aws-dsql"
 import * as ec2 from "aws-cdk-lib/aws-ec2"
 import * as iam from "aws-cdk-lib/aws-iam"
-import * as kms from "aws-cdk-lib/aws-kms"
 import * as lambda from "aws-cdk-lib/aws-lambda"
 import * as logs from "aws-cdk-lib/aws-logs"
 import * as s3 from "aws-cdk-lib/aws-s3"
 import * as s3assets from "aws-cdk-lib/aws-s3-assets"
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager"
-import * as sns from "aws-cdk-lib/aws-sns"
-import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions"
 import * as sfn from "aws-cdk-lib/aws-stepfunctions"
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks"
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha"
@@ -30,8 +27,8 @@ export interface DataConstructProps {
 
 /**
  * Aurora DSQL, open only to the tool roles from inside the VPC, the staged pipeline that
- * loads it (docs/superpowers/specs/2026-10-02-data-pipeline-design.md), the Gateway tool
- * Lambdas and the hand-off topic (docs/superpowers/specs/2026-10-03-write-tools-design.md).
+ * loads it (docs/superpowers/specs/2026-10-02-data-pipeline-design.md) and the Gateway tool
+ * Lambdas (docs/superpowers/specs/2026-10-03-write-tools-design.md).
  */
 export class DataConstruct extends Construct {
   public readonly clusterEndpoint: string
@@ -265,18 +262,10 @@ export class DataConstruct extends Construct {
       })
     }
 
-    // The hand-off tool only publishes to SNS: it runs outside the VPC (which has no route
-    // out) and never touches DSQL. The topic uses the AWS-managed key, whose key policy lets
-    // SNS use it for publishers in the account, so the function needs only sns:Publish.
-    const handOffTopic = new sns.Topic(this, "HumanHandOffTopic", {
-      topicName: "ledgerlens-human-handoff",
-      masterKey: kms.Alias.fromAliasName(this, "SnsManagedKey", "alias/aws/sns"),
-    })
-    if (props.config.admin_user_email) {
-      // the recipient confirms the subscription once, from the email SNS sends
-      handOffTopic.addSubscription(new subscriptions.EmailSubscription(props.config.admin_user_email))
-    }
-    const handOff = new PythonFunction(this, "HumanAgentHandOffFn", {
+    // The hand-off tool only validates the hand-off and returns it; the frontend reads it
+    // from the agent's stream (docs/superpowers/specs/2026-10-03-human-hand-off-frontend-design.md).
+    // It calls no AWS service, so it runs outside the VPC with the default role.
+    new PythonFunction(this, "HumanAgentHandOffFn", {
       functionName: "ledgerlens-human-agent-hand-off",
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
@@ -285,14 +274,12 @@ export class DataConstruct extends Construct {
       handler: "handler",
       bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
       timeout: cdk.Duration.seconds(10),
-      environment: { HANDOFF_TOPIC_ARN: handOffTopic.topicArn },
       logGroup: new logs.LogGroup(this, "HumanAgentHandOffLogs", {
         logGroupName: `/aws/lambda/${props.config.stack_name_base}-human-agent-hand-off`,
         retention: logs.RetentionDays.ONE_WEEK,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
     })
-    handOffTopic.grantPublish(handOff)
 
     // Stages 1-4 in order (spec 4.2); RUN_ID is the execution name
     const stage = (name: string) =>
