@@ -257,3 +257,12 @@ def test_tool_spec_description_names_every_reason() -> None:
     for reason in CallReason:
         assert reason.value in description, reason
     assert "unavailable" in description
+
+
+def test_tool_spec_description_says_it_already_ran_at_session_start() -> None:
+    # The agent calls it in code at session start (tools/session_context.py);
+    # telling the model to call it first would repeat the call on turn one.
+    description = tool_spec()["description"]
+
+    assert "Already called automatically at session start" in description
+    assert "Call it at the start of the conversation" not in description

@@ -16,3 +16,14 @@ test("every forbid names its actions", () => {
   const unscoped = statements.filter((s) => /forbid\s*\([^)]*\baction\s*,/.test(s))
   expect(unscoped).toEqual([])
 })
+
+test("the write tools are forbidden unless customer_confirmed is present and true", () => {
+  const confirm = statements.filter((s) => s.includes("customer_confirmed"))
+  expect(confirm).toHaveLength(1)
+  expect(confirm[0]).toMatch(/^\s*forbid/)
+  expect(confirm[0]).toContain('"block-credit-card-target___block_credit_card"')
+  expect(confirm[0]).toContain('"open-claim-target___open_claim"')
+  // without the has guard, a missing argument makes the forbid fail to evaluate and be skipped
+  expect(confirm[0]).toContain("!(context.input has customer_confirmed)")
+  expect(confirm[0]).toContain("context.input.customer_confirmed != true")
+})

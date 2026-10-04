@@ -411,6 +411,16 @@ export class BackendConstruct extends Construct {
       // See config.yaml: ltm_top_k and ltm_relevance_score.
       LTM_TOP_K: String(config.backend.ltm_top_k),
       LTM_RELEVANCE_SCORE: String(config.backend.ltm_relevance_score),
+      // Short-term memory: sliding window, optionally summarizing what falls out.
+      // See config.yaml: stm_window_size, use_stm_summarization, stm_summary_ratio,
+      // stm_preserve_recent_messages, stm_summarization_model_id, stm_summarization_prompt.
+      STM_WINDOW_SIZE: String(config.backend.stm_window_size),
+      USE_STM_SUMMARIZATION: config.backend.use_stm_summarization ? "true" : "false",
+      STM_SUMMARY_RATIO: String(config.backend.stm_summary_ratio),
+      STM_PRESERVE_RECENT_MESSAGES: String(config.backend.stm_preserve_recent_messages),
+      // Empty means the agent's own model and the built-in prompt.
+      STM_SUMMARIZATION_MODEL_ID: config.backend.stm_summarization_model_id,
+      STM_SUMMARIZATION_PROMPT: config.backend.stm_summarization_prompt,
       // Discover + auto-connect MCP servers from an AWS Agent Registry (opt-in).
       // When enabled, the agent lists the registry's Approved MCP records and
       // connects to each public streamable-HTTP server at runtime. See
@@ -859,25 +869,33 @@ export class BackendConstruct extends Construct {
       description: "AgentCore Gateway with MCP protocol and JWT authentication",
     })
 
-    // One Gateway target per LedgerLens read tool. The tool Lambdas live in the data
+    // One Gateway target per LedgerLens tool. The tool Lambdas live in the data
     // stack (data-construct.ts), next to the database, named ledgerlens-<slug>, so the
     // data stack deploys first. addLambdaTarget() grants the gateway role invoke
     // permission; sameEnvironment lets CDK add permissions to the imported function.
     // Target names are <slug>-target, so each tool's Cedar action is
-    // "<slug>-target___<tool>" (gateway/policies/policy.cedar).
+    // "<slug>-target___<tool>" (gateway/policies/policy.cedar). The model sees
+    // "gateway_<target>___<tool>", and Bedrock rejects every request if one tool name
+    // is over 64 characters, so a long tool gets a shorter target name.
     // ponytail: imported by name; move the Lambdas here if the two stacks ever deploy apart.
     const toolTargets = [
       { tool: "list_credit_cards", id: "ListCreditCards" },
       { tool: "list_card_transactions", id: "ListCardTransactions" },
       { tool: "get_session_context", id: "GetSessionContext" },
-    ].map(({ tool, id }) => {
+      { tool: "transaction_fraud_detection", id: "TransactionFraudDetection", target: "fraud-detection-target" },
+      { tool: "explain_transaction", id: "ExplainTransaction" },
+      { tool: "classify_call_type", id: "ClassifyCallType" },
+      { tool: "block_credit_card", id: "BlockCreditCard" },
+      { tool: "open_claim", id: "OpenClaim" },
+      { tool: "human_agent_hand_off", id: "HumanAgentHandOff" },
+    ].map(({ tool, id, target }) => {
       const slug = tool.replace(/_/g, "-")
       const toolFunction = lambda.Function.fromFunctionAttributes(this, `${id}Fn`, {
         functionArn: `arn:aws:lambda:${this.region}:${this.account}:function:ledgerlens-${slug}`,
         sameEnvironment: true,
       })
       return gateway.addLambdaTarget(`${id}Target`, {
-        gatewayTargetName: `${slug}-target`,
+        gatewayTargetName: target ?? `${slug}-target`,
         description: `LedgerLens ${tool} tool`,
         lambdaFunction: toolFunction,
         toolSchema: agentcore.ToolSchema.fromLocalAsset(

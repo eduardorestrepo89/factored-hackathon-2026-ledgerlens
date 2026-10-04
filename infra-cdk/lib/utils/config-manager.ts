@@ -56,6 +56,27 @@ export interface AppConfig {
      */
     ltm_relevance_score: number
     /**
+     * Short-term memory: how many recent messages the agent sends to the model per
+     * turn. Counts messages, not turns. Integer from 2 to 200. Defaults to 30.
+     */
+    stm_window_size: number
+    /**
+     * Summarize the oldest messages once the window is exceeded, instead of dropping
+     * them. Each summary costs one extra model call. Defaults to false.
+     */
+    use_stm_summarization: boolean
+    /** Share of messages summarized each time, from 0.1 to 0.8. Defaults to 0.3. */
+    stm_summary_ratio: number
+    /**
+     * Newest messages never summarized. Must be less than stm_window_size when
+     * summarization is on. Defaults to 10.
+     */
+    stm_preserve_recent_messages: number
+    /** Model that writes the summaries. Empty (default) means the agent's own model. */
+    stm_summarization_model_id: string
+    /** System prompt for the summarizer. Empty (default) means the built-in banking prompt. */
+    stm_summarization_prompt: string
+    /**
      * Discover and auto-connect MCP servers from an AWS Agent Registry.
      * Lightweight: no DynamoDB, no UI, no per-user preferences. Defaults to disabled.
      */
@@ -182,6 +203,41 @@ export class ConfigManager {
         )
       }
 
+      // Validate short-term memory (the agent's conversation window and summarization)
+      const stmWindowSize = parsedConfig.backend?.stm_window_size ?? 30
+      const useStmSummarization = parsedConfig.backend?.use_stm_summarization === true
+      const stmSummaryRatio = parsedConfig.backend?.stm_summary_ratio ?? 0.3
+      const stmPreserveRecent = parsedConfig.backend?.stm_preserve_recent_messages ?? 10
+      const stmModelId = parsedConfig.backend?.stm_summarization_model_id ?? ""
+      const stmPrompt = parsedConfig.backend?.stm_summarization_prompt ?? ""
+      if (!Number.isInteger(stmWindowSize) || stmWindowSize < 2 || stmWindowSize > 200) {
+        throw new Error(
+          `backend.stm_window_size in ${configPath} must be an integer from 2 to 200.`
+        )
+      }
+      if (typeof stmSummaryRatio !== "number" || stmSummaryRatio < 0.1 || stmSummaryRatio > 0.8) {
+        throw new Error(`backend.stm_summary_ratio in ${configPath} must be from 0.1 to 0.8.`)
+      }
+      if (!Number.isInteger(stmPreserveRecent) || stmPreserveRecent < 0) {
+        throw new Error(
+          `backend.stm_preserve_recent_messages in ${configPath} must be an integer of 0 or more.`
+        )
+      }
+      // Otherwise the summarizer raises "insufficient messages" on every turn
+      if (useStmSummarization && stmPreserveRecent >= stmWindowSize) {
+        throw new Error(
+          `backend.stm_preserve_recent_messages in ${configPath} must be less than ` +
+            `stm_window_size when use_stm_summarization is true.`
+        )
+      }
+      // Checked before .trim(): a YAML number or list would crash there or reach the runtime
+      if (typeof stmModelId !== "string") {
+        throw new Error(`backend.stm_summarization_model_id in ${configPath} must be a string.`)
+      }
+      if (typeof stmPrompt !== "string") {
+        throw new Error(`backend.stm_summarization_prompt in ${configPath} must be a string.`)
+      }
+
       return {
         stack_name_base: stackNameBase,
         admin_user_email: parsedConfig.admin_user_email || null,
@@ -194,6 +250,12 @@ export class ConfigManager {
           use_long_term_memory: parsedConfig.backend?.use_long_term_memory === true,
           ltm_top_k: parsedConfig.backend?.ltm_top_k ?? 10,
           ltm_relevance_score: parsedConfig.backend?.ltm_relevance_score ?? 0.3,
+          stm_window_size: stmWindowSize,
+          use_stm_summarization: useStmSummarization,
+          stm_summary_ratio: stmSummaryRatio,
+          stm_preserve_recent_messages: stmPreserveRecent,
+          stm_summarization_model_id: stmModelId.trim(),
+          stm_summarization_prompt: stmPrompt.trim(),
           mcp_registry: {
             enabled: mcpRegistryEnabled,
             registry_id: mcpRegistryId,

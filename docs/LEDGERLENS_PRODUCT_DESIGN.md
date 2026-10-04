@@ -151,37 +151,25 @@ In both options the Lambda still filters on `customer_id` in its SQL (section 5.
 The first step never varies, so the **agent code runs it before the model is called**. This means it always happens, adds no extra model round-trip, and lets the model start the conversation already knowing the likely reason.
 
 ```python
-# basic_agent.py, invocations() — sketch
-user_id = extract_user_id_from_context(context)
-is_first_turn = not memory_has_events(user_id, session_id)   # or: a flag the frontend sends on the first message
-
-session_context = None
-if is_first_turn:
-    with gateway_client:                                      # same MCP client, same token and Cedar path
-        ctx = gateway_client.call_tool_sync(
-            tool_use_id="bootstrap-ctx",
-            name="get-session-context-target___get_session_context",
-            arguments={"customer_id": "<from token claim>"},   # see note below
-        )
-        reasons = gateway_client.call_tool_sync(
-            tool_use_id="bootstrap-cls",
-            name="classify-call-type-target___classify_call_type",
-            arguments={"customer_id": "<from token claim>"},
-        )
-    session_context = build_context_block(ctx, reasons)       # compact JSON, row caps
-
-agent = create_strands_agent(user_id, session_id, session_context)
-# system_prompt = SYSTEM_PROMPT + ("\n\nSESSION CONTEXT:\n" + session_context if session_context else "")
+# basic_agent.py, invocations(); tools/session_context.py has the code
+agent = create_strands_agent(user_id, session_id, access_token, customer_id)  # restores state + messages
+await apply_session_context(agent, customer_id)
+#   ctx = agent.state.get("session_context")
+#   if ctx is None:                        # first turn, or the last fetch failed
+#       ctx = gather(get_session_context, classify_call_type)   # agent.tool, not recorded
+#       if both succeeded: agent.state.set("session_context", ctx)   # saved with the session
+#   agent.system_prompt = build_system_prompt(customer_id, ctx)   # <session_context> block
 ```
+Plan: `docs/superpowers/plans/2026-10-03-agent-short-term-memory-and-session-context.md`.
 
 Notes:
-- **Only on the first turn.** On later turns the context is already in the session history (AgentCore Memory). Adding it every turn would bloat the context window.
-- **The tools are called before the agent exists.** The Gateway is an ordinary MCP server, so the agent code opens the same `MCPClient` it later hands to the agent and calls the tools directly with `call_tool_sync` (or `call_tool_async`). It doesn't need an `Agent`. A direct call uses the Gateway tool name (`<target>___<tool>`), not the `gateway`-prefixed name the model sees. It goes through the same machine token and Cedar check as the model's calls.
+- **Fetched once, rendered every turn.** The context is saved in `agent.state` (restored with the session) and rendered into the system prompt every turn. The system prompt isn't saved with the session, and messages are subject to the conversation window, so neither alone would keep it. An empty `agent.state` means it hasn't been loaded yet; a failed fetch saves nothing and is retried on the next turn.
+- **The tools are called through the agent's own Gateway client:** `agent.tool.<name>(customer_id=..., record_direct_tool_call=False)`, matched by the `___<tool>` suffix of the model-facing name. The calls aren't recorded in the history, and they go through the same machine token and Cedar check as the model's calls.
 - **`customer_id` in code:** taken from the decoded machine token (section 5.3). The Gateway doesn't forward claims to the Lambdas (Q2), so the bootstrap tools can't read the customer from the token themselves.
-- **Run both calls in parallel** (`asyncio.gather` with `call_tool_async`), so session start takes about as long as the slower of the two.
+- **Run both calls in parallel** (`asyncio.gather` over `asyncio.to_thread`), so session start takes about as long as the slower of the two.
 - **This is deliberate:** conceptually these are a startup step, not tools for the model. They're still registered on the Gateway so the same Cedar and token path covers them, and the model can refresh them in long sessions.
 - Both bootstrap tools stay registered on the Gateway, so they're visible to the model. Their descriptions say "already called at session start; call again only to refresh".
-- **v1 (2026-10-03):** the system prompt isn't saved in AgentCore Memory, so context added to it on the first turn would be gone by the second. v1 instead calls `get_session_context` directly on the first turn. Strands records the call and its result in the history, and memory keeps it (`tools/session_start.py`; spec `docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md` §4.4). `classify_call_type` is deferred.
+- **History:** v1 (2026-10-03) called `get_session_context` on the first turn and let Strands record it in the history (`tools/session_start.py`, now removed; spec `docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md` §4.4). The conversation window could drop that record and a summary could reword it, so the context moved to `agent.state` and the system prompt (`PROMPT_VERSION` v2).
 
 ---
 
@@ -1103,14 +1091,14 @@ when { context has input && !(context.input has customer_confirmed && context.in
 - [x] Pre-token Lambda: look up `customer_id` in `USER_CUSTOMER_IDS_MAP` and add it as a claim (blank when not found).
 - [x] Pre-token Lambda CDK (`cognito-construct.ts`): set `USER_CUSTOMER_IDS_MAP` to the blank template from section 5.2.
 - [x] Cedar custom resource: create one policy per statement in `gateway/policies/policy.cedar`.
-- [x] Cedar: replace the sample policy with statements 1 and 2 of section 10 for the three read tools. Statement 3 waits for the write tools.
+- [x] Cedar: replace the sample policy with statements 1 and 2 of section 10 for every Gateway tool, and statement 3 (`block_credit_card` and `open_claim` need `customer_confirmed` true).
 
 **Agent (`patterns/strands-single-agent/`)**
 - [x] Read `customer_id` from the machine token once per request and pass it to the system prompt (section 5.3, option 1).
 - [x] `BeforeToolCallEvent` hook that overwrites `customer_id` on every tool call (section 5.3, option 1).
-- [x] Session start in `invocations()` (section 6): first turn only. Done for `get_session_context`; `classify_call_type` is deferred.
-- [x] Replace `SYSTEM_PROMPT`: v1 runs a reduced section 9 prompt (`PROMPT_VERSION` v1); the session context comes from the recorded session-start call.
-- [ ] Set `conversation_manager` explicitly.
+- [x] Session start in `invocations()` (section 6): `get_session_context` and `classify_call_type` once per session, saved in `agent.state` and rendered into the system prompt (`docs/superpowers/plans/2026-10-03-agent-short-term-memory-and-session-context.md`).
+- [x] Replace `SYSTEM_PROMPT`: a reduced section 9 prompt (`PROMPT_VERSION` v2); the session context comes from the `<session_context>` block.
+- [x] Set `conversation_manager` explicitly: a sliding window, optionally summarizing, from the `stm_*` keys in `config.yaml` (same plan).
 - [x] Remove Code Interpreter from the tool list. It isn't needed, and it's extra risk in a banking context.
 
 **Data**

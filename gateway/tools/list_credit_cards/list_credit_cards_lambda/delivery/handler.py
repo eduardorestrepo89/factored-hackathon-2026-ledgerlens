@@ -19,12 +19,6 @@ reuses them. The handler builds nothing itself.
 AS_OF (optional) is read once into CLOCK. This tool has no time window, so it
 only validates it: an invalid AS_OF answers every request with
 DataSourceUnavailableError's message, as any other bad setting does.
-
-TODO(ledgerlens): R1 - deployed alone by the data stack (ledgerlens-list-credit-cards)
-  to test it against the database; no Gateway target yet, so the agent can't call it.
-TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
-  depends on a Cedar policy matching it to the token's customer_id claim; neither
-  the policy nor the claim exists yet (product design sections 5 and 10).
 """
 
 import json
