@@ -413,6 +413,8 @@ export class BackendConstruct extends Construct {
       // See config.yaml: ltm_top_k and ltm_relevance_score.
       LTM_TOP_K: String(config.backend.ltm_top_k),
       LTM_RELEVANCE_SCORE: String(config.backend.ltm_relevance_score),
+      // The agent's Bedrock model. See config.yaml: model_id.
+      MODEL_ID: config.backend.model_id,
       // Short-term memory: sliding window, optionally summarizing what falls out.
       // See config.yaml: stm_window_size, use_stm_summarization, stm_summary_ratio,
       // stm_preserve_recent_messages, stm_summarization_model_id, stm_summarization_prompt.

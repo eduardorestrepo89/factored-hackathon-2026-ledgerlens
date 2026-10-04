@@ -87,6 +87,8 @@ export interface AppConfig {
      * them. Each summary costs one extra model call. Defaults to false.
      */
     use_stm_summarization: boolean
+    /** Bedrock model or inference profile the agent runs on. Defaults to "deepseek.v3.2". */
+    model_id: string
     /** Share of messages summarized each time, from 0.1 to 0.8. Defaults to 0.3. */
     stm_summary_ratio: number
     /**
@@ -230,6 +232,11 @@ export class ConfigManager {
         )
       }
 
+      const modelId = parsedConfig.backend?.model_id ?? "deepseek.v3.2"
+      if (typeof modelId !== "string" || !modelId.trim()) {
+        throw new Error(`backend.model_id in ${configPath} must be a non-empty string.`)
+      }
+
       // Validate short-term memory (the agent's conversation window and summarization)
       const stmWindowSize = parsedConfig.backend?.stm_window_size ?? 30
       const useStmSummarization = parsedConfig.backend?.use_stm_summarization === true
@@ -278,6 +285,7 @@ export class ConfigManager {
           use_long_term_memory: parsedConfig.backend?.use_long_term_memory === true,
           ltm_top_k: parsedConfig.backend?.ltm_top_k ?? 10,
           ltm_relevance_score: parsedConfig.backend?.ltm_relevance_score ?? 0.3,
+          model_id: modelId.trim(),
           stm_window_size: stmWindowSize,
           use_stm_summarization: useStmSummarization,
           stm_summary_ratio: stmSummaryRatio,

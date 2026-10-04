@@ -14,6 +14,20 @@ function loadBackend(backendLines: string) {
   return new ConfigManager(file).getProps().backend
 }
 
+test("the agent model defaults to DeepSeek V3.2 and is read trimmed", () => {
+  expect(loadBackend("  pattern: ledgerlens\n").model_id).toBe("deepseek.v3.2")
+  expect(loadBackend('  model_id: " us.anthropic.claude-haiku-4-5-20251001-v1:0 "\n').model_id).toBe(
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  )
+})
+
+test.each([
+  ["a blank model id", '  model_id: "  "\n'],
+  ["a non-string model id", "  model_id: 42\n"],
+])("rejects %s", (_name, backendLines) => {
+  expect(() => loadBackend(backendLines)).toThrow(/backend.model_id/)
+})
+
 test("short-term memory defaults to a 30-message window without summarization", () => {
   expect(loadBackend("  pattern: ledgerlens\n")).toMatchObject({
     stm_window_size: 30,
