@@ -19,16 +19,17 @@ CUSTOMER_ID = "CLI-F2DZJYU0POJ9"
 # Changed the prompt? Bump PROMPT_VERSION in system_prompt.py and add its hash here.
 PINNED_PROMPT_HASHES = {
     "v1": "f17e2e64c42b3a77401584aecfb37120e3d08fdeacf71f1e68711d655321bdc7",
+    # v2 is the short-term-memory prompt (feat/gateway-wiring session); v3 adds the hand-off
+    "v3": "1a5a26533d513a4e2584c171abef12441850fa334dd12f3c17fa0fee18f654a1",
 }
 
-# Designed in docs/LEDGERLENS_PRODUCT_DESIGN.md §7 but not deployed in v1.
+# Designed in docs/LEDGERLENS_PRODUCT_DESIGN.md §7 but not deployed yet.
 UNAVAILABLE_TOOLS = (
     "classify_call_type",
     "explain_transaction",
     "transaction_fraud_detection",
     "block_credit_card",
     "open_claim",
-    "human_agent_hand_off",
 )
 
 
@@ -76,8 +77,10 @@ def test_blank_customer_id_points_to_a_human_agent(system_prompt):
     prompt = system_prompt.build_system_prompt("")
 
     assert "human agent" in prompt
-    # No hand-off tool exists in v1, so the prompt mustn't promise one.
-    assert "hand-off" not in prompt
+    # No customer_id means Cedar denies every tool, so the unlinked block mustn't
+    # promise a hand-off.
+    assert "hand-off" not in system_prompt.UNLINKED_SESSION_BLOCK
+    assert "hand off" not in system_prompt.UNLINKED_SESSION_BLOCK.lower()
 
 
 def test_base_prompt_is_always_included(system_prompt):
@@ -108,3 +111,13 @@ def test_prompt_version_names_this_template(system_prompt):
     assert PINNED_PROMPT_HASHES.get(system_prompt.PROMPT_VERSION) == digest, (
         "The prompt changed: bump PROMPT_VERSION and pin the new hash"
     )
+
+
+def test_prompt_hands_off_and_says_goodbye(system_prompt):
+    prompt = system_prompt.BASE_SYSTEM_PROMPT
+
+    assert "human_agent_hand_off" in prompt
+    assert "say goodbye in one or two sentences" in prompt
+    assert "this same chat" in prompt
+    assert "Promise no time" in prompt
+    assert "Never say you have transferred them" not in prompt
