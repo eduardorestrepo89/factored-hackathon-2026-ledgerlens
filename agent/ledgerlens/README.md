@@ -16,7 +16,7 @@ User Request
     |
 BedrockAgentCoreApp (ledgerlens_agent.py)
     |
-Strands Agent (Sonnet model via BedrockModel)
+Strands Agent (model from config.yaml backend.model_id via BedrockModel)
     |
     +-- AgentCore Memory (conversation history)
     |     AgentCoreMemorySessionManager
@@ -45,7 +45,7 @@ Shared helpers (`auth.py`, `ssm.py`) live in `agent/utils/` and are copied into 
 
 ## Model
 
-- **Agent**: `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (Sonnet via Bedrock)
+- **Agent**: `backend.model_id` in `infra-cdk/config.yaml` (default `deepseek.v3.2`), passed to the runtime as `MODEL_ID`
 
 ## Streaming Events
 

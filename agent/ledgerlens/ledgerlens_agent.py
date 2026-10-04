@@ -14,10 +14,12 @@ from bedrock_agentcore.memory.integrations.strands.session_manager import (
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, RequestContext
 from strands import Agent
 from strands.models import BedrockModel
+from tools.confirmation_hook import ConfirmationHook, confirmation_events, resume_prompt
 from tools.conversation_memory import create_conversation_manager
 from tools.customer_id_hook import CustomerIdHook
 from tools.gateway import create_gateway_mcp_client
 from tools.guardrail import guardrail_settings
+from tools.leaked_markup import LeakedMarkupFilter
 from tools.mcp_registry import build_registry_mcp_clients, is_discovery_enabled
 from tools.session_context import apply_session_context
 from tools.system_prompt import PROMPT_VERSION, build_system_prompt
@@ -97,9 +99,14 @@ def create_strands_agent(
             user has no linked customer.
     """
 
+    # MODEL_ID comes from config.yaml (backend.model_id). GPT-6 models reject temperature.
+    model_id = os.environ.get("MODEL_ID")
+    if not model_id:
+        raise ValueError("MODEL_ID environment variable is required")
+
     # The guardrail blocks prompt attacks and topics unrelated to banking; it masks nothing.
     bedrock_model = BedrockModel(
-        model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        model_id=model_id,
         temperature=0.1,
         **guardrail_settings(),
     )
@@ -135,8 +142,9 @@ def create_strands_agent(
         session_manager=session_manager,
         # Short-term memory window and optional summarization, from STM_* env vars.
         conversation_manager=create_conversation_manager(),
-        # Overwrites customer_id on every tool call with the token's value.
-        hooks=[CustomerIdHook(customer_id)],
+        # In order: overwrite customer_id with the token's value, then pause a card
+        # block, claim or hand-off until the customer taps Yes or No.
+        hooks=[CustomerIdHook(customer_id), ConfirmationHook()],
         trace_attributes={
             "user.id": user_id,
             "session.id": session_id,
@@ -175,8 +183,19 @@ async def invocations(payload, context: RequestContext):
         # into the system prompt every turn, out of reach of the conversation window.
         await apply_session_context(agent, customer_id)
 
-        async for event in agent.stream_async(user_query):
-            yield json.loads(json.dumps(dict(event), default=str))
+        # A paused claim or hand-off resumes with the customer's answer instead of a prompt.
+        # ponytail: _interrupt_state is Strands-internal (1.32.0); it's the only way to
+        # tell, before streaming, that the agent waits on an answer.
+        prompt = user_query
+        if agent._interrupt_state.activated:
+            prompt = resume_prompt(list(agent._interrupt_state.interrupts), payload)
+
+        markup = LeakedMarkupFilter()
+        async for event in agent.stream_async(prompt):
+            for confirmation in confirmation_events(event):
+                yield confirmation
+            for clean in markup.clean(json.loads(json.dumps(dict(event), default=str))):
+                yield clean
 
     except Exception as e:
         logger.exception("Agent run failed")
