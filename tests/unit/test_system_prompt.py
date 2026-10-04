@@ -39,6 +39,9 @@ PINNED_PROMPT_HASHES = {
     # v8 opening on an open case's claim and amount, never re-blocking or re-claiming
     # charges an open case already covers
     "v9": "e0e28866d50314455d83aea94f9562cd6afe79dc5506881a3fd83537966869e3",
+    # v9 after the persona eval: only contradicts_card_state is a mismatch, a person is
+    # offered only through the hand-off call, priority high follows a High claim or case
+    "v10": "7be7fed5e4577e44d63a8b037f83b930d6bc6189e5f398477906f23221e594ba",
 }
 
 
@@ -160,6 +163,34 @@ def test_priority_high_covers_every_reason(system_prompt):
 
     assert "Use priority high when a card was lost or stolen or couldn't be blocked" in prompt
     assert "Use priority normal unless a rule above says high" not in prompt
+
+
+def test_priority_high_follows_the_claims_priority_not_a_usd_sum(system_prompt):
+    # Persona eval: a USD 500 sum can't be judged on COP or ARS charges (no
+    # conversions), and P07's existing High claim went out as a normal hand-off.
+    prompt = _flat(system_prompt.BASE_SYSTEM_PROMPT)
+
+    assert "more than USD 500" not in prompt
+    assert (
+        'a claim opened in this chat or a case in "open_cases" has priority High' in prompt
+    )
+
+
+def test_only_contradicts_card_state_means_the_records_do_not_match(system_prompt):
+    # Persona eval P01: code 51 with credit available was called a mismatch and
+    # handed off; the expected outcome is the code's meaning, no cause guessed.
+    prompt = _flat(system_prompt.BASE_SYSTEM_PROMPT)
+
+    assert "Only contradicts_card_state true from explain_transaction means the records" in prompt
+    assert "don't call it a mismatch" in prompt
+
+
+def test_a_person_is_offered_only_through_the_hand_off_call(system_prompt):
+    # Persona eval P03: a person was offered in text, other sessions used the buttons.
+    prompt = _flat(system_prompt.BASE_SYSTEM_PROMPT)
+
+    assert "Never offer a person in text" in prompt
+    assert "offer to pass them to a person" not in prompt
 
 
 def test_open_case_follow_up_hands_off_without_a_new_claim(system_prompt):
