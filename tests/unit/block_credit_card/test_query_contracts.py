@@ -160,8 +160,9 @@ def test_tool_spec_name_inputs_and_required_fields() -> None:
     assert properties["customer_confirmed"]["type"] == "boolean"
 
 
-def test_tool_spec_description_demands_an_explicit_yes() -> None:
+def test_tool_spec_description_leaves_the_yes_to_the_buttons() -> None:
+    # agent/ledgerlens/tools/confirmation_hook.py pauses the call for the customer's click.
     description = tool_spec()["description"]
 
-    assert "Only call after the customer explicitly said yes" in description
+    assert "the app asks the customer to confirm with Yes/No buttons" in description
     assert "'already_blocked'" in description
