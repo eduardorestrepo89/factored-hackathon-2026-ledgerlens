@@ -11,6 +11,7 @@ interface ChatInputProps {
   handleSubmit: (e: FormEvent) => void
   isLoading: boolean
   className?: string
+  placeholder?: string
 }
 
 export function ChatInput({
@@ -19,6 +20,7 @@ export function ChatInput({
   handleSubmit,
   isLoading,
   className = "",
+  placeholder = "Escribe un mensaje…",
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -60,7 +62,7 @@ export function ChatInput({
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your message... (Ctrl+Enter for new line)"
+          placeholder={placeholder}
           disabled={isLoading}
           className="flex-1 min-h-[40px] max-h-[200px] resize-none py-2"
           rows={1}
@@ -71,12 +73,12 @@ export function ChatInput({
           {isLoading ? (
             <>
               <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
-              Thinking...
+              Pensando…
             </>
           ) : (
             <>
               <Send className="h-4 w-4 mr-2" />
-              Send
+              Enviar
             </>
           )}
         </Button>
