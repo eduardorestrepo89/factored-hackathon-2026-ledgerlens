@@ -1,7 +1,13 @@
 # Agent short-term memory and session-start context: Plan
 
 **Date:** 2026-10-03
-**Status:** Planned, not started.
+**Status:** Implemented on `feat/gateway-wiring` (uncommitted, awaiting the user's review). The final code review changed six things the sections below still sketch the old way:
+- **Bootstrap:** `session_context.py` streams the two tools straight from `agent.tool_registry`, not through `agent.tool`. `agent.tool` runs conversation management after every call (`strands/tools/_caller.py:136-138`), so two parallel calls could each summarize the same messages.
+- **Body check:** it saves a body only if it holds `customer` / `reasons` and no `error`. The Lambdas return failures as `{"error": ...}`. It also unwraps one `{"content": [...]}` envelope.
+- **Rollback:** the `removed_message_count` rollback lives in an overridden `reduce_context`, which strands also calls on a context overflow. `apply_management` only logs.
+- **Switching summarization:** `StmSlidingWindowConversationManager` and `WindowedSummarizingConversationManager` restore each other's saved state, and the default strands state. Switching `use_stm_summarization` no longer fails sessions in flight.
+- **Escaping:** `build_system_prompt` escapes `<` and `>` inside the context JSON, so database text can't close `<session_context>`.
+- **Prompt v2:** OPENING names the event from the top reason's `evidence`, not from a `ref_id` lookup in "customer".
 **Scope:** `patterns/strands-single-agent/` (including replacing `tools/session_start.py`), `infra-cdk/` (config and runtime env vars), `tests/unit/`, `requirements-dev.txt`, and one fix in `docs/LEDGERLENS_PRODUCT_DESIGN.md`.
 **Checked against:** `strands-agents==1.32.0` and `bedrock-agentcore==1.4.7`, the versions pinned in `patterns/strands-single-agent/requirements.txt`. Strands is **not** installed in `.venv`; its source was read from the 1.32.0 wheel.
 

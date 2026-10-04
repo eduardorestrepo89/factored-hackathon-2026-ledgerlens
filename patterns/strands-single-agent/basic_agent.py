@@ -14,10 +14,11 @@ from bedrock_agentcore.memory.integrations.strands.session_manager import (
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, RequestContext
 from strands import Agent
 from strands.models import BedrockModel
+from tools.conversation_memory import create_conversation_manager
 from tools.customer_id_hook import CustomerIdHook
 from tools.gateway import create_gateway_mcp_client
 from tools.mcp_registry import build_registry_mcp_clients, is_discovery_enabled
-from tools.session_start import load_session_context
+from tools.session_context import apply_session_context
 from tools.system_prompt import PROMPT_VERSION, build_system_prompt
 from utils.auth import (
     extract_customer_id_from_token,
@@ -128,6 +129,8 @@ def create_strands_agent(
         tools=tools,
         model=bedrock_model,
         session_manager=session_manager,
+        # Short-term memory window and optional summarization, from STM_* env vars.
+        conversation_manager=create_conversation_manager(),
         # Overwrites customer_id on every tool call with the token's value.
         hooks=[CustomerIdHook(customer_id)],
         trace_attributes={
@@ -164,8 +167,9 @@ async def invocations(payload, context: RequestContext):
         customer_id = extract_customer_id_from_token(access_token)
         agent = create_strands_agent(user_id, session_id, access_token, customer_id)
         logger.info("[PROMPT] version=%s session=%s", PROMPT_VERSION, session_id)
-        # First turn only: records get_session_context into the memory-backed history.
-        load_session_context(agent, customer_id)
+        # Session context: fetched once per session into agent.state, then rendered
+        # into the system prompt every turn, out of reach of the conversation window.
+        await apply_session_context(agent, customer_id)
 
         async for event in agent.stream_async(user_query):
             yield json.loads(json.dumps(dict(event), default=str))
