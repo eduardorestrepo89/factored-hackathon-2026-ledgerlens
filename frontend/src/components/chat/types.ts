@@ -1,5 +1,6 @@
 // Define message types
-export type MessageRole = "user" | "assistant"
+// "human" is the human agent (Laura) after a hand-off; those messages never reach AgentCore
+export type MessageRole = "user" | "assistant" | "human"
 
 export type ToolCallStatus = "streaming" | "executing" | "complete"
 

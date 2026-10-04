@@ -325,6 +325,8 @@ HAVING COUNT(*) >= 20
 
 ## 5. `human_agent_hand_off`
 
+> **Superseded:** the SNS publisher, topic and settings in this section were removed by [2026-10-03-human-hand-off-frontend-design.md](2026-10-03-human-hand-off-frontend-design.md). The input schema and validation still hold.
+
 ### 5.1 Input (`tool_spec.json`)
 
 ```json

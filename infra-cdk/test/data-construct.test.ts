@@ -182,10 +182,9 @@ test("the read tools keep their construct ids, so the deployed functions are not
   }
 })
 
-test("the hand-off topic is encrypted; its Lambda runs outside the VPC and may only publish", () => {
-  const topicId = logicalId("AWS::SNS::Topic", { TopicName: "ledgerlens-human-handoff" })
-  const topic = t.findResources("AWS::SNS::Topic")[topicId]
-  expect(JSON.stringify(topic.Properties.KmsMasterKeyId)).toContain("alias/aws/sns")
+test("the hand-off Lambda runs outside the VPC with no environment, no SNS and no DSQL", () => {
+  t.resourceCountIs("AWS::SNS::Topic", 0)
+  t.resourceCountIs("AWS::SNS::Subscription", 0)
   const fns = Object.values(
     t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: "ledgerlens-human-agent-hand-off" } })
   )
@@ -194,15 +193,12 @@ test("the hand-off topic is encrypted; its Lambda runs outside the VPC and may o
   expect(fn.Properties.VpcConfig).toBeUndefined()
   expect(fn.Properties.Handler).toBe("human_agent_hand_off_lambda.delivery.handler.handler")
   expect(fn.Properties.Timeout).toBe(10)
-  expect(fn.Properties.Environment.Variables.HANDOFF_TOPIC_ARN).toEqual({ Ref: topicId })
-  const roleId = fn.Properties.Role["Fn::GetAtt"][0]
-  const actions = actionsOf(roleId)
-  expect(actions).toContain("sns:Publish")
-  expect(actions.filter((a: string) => a.startsWith("dsql:"))).toEqual([])
+  expect(fn.Properties.Environment).toBeUndefined()
+  const actions = actionsOf(fn.Properties.Role["Fn::GetAtt"][0])
+  expect(actions.filter((a: string) => a.startsWith("sns:") || a.startsWith("dsql:"))).toEqual([])
 })
 
-test("the admin email gets the hand-offs only when it is configured", () => {
-  t.resourceCountIs("AWS::SNS::Subscription", 0)
+test("an admin email no longer subscribes to anything", () => {
   const withEmail = synth({ ...config, admin_user_email: "ops@example.com" } as unknown as AppConfig)
-  withEmail.hasResourceProperties("AWS::SNS::Subscription", { Protocol: "email", Endpoint: "ops@example.com" })
+  withEmail.resourceCountIs("AWS::SNS::Subscription", 0)
 })

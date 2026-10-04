@@ -41,8 +41,10 @@ def test_tool_spec_matches_the_use_case() -> None:
     assert properties["related_ids"]["maxItems"] == MAX_RELATED_IDS
 
 
-def test_tool_spec_description_asks_for_a_complete_summary_and_no_time() -> None:
+def test_description_asks_for_a_summary_a_goodbye_and_no_time() -> None:
     description = tool_spec()["description"]
 
     assert "without asking the customer anything again" in description
+    assert "say goodbye in one or two sentences" in description
+    assert "continue in this same chat" in description
     assert "Don't promise a time." in description

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class HandOff:
-    """A validated hand-off to a human agent, as it is published."""
+    """A validated hand-off to a human agent."""
 
     customer_id: str
     priority: str
@@ -16,7 +16,7 @@ class HandOff:
 
 @dataclass(frozen=True)
 class HandOffResult:
-    """The published hand-off: its reference and priority."""
+    """The queued hand-off and its content-derived id."""
 
     hand_off_id: str
-    priority: str
+    hand_off: HandOff

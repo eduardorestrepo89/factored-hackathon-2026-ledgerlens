@@ -10,26 +10,21 @@ in ``context.client_context.custom["bedrockAgentCoreToolName"]`` with a
 Output: ``{"content": [{"type": "text", "text": <JSON>}]}`` on success, or
 ``{"error": <agent-facing message>}``. Raw exception text is never returned.
 
-The use case and its publisher are built once, when the module loads; a warm
-container reuses them. The function runs outside the VPC and never touches DSQL.
+The function makes no AWS call and reads no configuration: the frontend reads
+the hand-off from the agent's stream and opens the human agent's desk
+(docs/superpowers/specs/2026-10-03-human-hand-off-frontend-design.md).
 """
 
 import json
 import logging
-import os
 from collections.abc import Mapping
 from typing import Any, Final
 
-from human_agent_hand_off_lambda.delivery.dependencies.dependencies_builder import (
-    build_hand_off_use_case,
-)
+from human_agent_hand_off_lambda.application.use_cases.hand_off import HandOffUseCase
 from human_agent_hand_off_lambda.delivery.presenters.hand_off import (
     present_hand_off,
 )
-from human_agent_hand_off_lambda.domain.errors import (
-    DomainError,
-    HandOffUnavailableError,
-)
+from human_agent_hand_off_lambda.domain.errors import DomainError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -47,11 +42,11 @@ _WRONG_TOOL_MESSAGE: Final = (
 )
 
 
-USE_CASE = build_hand_off_use_case(os.environ)
+USE_CASE = HandOffUseCase()
 
 
 def handler(event: object, context: object) -> dict[str, Any]:
-    """Send the conversation to a human agent for the agent.
+    """Validate a hand-off to a human agent and return it to the agent.
 
     Args:
         event: Tool arguments passed directly by the AgentCore Gateway.
@@ -67,8 +62,6 @@ def handler(event: object, context: object) -> dict[str, Any]:
 
     args = event if isinstance(event, Mapping) else {}
     try:
-        if USE_CASE is None:
-            raise HandOffUnavailableError()
         body = present_hand_off(
             USE_CASE.execute(
                 customer_id=args.get("customer_id"),

@@ -12,6 +12,9 @@ export type ToolRenderFn = (props: ToolRenderProps) => ReactNode
 
 const renderers = new Map<string, ToolRenderFn>()
 
+/** The tool name without the Gateway's "<target>___" prefix. */
+export const bareToolName = (name: string): string => name.split("___").pop() ?? name
+
 export function useDefaultTool(render: ToolRenderFn) {
   renderers.set("*", render)
 }
@@ -21,5 +24,5 @@ export function useToolRenderer(name: string, render: ToolRenderFn) {
 }
 
 export function getToolRenderer(name: string): ToolRenderFn | null {
-  return renderers.get(name) ?? renderers.get("*") ?? null
+  return renderers.get(name) ?? renderers.get(bareToolName(name)) ?? renderers.get("*") ?? null
 }

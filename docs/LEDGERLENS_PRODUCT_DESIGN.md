@@ -83,7 +83,7 @@ AgentCore Runtime (Strands agent, Claude Sonnet 4.5)
 AgentCore Gateway (Cognito machine JWT → Cedar policy engine, ENFORCE)
    ▼
 Lambda tools (IAM token auth) ──> Aurora DSQL (customer data, serverless, PostgreSQL-compatible)
-   └─ human_agent_hand_off ──> SNS (human agent queue / alert)
+   └─ human_agent_hand_off ──> agent desk in the frontend (no AWS service)
 ```
 
 | Component | Role | Status in the repo |
@@ -96,7 +96,7 @@ Lambda tools (IAM token auth) ──> Aurora DSQL (customer data, serverless, Po
 | AgentCore Gateway + Cedar | Exposes the tools over MCP and enforces access per customer | Exists; replace the sample tool |
 | 9 Lambda tools | Section 7 | **To build** |
 | Aurora DSQL | ERD data model; tools connect with short-lived IAM tokens, no DB password | **To build.** `list_card_transactions` is already written for it. |
-| SNS | Human hand-off alerts | **To build** |
+| Frontend agent desk | Human hand-off (split screen) | **Built** (hand-off spec) |
 
 ---
 
@@ -185,7 +185,7 @@ Notes:
 | 6 | `transaction_fraud_detection` | Model | A2 | transactions, digital_events, customers | — | — |
 | 7 | `block_credit_card` | Model | A2 | products | products | **Yes** |
 | 8 | `open_claim` | Model | A2 | transactions, complaints | complaints | **Yes** |
-| 9 | `human_agent_hand_off` | Model | A2 + fallback | — | SNS, call_center_interactions | — |
+| 9 | `human_agent_hand_off` | Model | A2 + fallback | — | — (the frontend opens the agent desk) | — |
 
 Conventions for every tool:
 - **Gateway targets:** one Lambda per tool, one Gateway target per Lambda, named `<tool-name-with-dashes>-target`. The Cedar action is `"<target>___<tool>"`.
@@ -805,7 +805,7 @@ HAVING COUNT(*) >= 20;             -- no estimate from too few cases
 
 ### 7.9 `human_agent_hand_off` (A2 + fallback)
 
-Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tools-design.md) §5. SNS only; the Lambda runs outside the VPC.
+Spec: [2026-10-03-human-hand-off-frontend-design.md](superpowers/specs/2026-10-03-human-hand-off-frontend-design.md), which replaces the SNS design of the write-tools spec §5. The Lambda validates the hand-off and returns it; it runs outside the VPC and calls no AWS service.
 
 **tool_spec description:** "Transfers the conversation to a human agent. Use when the customer asks for a person, after a confirmed fraud case, or when you can't resolve the request. Include a complete summary so the customer doesn't have to repeat anything."
 
@@ -821,7 +821,7 @@ Spec: [2026-10-03-write-tools-design.md](superpowers/specs/2026-10-03-write-tool
 ```
 
 **Behavior**
-- Publishes the payload to the SNS topic `ledgerlens-human-handoff`. Subscribers can be email or SMS for the demo, or a contact-center queue later.
+- Returns the validated hand-off with a content-derived `HO-` id. The frontend detects the result, waits for the goodbye and opens the human agent's desk.
 - No `call_center_interactions` row: that table has no column for the summary.
 
 ---
@@ -1084,10 +1084,10 @@ when { context has input && !(context.input has customer_confirmed && context.in
 
 **Infrastructure (`infra-cdk/`)**
 - [ ] Create an Aurora DSQL cluster. No VPC, DB secret or RDS Proxy is needed: the tools reach the cluster endpoint over TLS with IAM tokens. Add a PrivateLink endpoint only if traffic must stay private.
-- [x] Create the SNS topic `ledgerlens-human-handoff` (data stack).
+- [x] ~~Create the SNS topic `ledgerlens-human-handoff`~~ Removed: the frontend opens the agent desk (hand-off spec).
 - [ ] Create 9 tool Lambdas (Python 3.13, ARM64), each with `gateway/tools/<tool>/tool_spec.json`. Set `DB_ENGINE=aurora_dsql`, `DSQL_CLUSTER_ENDPOINT` and `DSQL_DB_USER`. Keep the Lambda timeout well under the agent's tool timeout, because DSQL has no per-query timeout.
 - [x] Call `gateway.addLambdaTarget(...)` once per tool, replacing `sample-tool-target`. Done for the three read tools, imported from the data stack by name.
-- [x] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`). The read tools use `ledgerlens-tools` (DSQL role `ll_read`); `block_credit_card` and `open_claim` use `ledgerlens-write-tools` (`ll_write`); only the hand-off role may publish to SNS.
+- [x] Lambda IAM: `dsql:DbConnect` on the cluster ARN (`dsql:DbConnectAdmin` only if `DSQL_DB_USER=admin`). The read tools use `ledgerlens-tools` (DSQL role `ll_read`); `block_credit_card` and `open_claim` use `ledgerlens-write-tools` (`ll_write`); the hand-off Lambda has only its log permissions.
 - [x] Pre-token Lambda: look up `customer_id` in `USER_CUSTOMER_IDS_MAP` and add it as a claim (blank when not found).
 - [x] Pre-token Lambda CDK (`cognito-construct.ts`): set `USER_CUSTOMER_IDS_MAP` to the blank template from section 5.2.
 - [x] Cedar custom resource: create one policy per statement in `gateway/policies/policy.cedar`.
@@ -1113,7 +1113,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | **P0: Foundation** | Aurora DSQL + data load, identity mapping, `customer_id` claim, Cedar rules, one read tool working end to end (`list_credit_cards`) | "Show my cards" works only for the signed-in customer |
 | **P1: A2 clarification** | `list_card_transactions`, `explain_transaction` | J2: foreign-currency charge explained with the rate |
 | **P2: A1 opening** | `get_session_context`, `classify_call_type`, session start in code, the new prompt | J1: agent opens with the declined charge |
-| **P3: A2 fraud** | `transaction_fraud_detection`, `block_credit_card`, `open_claim`, `human_agent_hand_off` + SNS | J3: full fraud flow |
+| **P3: A2 fraud** | `transaction_fraud_detection`, `block_credit_card`, `open_claim`, `human_agent_hand_off` + agent desk | J3: full fraud flow |
 | **P4: Hardening** | Evaluations (section 13), red-team, latency tuning | Metrics dashboard |
 
 ---
@@ -1126,7 +1126,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 | Q2 | **Answered 2026-10-01: no.** Does the AgentCore Gateway forward JWT claims to Lambda targets? It doesn't: the Lambda event holds only the tool's input properties, and the context holds only Gateway metadata. `customer_id` stays a tool input, filled in by code (section 5.3), and Cedar check 2 is the check that ties it to the token. | Security design, section 5 |
 | Q3 | Do `forbid` statements on `context.input` affect tool visibility at `tools/list`? | Cedar, section 10 |
 | Q4 | Should `block_credit_card` write to Aurora DSQL only (demo), or call a card processor sandbox? | Scope of P3 |
-| Q5 | Who receives the SNS hand-off: email for the demo, or a contact-center queue? | P3 |
+| Q5 | ~~Who receives the SNS hand-off?~~ Answered: the frontend's agent desk (hand-off spec). | P3 |
 | Q6 | Which customer language(s) are in the demo dataset? `customers` has no language field, so it's inferred from `country`. | Style section of the prompt |
 | Q7 | **Answered 2026-10-01:** every tool Lambda reads an optional `AS_OF` env var as "now"; demos set it to a timestamp inside the dataset's time range. | All the "recent" windows |
 | Q8 | Does Cedar evaluate a tool call's arguments before or after a Gateway REQUEST interceptor transforms them? | Whether the interceptor option in section 5.3 keeps Cedar check 2 meaningful |
