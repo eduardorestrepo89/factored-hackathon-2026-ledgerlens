@@ -1,8 +1,8 @@
 {
-  "name": "fast-cdk",
+  "name": "ledgerlens-cdk",
   "version": "0.4.2",
   "bin": {
-    "fast-cdk": "bin/fast-cdk.js"
+    "ledgerlens-cdk": "bin/ledgerlens-cdk.js"
   },
   "scripts": {
     "build": "tsc",

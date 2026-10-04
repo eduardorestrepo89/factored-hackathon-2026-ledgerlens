@@ -1,5 +1,9 @@
 stack_name_base: ledgerlens-bank-assistant
 
+# What `cdk deploy --all` deploys: full (data stack, then the main stack) or data (only the
+# data stack). Override per run with: cdk deploy --all -c deploy_scope=data
+deploy_scope: full
+
 # Optional: Set to automatically create an admin user and email credentials
 # If not provided, you'll need to manually create users via AWS Console
 admin_user_email: # Example: admin@example.com

@@ -17,6 +17,7 @@ from strands.models import BedrockModel
 from tools.conversation_memory import create_conversation_manager
 from tools.customer_id_hook import CustomerIdHook
 from tools.gateway import create_gateway_mcp_client
+from tools.guardrail import guardrail_settings
 from tools.mcp_registry import build_registry_mcp_clients, is_discovery_enabled
 from tools.session_context import apply_session_context
 from tools.system_prompt import PROMPT_VERSION, build_system_prompt
@@ -96,8 +97,11 @@ def create_strands_agent(
             user has no linked customer.
     """
 
+    # The guardrail blocks prompt attacks and topics unrelated to banking; it masks nothing.
     bedrock_model = BedrockModel(
-        model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0", temperature=0.1
+        model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        temperature=0.1,
+        **guardrail_settings(),
     )
 
     session_manager = _create_session_manager(user_id, session_id)

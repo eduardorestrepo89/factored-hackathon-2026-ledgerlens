@@ -7,6 +7,26 @@ const MAX_STACK_NAME_BASE_LENGTH = 35
 export type DeploymentType = "docker" | "zip"
 
 /**
+ * What `cdk deploy` builds.
+ * - full: the data stack and the main stack (frontend, Cognito, agent, Gateway and tool Lambdas).
+ * - data: only the data stack (Aurora DSQL and its load pipeline).
+ */
+export type DeployScope = "full" | "data"
+const DEPLOY_SCOPES: readonly string[] = ["full", "data"]
+
+/**
+ * The scope to deploy: a `cdk deploy -c deploy_scope=<scope>` override wins over config.yaml.
+ * Context values arrive as raw strings, so the override is validated here.
+ */
+export function resolveDeployScope(configured: DeployScope, override?: unknown): DeployScope {
+  if (override === undefined) return configured
+  if (typeof override !== "string" || !DEPLOY_SCOPES.includes(override)) {
+    throw new Error(`Invalid -c deploy_scope '${override}'. Must be 'full' or 'data'.`)
+  }
+  return override as DeployScope
+}
+
+/**
  * Network mode for the AgentCore Runtime.
  * - PUBLIC: Runtime is accessible over the public internet (default).
  * - VPC: Runtime is deployed into a user-provided VPC for private network isolation.
@@ -28,11 +48,13 @@ export interface VpcConfig {
 
 export interface AppConfig {
   stack_name_base: string
+  /** Full deploy or only the data stack. Defaults to "full". */
+  deploy_scope: DeployScope
   admin_user_email?: string | null
   backend: {
     pattern: string
     deployment_type: DeploymentType
-    /** Name for the agent runtime. Valid characters: a-z, A-Z, 0-9, _. Defaults to "FASTAgent". */
+    /** Name for the agent runtime. Valid characters: a-z, A-Z, 0-9, _. Defaults to "LedgerLensAgent". */
     agent_name: string
     /** Network mode for the AgentCore Runtime. Defaults to "PUBLIC". */
     network_mode: NetworkMode
@@ -157,6 +179,11 @@ export class ConfigManager {
         )
       }
 
+      const deployScope = parsedConfig.deploy_scope ?? "full"
+      if (!DEPLOY_SCOPES.includes(deployScope)) {
+        throw new Error(`Invalid deploy_scope '${deployScope}' in ${configPath}. Must be 'full' or 'data'.`)
+      }
+
       // Validate network_mode if provided
       const networkMode = parsedConfig.backend?.network_mode || "PUBLIC"
       if (networkMode !== "PUBLIC" && networkMode !== "VPC") {
@@ -240,11 +267,12 @@ export class ConfigManager {
 
       return {
         stack_name_base: stackNameBase,
+        deploy_scope: deployScope,
         admin_user_email: parsedConfig.admin_user_email || null,
         backend: {
           pattern: parsedConfig.backend?.pattern || "strands-single-agent",
           deployment_type: deploymentType,
-          agent_name: parsedConfig.backend?.agent_name || "FASTAgent",
+          agent_name: parsedConfig.backend?.agent_name || "LedgerLensAgent",
           network_mode: networkMode,
           vpc: vpcConfig,
           use_long_term_memory: parsedConfig.backend?.use_long_term_memory === true,

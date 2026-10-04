@@ -1,7 +1,7 @@
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
-import { ConfigManager } from "../lib/utils/config-manager"
+import { ConfigManager, resolveDeployScope } from "../lib/utils/config-manager"
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "config-manager-"))
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }))
@@ -71,4 +71,33 @@ test("a preserve count may reach the window while summarization is off", () => {
   // reduce_context never runs on a sliding window, so the count is unused
   const backend = loadBackend("  stm_window_size: 10\n  stm_preserve_recent_messages: 10\n")
   expect(backend.stm_preserve_recent_messages).toBe(10)
+})
+
+// Writes a config file from the given lines and loads it.
+function loadConfig(lines: string) {
+  const file = path.join(dir, `config-${files++}.yaml`)
+  fs.writeFileSync(file, `stack_name_base: test\n${lines}`)
+  return new ConfigManager(file).getProps()
+}
+
+test("deploys everything when deploy_scope is not set", () => {
+  expect(loadConfig("").deploy_scope).toBe("full")
+})
+
+test.each(["full", "data"])("reads deploy_scope %s", (scope) => {
+  expect(loadConfig(`deploy_scope: ${scope}\n`).deploy_scope).toBe(scope)
+})
+
+test("rejects an unknown deploy_scope", () => {
+  expect(() => loadConfig("deploy_scope: backend\n")).toThrow(/deploy_scope/)
+})
+
+test("a -c deploy_scope override wins over config.yaml", () => {
+  expect(resolveDeployScope("full", "data")).toBe("data")
+  expect(resolveDeployScope("data", "full")).toBe("full")
+  expect(resolveDeployScope("data", undefined)).toBe("data")
+})
+
+test("rejects an unknown -c deploy_scope override", () => {
+  expect(() => resolveDeployScope("full", "all")).toThrow(/deploy_scope/)
 })

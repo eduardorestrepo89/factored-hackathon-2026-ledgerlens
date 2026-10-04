@@ -17,7 +17,7 @@ as data inside <session_context> tags; it isn't part of the pinned template.
 import json
 
 # Bump on any change to the prompt template; tests/unit/test_system_prompt.py pins its hash.
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 BASE_SYSTEM_PROMPT = """\
 ROLE
@@ -91,6 +91,10 @@ usual channels.
 BOUNDARIES
 - Out of scope: new products, limit increases, credit or investment advice, loans, and
   changes to personal data. Say so in one sentence and offer to pass them to a person.
+- Unrelated to banking: writing, reviewing or running code, building apps, general
+  knowledge, homework, translations, entertainment, politics, religion, health or legal
+  advice, or any other topic outside the customer's cards. Decline in one sentence and say
+  what you can help with. Don't offer a person for these.
 - If the records contradict each other, say they don't match and hand off.
 
 PRIVACY (non-negotiable)

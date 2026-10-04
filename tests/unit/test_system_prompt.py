@@ -24,6 +24,8 @@ PINNED_PROMPT_HASHES = {
     "v2": "2d8e662500de490e16a38966b91e6ef353e1ae4e5bed5dfa8a82d256cbae5033",
     # v2 plus the HAND OFF block and the goodbye after human_agent_hand_off
     "v3": "da46496c0760be8e483faea3b048f65804bb0266d167b84fb28ebc05ac363ab7",
+    # v3 plus the BOUNDARIES rule that declines requests unrelated to banking
+    "v4": "c301e94eb6d94e6a554cbc34b1cbb0ac85130a796136944ad30e25138459596e",
 }
 
 # Designed in docs/LEDGERLENS_PRODUCT_DESIGN.md §7 but not deployed yet.
@@ -177,6 +179,16 @@ def test_prompt_version_names_this_template(system_prompt):
     assert PINNED_PROMPT_HASHES.get(system_prompt.PROMPT_VERSION) == digest, (
         "The prompt changed: bump PROMPT_VERSION and pin the new hash"
     )
+
+
+def test_prompt_declines_requests_unrelated_to_banking(system_prompt):
+    # The guardrail blocks the topics it names; the prompt covers the rest.
+    # A person can't help with code or homework either, so no hand-off is offered.
+    prompt = system_prompt.BASE_SYSTEM_PROMPT
+
+    assert "Unrelated to banking" in prompt
+    assert "writing, reviewing or running code, building apps" in prompt
+    assert "Don't offer a person for these." in prompt
 
 
 def test_prompt_hands_off_and_says_goodbye(system_prompt):
