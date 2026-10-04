@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Ephemeral CodeBuild deployment script for FAST.
+Ephemeral CodeBuild deployment script for LedgerLens.
 
-Deploys the full FAST stack using a CodeBuild project. Requires Python 3.11+,
+Deploys the LedgerLens stacks using a CodeBuild project. Requires Python 3.11+,
 AWS CLI, and git. Only git-tracked or staged files are deployed; untracked
 files are skipped with a warning.
 
@@ -15,11 +15,14 @@ Flow: zip source → create source bucket/IAM role/boundary/project →
 On success, all created resources (source bucket, project, IAM role, boundary)
 are removed. On failure, they are retained for debugging and reused on the next
 run. The bucket has a 1-day object-expiry rule so a leftover archive can't
-linger. Does NOT remove the deployed FAST stack (use `cd infra-cdk && cdk destroy`).
+linger. Does NOT remove the deployed LedgerLens stacks (use `cd infra-cdk && cdk destroy`).
 
 Usage: python scripts/deploy-with-codebuild.py [STACK ...]
-  No stack names deploys every stack (cdk deploy --all). To deploy only the
-  database and its pipeline: python scripts/deploy-with-codebuild.py <stack_name_base>-data
+  No stack names deploys every stack in deploy_scope (cdk deploy --all). With
+  deploy_scope: full (the default in infra-cdk/config.yaml) that is the data stack and
+  the main stack; with deploy_scope: data, only the data stack. To deploy only the
+  database and its pipeline under a full scope:
+  python scripts/deploy-with-codebuild.py <stack_name_base>-data
 """
 
 import io
@@ -38,7 +41,7 @@ if sys.version_info < (3, 11):
     print("Error: Python 3.11 or higher is required")
     sys.exit(1)
 
-RESOURCE_PREFIX: str = "fast-deploy"
+RESOURCE_PREFIX: str = "ledgerlens-deploy"
 LOG_POLL_INTERVAL: int = 5
 
 
@@ -180,7 +183,7 @@ def _collect_tracked_files(repo_root: Path) -> List[str]:
     except subprocess.CalledProcessError:
         log_error(
             "Failed to list files with git. Run this script from inside the "
-            "FAST git repository."
+            "LedgerLens git repository."
         )
         sys.exit(1)
 

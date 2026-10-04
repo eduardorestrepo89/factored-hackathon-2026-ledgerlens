@@ -8,14 +8,14 @@ This document provides a checklist for bumping the version of FAST (Fullstack Ag
 2. **`pyproject.toml`** - Python package version (`version = "X.Y.Z"`)
 3. **`frontend/package.json`** - Frontend package version (`"version": "X.Y.Z"`)
 4. **`infra-cdk/package.json`** - CDK package version (`"version": "X.Y.Z"`)
-5. **`infra-cdk/lib/fast-main-stack.ts`** - Stack description (`(vX.Y.Z)`)
+5. **`infra-cdk/lib/ledgerlens-main-stack.ts`** - Stack description (`(vX.Y.Z)`)
 6. **`CHANGELOG.md`** - Add new version entry at top
 
 ## Auto-Generated Files (DO NOT manually update)
 
 - `frontend/package-lock.json`
 - `infra-cdk/package-lock.json`
-- `infra-cdk/lib/fast-main-stack.js`
+- `infra-cdk/lib/ledgerlens-main-stack.js`
 
 ## Procedure
 

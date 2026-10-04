@@ -3,22 +3,27 @@ import { Construct } from "constructs"
 import { AppConfig } from "./utils/config-manager"
 
 // Import constructs
-import { BackendConstruct } from "./backend-construct"
+import { BackendConstruct, ToolsData } from "./backend-construct"
 import { AmplifyHostingConstruct } from "./amplify-hosting-construct"
 import { CognitoConstruct } from "./cognito-construct"
 
-export interface FastAmplifyStackProps extends cdk.StackProps {
+export interface LedgerLensMainStackProps extends cdk.StackProps {
   config: AppConfig
+  /** The data stack's VPC, roles and DSQL host, used by the tool Lambdas. */
+  data: ToolsData
 }
 
-export class FastMainStack extends cdk.Stack {
+/**
+ * Frontend hosting, Cognito, and the agent backend: AgentCore Runtime, Gateway and the tool
+ * Lambdas. Built on top of the data stack, which therefore deploys first.
+ */
+export class LedgerLensMainStack extends cdk.Stack {
   public readonly amplifyHosting: AmplifyHostingConstruct
   public readonly backend: BackendConstruct
   public readonly cognito: CognitoConstruct
 
-  constructor(scope: Construct, id: string, props: FastAmplifyStackProps) {
-    const description =
-      "Fullstack AgentCore Solution Template - Main Stack (v0.4.2) (uksb-v6dos0t5g8)"
+  constructor(scope: Construct, id: string, props: LedgerLensMainStackProps) {
+    const description = "LedgerLens bank assistant: frontend, Cognito, agent and Gateway tools (v0.4.2)"
     super(scope, id, { ...props, description })
 
     // Step 1: Create the Amplify construct to get the predictable domain
@@ -34,6 +39,7 @@ export class FastMainStack extends cdk.Stack {
     // Step 2: Create backend construct with the predictable Amplify URL and Cognito details
     this.backend = new BackendConstruct(this, `${id}-backend`, {
       config: props.config,
+      data: props.data,
       userPoolId: this.cognito.userPoolId,
       userPoolClientId: this.cognito.userPoolClientId,
       userPoolDomain: this.cognito.userPoolDomain,

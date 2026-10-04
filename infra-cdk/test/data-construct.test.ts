@@ -60,10 +60,12 @@ test("uses the default VPC, creating no network of its own; the endpoint admits 
   t.hasResourceProperties("AWS::EC2::SecurityGroupIngress", { IpProtocol: "tcp", FromPort: 5432, ToPort: 5432 })
 })
 
-test("every Lambda in the VPC runs in the endpoint's subnet", () => {
+test("the read check runs in the endpoint's subnet; the tool Lambdas live in the main stack", () => {
   const vpcFns = Object.values(t.findResources("AWS::Lambda::Function")).filter((f) => f.Properties.VpcConfig)
-  expect(vpcFns).toHaveLength(9) // the read check and the eight DSQL tools
-  for (const fn of vpcFns) expect(fn.Properties.VpcConfig.SubnetIds).toEqual(["s-12345"])
+  expect(vpcFns).toHaveLength(1)
+  expect(vpcFns[0].Properties.VpcConfig.SubnetIds).toEqual(["s-12345"])
+  const names = Object.values(t.findResources("AWS::Lambda::Function")).map((f) => f.Properties.FunctionName)
+  expect(names.filter((n) => n && n !== "ledgerlens-dsql-read-check")).toEqual([])
 })
 
 test("read check runs in the VPC with the tools role and the private host", () => {
@@ -81,27 +83,6 @@ test("read check runs in the VPC with the tools role and the private host", () =
   expect(host).toContain(`{"Fn::GetAtt":["${clusterId}","Identifier"]}`)
   expect(host).toContain(`{"Fn::Select":[3,{"Fn::Split":[".",{"Fn::GetAtt":["${clusterId}","VpcEndpointServiceName"]}]}]}`)
   expect(host).toContain('"us-east-1.on.aws"')
-})
-
-test.each([
-  ["list_credit_cards", "ledgerlens-list-credit-cards"],
-  ["list_card_transactions", "ledgerlens-list-card-transactions"],
-  ["get_session_context", "ledgerlens-get-session-context"],
-  ["transaction_fraud_detection", "ledgerlens-transaction-fraud-detection"],
-  ["explain_transaction", "ledgerlens-explain-transaction"],
-  ["classify_call_type", "ledgerlens-classify-call-type"],
-])("%s runs in the VPC as the tools role, against the private host as ll_read", (tool, functionName) => {
-  const toolsId = logicalId("AWS::IAM::Role", { RoleName: "ledgerlens-tools" })
-  t.hasResourceProperties("AWS::Lambda::Function", {
-    FunctionName: functionName,
-    Handler: `${tool}_lambda.delivery.handler.handler`,
-    Role: { "Fn::GetAtt": [toolsId, "Arn"] },
-    VpcConfig: Match.objectLike({ SubnetIds: Match.anyValue() }),
-    Environment: { Variables: { DSQL_CLUSTER_ENDPOINT: Match.anyValue(), AS_OF: "2026-06-17T23:59:59" } },
-  })
-  const fn = Object.values(t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: functionName } }))[0]
-  const readCheck = Object.values(t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: "ledgerlens-dsql-read-check" } }))[0]
-  expect(fn.Properties.Environment.Variables.DSQL_CLUSTER_ENDPOINT).toEqual(readCheck.Properties.Environment.Variables.DSQL_HOST)
 })
 
 test("state machine runs ingest, transform, curate, load, then the read check", () => {
@@ -153,49 +134,6 @@ test("write tools role can connect to DSQL, never as admin", () => {
   const actions = actionsOf(writeId)
   expect(actions).toContain("dsql:DbConnect")
   expect(actions).not.toContain("dsql:DbConnectAdmin")
-})
-
-test.each([
-  ["block_credit_card", "ledgerlens-block-credit-card"],
-  ["open_claim", "ledgerlens-open-claim"],
-])("%s runs in the VPC as the write tools role, against the private host", (tool, functionName) => {
-  const writeId = logicalId("AWS::IAM::Role", { RoleName: "ledgerlens-write-tools" })
-  t.hasResourceProperties("AWS::Lambda::Function", {
-    FunctionName: functionName,
-    Handler: `${tool}_lambda.delivery.handler.handler`,
-    Role: { "Fn::GetAtt": [writeId, "Arn"] },
-    Timeout: 30,
-    VpcConfig: Match.objectLike({ SubnetIds: Match.anyValue() }),
-    Environment: { Variables: { DSQL_CLUSTER_ENDPOINT: Match.anyValue(), AS_OF: "2026-06-17T23:59:59" } },
-  })
-})
-
-test("the read tools keep their construct ids, so the deployed functions are not replaced", () => {
-  for (const [functionName, prefix] of [
-    ["ledgerlens-list-credit-cards", "DataListCreditCardsFn"],
-    ["ledgerlens-list-card-transactions", "DataListCardTransactionsFn"],
-    ["ledgerlens-get-session-context", "DataGetSessionContextFn"],
-  ]) {
-    const ids = Object.keys(t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: functionName } }))
-    expect(ids).toHaveLength(1)
-    expect(ids[0].startsWith(prefix)).toBe(true)
-  }
-})
-
-test("the hand-off Lambda runs outside the VPC with no environment, no SNS and no DSQL", () => {
-  t.resourceCountIs("AWS::SNS::Topic", 0)
-  t.resourceCountIs("AWS::SNS::Subscription", 0)
-  const fns = Object.values(
-    t.findResources("AWS::Lambda::Function", { Properties: { FunctionName: "ledgerlens-human-agent-hand-off" } })
-  )
-  expect(fns).toHaveLength(1)
-  const fn = fns[0]
-  expect(fn.Properties.VpcConfig).toBeUndefined()
-  expect(fn.Properties.Handler).toBe("human_agent_hand_off_lambda.delivery.handler.handler")
-  expect(fn.Properties.Timeout).toBe(10)
-  expect(fn.Properties.Environment).toBeUndefined()
-  const actions = actionsOf(fn.Properties.Role["Fn::GetAtt"][0])
-  expect(actions.filter((a: string) => a.startsWith("sns:") || a.startsWith("dsql:"))).toEqual([])
 })
 
 test("an admin email no longer subscribes to anything", () => {

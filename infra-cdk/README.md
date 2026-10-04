@@ -43,6 +43,14 @@ npx cdk bootstrap
 npx cdk deploy --all
 ```
 
+`deploy_scope` in `config.yaml` decides what that deploys:
+
+- `full` (default): `<stack_name_base>-data` (Aurora DSQL and its load pipeline), then
+  `<stack_name_base>` (Amplify, Cognito, the agent, the Gateway and the tool Lambdas).
+- `data`: only `<stack_name_base>-data`.
+
+Override it for one run with `npx cdk deploy --all -c deploy_scope=data`.
+
 ## Useful Commands
 
 * `npm run build`   - Compile TypeScript to JavaScript
@@ -73,14 +81,16 @@ backend:
 ```
 infra-cdk/
 ├── bin/
-│   └── fast-cdk.ts          # CDK app entry point
+│   └── ledgerlens-cdk.ts         # CDK app entry point
 ├── lib/
-│   ├── fast-cdk-stack.ts    # Main orchestrator stack
-│   ├── backend-stack.ts     # Backend/AgentCore stack
-│   ├── frontend-stack.ts    # Frontend/CloudFront stack
-│   └── utils/               # Utility functions and constructs
+│   ├── ledgerlens-app.ts         # Builds the stacks for deploy_scope
+│   ├── ledgerlens-main-stack.ts  # Main stack: Amplify, Cognito, backend
+│   ├── backend-construct.ts      # AgentCore Runtime, Gateway and tool Lambdas
+│   ├── data-stack.ts             # Data stack: Aurora DSQL and its load pipeline
+│   ├── data-construct.ts
+│   └── utils/                    # Utility functions and constructs
 ├── test/
-│   └── fast-cdk.test.ts     # Unit tests
+│   └── ledgerlens-cdk.test.ts    # deploy_scope tests
 ├── cdk.json                 # CDK configuration
 ├── config.yaml              # Application configuration
 ├── package.json

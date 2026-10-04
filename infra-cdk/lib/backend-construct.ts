@@ -16,11 +16,20 @@ import * as cr from "aws-cdk-lib/custom-resources"
 import { Construct } from "constructs"
 import { AppConfig } from "./utils/config-manager"
 import { AgentCoreRole } from "./utils/agentcore-role"
+import { AgentGuardrail } from "./utils/agent-guardrail"
+import { DataConstruct } from "./data-construct"
 import * as path from "path"
 import * as fs from "fs"
 
+/** What the tool Lambdas need from the data stack to reach Aurora DSQL. */
+export type ToolsData = Pick<
+  DataConstruct,
+  "vpc" | "toolSubnets" | "toolsSecurityGroup" | "toolsRole" | "writeToolsRole" | "privateHost"
+>
+
 export interface BackendConstructProps {
   config: AppConfig
+  data: ToolsData
   userPoolId: string
   userPoolClientId: string
   userPoolDomain: cognito.UserPoolDomain
@@ -81,7 +90,7 @@ export class BackendConstruct extends Construct {
     // since it doesn't directly depend on the gateway.
 
     // Create AgentCore Gateway (before Runtime)
-    this.createAgentCoreGateway(props.config)
+    this.createAgentCoreGateway(props.config, props.data)
 
     // Create AgentCore Runtime resources
     this.createAgentCoreRuntime(props.config)
@@ -316,6 +325,24 @@ export class BackendConstruct extends Construct {
       })
     )
 
+    // Guardrail on the agent's model: blocks prompt attacks and topics unrelated to
+    // banking, masks nothing. See lib/utils/agent-guardrail.ts.
+    const guardrail = new AgentGuardrail(this, "AgentGuardrail", {
+      namePrefix: config.stack_name_base,
+    })
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "GuardrailAccess",
+        effect: iam.Effect.ALLOW,
+        actions: ["bedrock:ApplyGuardrail"],
+        resources: [
+          guardrail.guardrailArn,
+          // The Standard tier's cross-region profile, in every region it may route to.
+          `arn:aws:bedrock:*:${this.account}:guardrail-profile/${guardrail.guardrailProfileId}`,
+        ],
+      })
+    )
+
     // Add OAuth2 Credential Provider access for AgentCore Runtime
     // The @requires_access_token decorator performs a two-stage process:
     // 1. GetOauth2CredentialProvider - Looks up provider metadata (ARN, vendor config, grant types)
@@ -427,6 +454,9 @@ export class BackendConstruct extends Construct {
       // config.yaml: mcp_registry and docs/MCP_REGISTRY_DISCOVERY.md.
       MCP_REGISTRY_DISCOVERY_ENABLED: config.backend.mcp_registry.enabled ? "true" : "false",
       MCP_REGISTRY_ID: config.backend.mcp_registry.registry_id,
+      // Read by patterns/strands-single-agent/tools/guardrail.py.
+      GUARDRAIL_ID: guardrail.guardrailId,
+      GUARDRAIL_VERSION: guardrail.guardrailVersion,
     }
 
     // Add claude-agent-sdk specific environment variable
@@ -692,7 +722,7 @@ export class BackendConstruct extends Construct {
     })
   }
 
-  private createAgentCoreGateway(config: AppConfig): void {
+  private createAgentCoreGateway(config: AppConfig, data: ToolsData): void {
     // Create comprehensive IAM role for gateway
     const gatewayRole = new iam.Role(this, "GatewayRole", {
       assumedBy: new iam.ServicePrincipal("bedrock-agentcore.amazonaws.com"),
@@ -869,30 +899,56 @@ export class BackendConstruct extends Construct {
       description: "AgentCore Gateway with MCP protocol and JWT authentication",
     })
 
-    // One Gateway target per LedgerLens tool. The tool Lambdas live in the data
-    // stack (data-construct.ts), next to the database, named ledgerlens-<slug>, so the
-    // data stack deploys first. addLambdaTarget() grants the gateway role invoke
-    // permission; sameEnvironment lets CDK add permissions to the imported function.
+    // One Gateway target (MCP tool) per LedgerLens tool, each backed by its own Lambda,
+    // named ledgerlens-<slug>. The DSQL tools run in the data stack's VPC, in the DSQL
+    // endpoint's subnet: the read tools as ll_read (tools role), block_credit_card and
+    // open_claim as ll_write (write tools role, their DSQL_DB_USER default). The subnets are
+    // public, but Lambdas get no public IP, so the tools reach only the DSQL endpoint.
+    // The hand-off tool calls no AWS service, so it runs outside the VPC with the default role
+    // (docs/superpowers/specs/2026-10-03-human-hand-off-frontend-design.md).
+    // addLambdaTarget() grants the gateway role invoke permission.
     // Target names are <slug>-target, so each tool's Cedar action is
     // "<slug>-target___<tool>" (gateway/policies/policy.cedar). The model sees
     // "gateway_<target>___<tool>", and Bedrock rejects every request if one tool name
     // is over 64 characters, so a long tool gets a shorter target name.
-    // ponytail: imported by name; move the Lambdas here if the two stacks ever deploy apart.
+    const readRole: iam.IRole = data.toolsRole
+    const writeRole: iam.IRole = data.writeToolsRole
     const toolTargets = [
-      { tool: "list_credit_cards", id: "ListCreditCards" },
-      { tool: "list_card_transactions", id: "ListCardTransactions" },
-      { tool: "get_session_context", id: "GetSessionContext" },
-      { tool: "transaction_fraud_detection", id: "TransactionFraudDetection", target: "fraud-detection-target" },
-      { tool: "explain_transaction", id: "ExplainTransaction" },
-      { tool: "classify_call_type", id: "ClassifyCallType" },
-      { tool: "block_credit_card", id: "BlockCreditCard" },
-      { tool: "open_claim", id: "OpenClaim" },
+      { tool: "list_credit_cards", id: "ListCreditCards", role: readRole },
+      { tool: "list_card_transactions", id: "ListCardTransactions", role: readRole },
+      { tool: "get_session_context", id: "GetSessionContext", role: readRole },
+      { tool: "transaction_fraud_detection", id: "TransactionFraudDetection", role: readRole, target: "fraud-detection-target" },
+      { tool: "explain_transaction", id: "ExplainTransaction", role: readRole },
+      { tool: "classify_call_type", id: "ClassifyCallType", role: readRole },
+      { tool: "block_credit_card", id: "BlockCreditCard", role: writeRole },
+      { tool: "open_claim", id: "OpenClaim", role: writeRole },
       { tool: "human_agent_hand_off", id: "HumanAgentHandOff" },
-    ].map(({ tool, id, target }) => {
+    ].map(({ tool, id, target, role }) => {
       const slug = tool.replace(/_/g, "-")
-      const toolFunction = lambda.Function.fromFunctionAttributes(this, `${id}Fn`, {
-        functionArn: `arn:aws:lambda:${this.region}:${this.account}:function:ledgerlens-${slug}`,
-        sameEnvironment: true,
+      const toolFunction = new PythonFunction(this, `${id}Fn`, {
+        functionName: `ledgerlens-${slug}`,
+        runtime: lambda.Runtime.PYTHON_3_13,
+        architecture: lambda.Architecture.ARM_64,
+        entry: path.join(__dirname, "..", "..", "gateway", "tools", tool), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        index: `${tool}_lambda/delivery/handler.py`,
+        handler: "handler",
+        // local test runs leave bytecode caches in the tool folder; don't ship them
+        bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
+        // only the DSQL tools join the VPC and reach the database
+        timeout: cdk.Duration.seconds(role ? 30 : 10),
+        ...(role && {
+          role,
+          vpc: data.vpc,
+          vpcSubnets: data.toolSubnets,
+          allowPublicSubnet: true,
+          securityGroups: [data.toolsSecurityGroup],
+          environment: { DSQL_CLUSTER_ENDPOINT: data.privateHost, AS_OF: config.data.as_of },
+        }),
+        logGroup: new logs.LogGroup(this, `${id}Logs`, {
+          logGroupName: `/aws/lambda/${config.stack_name_base}-${slug}`,
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+        }),
       })
       return gateway.addLambdaTarget(`${id}Target`, {
         gatewayTargetName: target ?? `${slug}-target`,

@@ -244,7 +244,7 @@ fullstack-agentcore-solution-template/
 │   │   ├── amplify-hosting-stack.ts
 │   │   ├── backend-stack.ts
 │   │   ├── cognito-stack.ts
-│   │   └── fast-main-stack.ts
+│   │   └── ledgerlens-main-stack.ts
 │   ├── bin/                # CDK app entry point
 │   ├── lambdas/            # Lambda function code
 │   │   ├── cedar-policy/    # Cedar Policy Engine lifecycle

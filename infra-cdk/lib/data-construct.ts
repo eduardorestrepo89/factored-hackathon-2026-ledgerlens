@@ -26,9 +26,10 @@ export interface DataConstructProps {
 }
 
 /**
- * Aurora DSQL, open only to the tool roles from inside the VPC, the staged pipeline that
- * loads it (docs/superpowers/specs/2026-10-02-data-pipeline-design.md) and the Gateway tool
- * Lambdas (docs/superpowers/specs/2026-10-03-write-tools-design.md).
+ * Aurora DSQL, open only to the tool roles from inside the VPC, and the staged pipeline that
+ * loads it (docs/superpowers/specs/2026-10-02-data-pipeline-design.md). The Gateway tool
+ * Lambdas live in the main stack (backend-construct.ts) and use this construct's VPC,
+ * subnets, security group, roles and private host.
  */
 export class DataConstruct extends Construct {
   public readonly clusterEndpoint: string
@@ -40,6 +41,8 @@ export class DataConstruct extends Construct {
   public readonly toolsRole: iam.Role
   public readonly writeToolsRole: iam.Role
   public readonly toolsSecurityGroup: ec2.SecurityGroup
+  /** The DSQL endpoint's subnet; every Lambda that reaches DSQL must run in it. */
+  public readonly toolSubnets: ec2.SubnetSelection
 
   constructor(scope: Construct, id: string, props: DataConstructProps) {
     super(scope, id)
@@ -48,7 +51,7 @@ export class DataConstruct extends Construct {
     // Network (spec 7.2): the account's default VPC, one AZ. Its subnets are public, but
     // Lambdas get no public IP, so the tools still reach only the DSQL endpoint.
     this.vpc = ec2.Vpc.fromLookup(this, "Vpc", { isDefault: true })
-    const subnets: ec2.SubnetSelection = {
+    this.toolSubnets = {
       subnetType: ec2.SubnetType.PUBLIC,
       availabilityZones: [stack.availabilityZones[0]], // each extra AZ costs another endpoint ENI
     }
@@ -117,7 +120,7 @@ export class DataConstruct extends Construct {
 
     new ec2.InterfaceVpcEndpoint(this, "DsqlEndpoint", {
       vpc: this.vpc,
-      subnets,
+      subnets: this.toolSubnets,
       service: new ec2.InterfaceVpcEndpointService(cluster.attrVpcEndpointServiceName, 5432),
       privateDnsEnabled: true,
       securityGroups: [endpointSg],
@@ -210,72 +213,13 @@ export class DataConstruct extends Construct {
       handler: "handler",
       role: this.toolsRole,
       vpc: this.vpc,
-      vpcSubnets: subnets,
+      vpcSubnets: this.toolSubnets,
       allowPublicSubnet: true, // no public IP and no route out; see the network note above
       securityGroups: [this.toolsSecurityGroup],
       timeout: cdk.Duration.minutes(2),
       environment: { DSQL_HOST: this.privateHost },
       logGroup: new logs.LogGroup(this, "ReadCheckLogs", {
         logGroupName: `/aws/lambda/${props.config.stack_name_base}-dsql-read-check`,
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
-    })
-
-    // Gateway tool Lambdas, imported by name by the agent stack. The read tools read as
-    // ll_read, the role the read check proves. The write tools connect as ll_write (their
-    // DSQL_DB_USER default) with their own IAM role, which the load and access stages map.
-    // The ids keep ListCreditCardsFn/ListCreditCardsLogs so the deployed function is not replaced.
-    const tools: { tool: string; id: string; role?: iam.IRole }[] = [
-      { tool: "list_credit_cards", id: "ListCreditCards" },
-      { tool: "list_card_transactions", id: "ListCardTransactions" },
-      { tool: "get_session_context", id: "GetSessionContext" },
-      { tool: "transaction_fraud_detection", id: "TransactionFraudDetection" },
-      { tool: "explain_transaction", id: "ExplainTransaction" },
-      { tool: "classify_call_type", id: "ClassifyCallType" },
-      { tool: "block_credit_card", id: "BlockCreditCard", role: this.writeToolsRole },
-      { tool: "open_claim", id: "OpenClaim", role: this.writeToolsRole },
-    ]
-    for (const { tool, id, role = this.toolsRole } of tools) {
-      const slug = tool.replace(/_/g, "-")
-      new PythonFunction(this, `${id}Fn`, {
-        functionName: `ledgerlens-${slug}`,
-        runtime: lambda.Runtime.PYTHON_3_13,
-        architecture: lambda.Architecture.ARM_64,
-        entry: path.join(__dirname, "..", "..", "gateway", "tools", tool), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-        index: `${tool}_lambda/delivery/handler.py`,
-        handler: "handler",
-        // local test runs leave bytecode caches in the tool folder; don't ship them
-        bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
-        role,
-        vpc: this.vpc,
-        vpcSubnets: subnets,
-        allowPublicSubnet: true,
-        securityGroups: [this.toolsSecurityGroup],
-        timeout: cdk.Duration.seconds(30),
-        environment: { DSQL_CLUSTER_ENDPOINT: this.privateHost, AS_OF: props.config.data.as_of },
-        logGroup: new logs.LogGroup(this, `${id}Logs`, {
-          logGroupName: `/aws/lambda/${props.config.stack_name_base}-${slug}`,
-          retention: logs.RetentionDays.ONE_WEEK,
-          removalPolicy: cdk.RemovalPolicy.DESTROY,
-        }),
-      })
-    }
-
-    // The hand-off tool only validates the hand-off and returns it; the frontend reads it
-    // from the agent's stream (docs/superpowers/specs/2026-10-03-human-hand-off-frontend-design.md).
-    // It calls no AWS service, so it runs outside the VPC with the default role.
-    new PythonFunction(this, "HumanAgentHandOffFn", {
-      functionName: "ledgerlens-human-agent-hand-off",
-      runtime: lambda.Runtime.PYTHON_3_13,
-      architecture: lambda.Architecture.ARM_64,
-      entry: path.join(__dirname, "..", "..", "gateway", "tools", "human_agent_hand_off"), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      index: "human_agent_hand_off_lambda/delivery/handler.py",
-      handler: "handler",
-      bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
-      timeout: cdk.Duration.seconds(10),
-      logGroup: new logs.LogGroup(this, "HumanAgentHandOffLogs", {
-        logGroupName: `/aws/lambda/${props.config.stack_name_base}-human-agent-hand-off`,
         retention: logs.RetentionDays.ONE_WEEK,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
