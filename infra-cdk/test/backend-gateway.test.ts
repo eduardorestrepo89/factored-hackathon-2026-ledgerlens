@@ -43,6 +43,18 @@ const policy = Object.values(t.findResources("AWS::CloudFormation::CustomResourc
   (r) => r.Properties.PolicyDocument
 )
 
+test("the runtime gets the short-term memory settings from config.yaml", () => {
+  const [runtime] = Object.values(t.findResources("AWS::BedrockAgentCore::Runtime"))
+  expect(runtime.Properties.EnvironmentVariables).toMatchObject({
+    STM_WINDOW_SIZE: "30",
+    USE_STM_SUMMARIZATION: "false",
+    STM_SUMMARY_RATIO: "0.3",
+    STM_PRESERVE_RECENT_MESSAGES: "10",
+    STM_SUMMARIZATION_MODEL_ID: "",
+    STM_SUMMARIZATION_PROMPT: "",
+  })
+})
+
 test("the Gateway has one target per tool, pointing at the data stack's Lambda", () => {
   const byName = Object.fromEntries(Object.values(targets).map((r) => [r.Properties.Name, r]))
   expect(Object.keys(byName).sort()).toEqual(Object.values(TARGETS).sort())

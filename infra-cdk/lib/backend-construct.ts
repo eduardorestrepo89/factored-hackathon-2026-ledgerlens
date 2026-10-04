@@ -411,6 +411,16 @@ export class BackendConstruct extends Construct {
       // See config.yaml: ltm_top_k and ltm_relevance_score.
       LTM_TOP_K: String(config.backend.ltm_top_k),
       LTM_RELEVANCE_SCORE: String(config.backend.ltm_relevance_score),
+      // Short-term memory: sliding window, optionally summarizing what falls out.
+      // See config.yaml: stm_window_size, use_stm_summarization, stm_summary_ratio,
+      // stm_preserve_recent_messages, stm_summarization_model_id, stm_summarization_prompt.
+      STM_WINDOW_SIZE: String(config.backend.stm_window_size),
+      USE_STM_SUMMARIZATION: config.backend.use_stm_summarization ? "true" : "false",
+      STM_SUMMARY_RATIO: String(config.backend.stm_summary_ratio),
+      STM_PRESERVE_RECENT_MESSAGES: String(config.backend.stm_preserve_recent_messages),
+      // Empty means the agent's own model and the built-in prompt.
+      STM_SUMMARIZATION_MODEL_ID: config.backend.stm_summarization_model_id,
+      STM_SUMMARIZATION_PROMPT: config.backend.stm_summarization_prompt,
       // Discover + auto-connect MCP servers from an AWS Agent Registry (opt-in).
       // When enabled, the agent lists the registry's Approved MCP records and
       // connects to each public streamable-HTTP server at runtime. See

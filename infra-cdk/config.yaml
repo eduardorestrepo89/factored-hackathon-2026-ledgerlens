@@ -24,6 +24,23 @@ backend:
   ltm_top_k: 10             # Number of facts to retrieve per turn (default: 10)
   ltm_relevance_score: 0.3  # Minimum similarity threshold for retrieval (default: 0.3)
 
+  # Short-term memory: how many recent messages the agent sends to the model per turn.
+  # Counts messages, not turns (one tool-using question is ~4-6 messages).
+  stm_window_size: 30
+  # When true, the oldest messages are summarized once the window is exceeded,
+  # instead of being dropped. Each summary costs one extra model call.
+  use_stm_summarization: false
+  stm_summary_ratio: 0.3            # Share of messages summarized each time (0.1-0.8)
+  stm_preserve_recent_messages: 10  # Newest messages never summarized; must be < stm_window_size
+  # Model that writes the summaries. Empty = the agent's own model (Claude Sonnet 4.5).
+  # A cheaper model cuts the cost of each summary, e.g.
+  # "us.anthropic.claude-haiku-4-5-20251001-v1:0".
+  stm_summarization_model_id: ""
+  # System prompt for the summarizer. Empty = the built-in banking prompt
+  # (STM_SUMMARY_PROMPT in tools/conversation_memory.py), which keeps card digits,
+  # amounts, IDs and actions word for word. Use a YAML block (|) for several lines.
+  stm_summarization_prompt: ""
+
   # MCP server discovery + auto-connect from an AWS Agent Registry.
   # Lightweight: no DynamoDB, no UI, no per-user preferences. When enabled, the
   # agent lists the registry's Approved MCP records at runtime and connects to
