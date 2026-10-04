@@ -83,7 +83,7 @@ def fetch_access_token(
     """Fetch a machine token with the client credentials flow.
 
     With user_sub, the request carries aws_client_metadata the way the agent sends
-    it (patterns/utils/auth.py), so the pre-token Lambda adds that user's
+    it (agent/utils/auth.py), so the pre-token Lambda adds that user's
     customer_id claim. Without it, the claim is blank and Cedar allows no
     LedgerLens tool.
     """

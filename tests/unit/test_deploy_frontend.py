@@ -48,7 +48,7 @@ def test_a_local_redirect_replaces_the_amplify_url(tmp_path):
         "s",
         OUTPUTS,
         "us-east-1",
-        "strands-single-agent",
+        "ledgerlens",
         tmp_path,
         redirect_uri=deploy.LOCAL_DEV_URL,
     )
@@ -63,7 +63,7 @@ def test_a_local_redirect_replaces_the_amplify_url(tmp_path):
 @pytest.mark.unit
 def test_without_a_redirect_the_amplify_url_is_kept(tmp_path):
     deploy.generate_aws_exports(
-        "s", OUTPUTS, "us-east-1", "strands-single-agent", tmp_path
+        "s", OUTPUTS, "us-east-1", "ledgerlens", tmp_path
     )
 
     exports = read_exports(tmp_path)

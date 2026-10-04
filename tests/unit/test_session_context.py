@@ -1,6 +1,6 @@
 """Unit tests for the session-start step that loads the session context once.
 
-The module lives at ``patterns/strands-single-agent/tools/session_context.py``.
+The module lives at ``agent/ledgerlens/tools/session_context.py``.
 apply_session_context is driven with a fake agent holding a real ``AgentState``
 (saved with the session) and a ``system_prompt``. The fetch runs against a real
 Strands Agent whose tools stand in for the Gateway's, by name.
@@ -19,7 +19,7 @@ from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.agent.state import AgentState
 from strands.models import BedrockModel
 
-_PATTERN_DIR = Path(__file__).resolve().parents[2] / "patterns" / "strands-single-agent"
+_PATTERN_DIR = Path(__file__).resolve().parents[2] / "agent" / "ledgerlens"
 
 CUSTOMER_ID = "CLI-70U0WJ1NH1MN"
 SESSION_TOOL = "gateway_get-session-context-target___get_session_context"

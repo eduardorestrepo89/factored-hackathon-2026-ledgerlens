@@ -1,6 +1,6 @@
 """Unit tests for the Strands agent's system prompt builder.
 
-The module lives at ``patterns/strands-single-agent/tools/system_prompt.py``
+The module lives at ``agent/ledgerlens/tools/system_prompt.py``
 and has no runtime dependencies, so it is imported directly.
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-_PATTERN_DIR = Path(__file__).resolve().parents[2] / "patterns" / "strands-single-agent"
+_PATTERN_DIR = Path(__file__).resolve().parents[2] / "agent" / "ledgerlens"
 
 CUSTOMER_ID = "CLI-F2DZJYU0POJ9"
 

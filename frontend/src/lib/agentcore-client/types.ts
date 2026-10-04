@@ -1,18 +1,10 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/** Supported agent pattern prefixes — determines the frontend parser */
-export type AgentPattern =
-  | `agui-${string}`
-  | `strands-${string}`
-  | `langgraph-${string}`
-  | `claude-${string}`
-
 /** Configuration for AgentCoreClient */
 export interface AgentCoreConfig {
   runtimeArn: string
   region?: string
-  pattern: AgentPattern
 }
 
 /** Stream event types emitted by parsers */

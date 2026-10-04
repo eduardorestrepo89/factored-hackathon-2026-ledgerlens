@@ -33,7 +33,7 @@ stack_name_base: your-project-name # Change this to your preferred stack name (m
 admin_user_email: null # Optional: admin@example.com (auto-creates user & emails credentials)
 
 backend:
-  pattern: strands-single-agent # Available patterns: strands-single-agent, langgraph
+  pattern: ledgerlens # Agent folder under agent/ to deploy
   deployment_type: docker # Available deployment types: docker (default), zip
 ```
 
@@ -63,7 +63,7 @@ FAST supports two deployment types for AgentCore Runtime. Set `deployment_type` 
 - Your dependencies are pure Python or have ARM64 wheels available
 - You need higher session throughput
 
-**ZIP packaging includes**: The `patterns/<your-pattern>/`, `patterns/utils/`, `gateway/`, and `tools/` directories are bundled together with dependencies from `requirements.txt`. This matches the `COPY` commands in the Docker deployment's Dockerfile.
+**ZIP packaging includes**: The `agent/<your-pattern>/` and `agent/utils/` directories are bundled together with dependencies from `requirements.txt`. This matches the `COPY` commands in the Docker deployment's Dockerfile.
 
 ### VPC Deployment (Private Network)
 
@@ -76,17 +76,16 @@ When VPC mode is enabled, the **AgentCore Runtime** (your agent code) runs insid
 The following components run **outside** the VPC in AWS-managed infrastructure:
 
 - **Gateway tool Lambdas** — The agent calls the Gateway through the `bedrock-agent-runtime` VPC endpoint (private networking). The Gateway then invokes Lambda functions on AWS-managed infrastructure. The agent's network call stays private; only the Lambda execution happens outside the VPC.
-- **Code Interpreter** — The agent calls the Code Interpreter API through the `bedrock-agent-runtime` VPC endpoint. The sandbox execution happens in Bedrock's managed environment.
 - **Bedrock model invocations** — Model calls go through the `bedrock-runtime` VPC endpoint to Bedrock's managed infrastructure.
 - **Frontend (Amplify/CloudFront)** — Entirely separate, public-facing, and not part of the VPC deployment.
 
-In short: the agent's outbound network traffic stays on private AWS networking via VPC endpoints. The services it calls (Bedrock, Gateway, Code Interpreter) may execute on infrastructure outside the VPC, but the network path from the agent to those service APIs is private.
+In short: the agent's outbound network traffic stays on private AWS networking via VPC endpoints. The services it calls (Bedrock, Gateway) may execute on infrastructure outside the VPC, but the network path from the agent to those service APIs is private.
 
 #### Configuration
 
 ```yaml
 backend:
-  pattern: strands-single-agent
+  pattern: ledgerlens
   deployment_type: docker
   network_mode: VPC
   vpc:
@@ -131,7 +130,7 @@ All interface endpoints must have private DNS enabled and must be associated wit
 
 #### NAT Gateway
 
-A NAT Gateway is **required** if you use identity-aware Gateway authentication (Approach 1 in `patterns/*/tools/gateway.py`). This approach calls the Cognito `/oauth2/token` hosted domain endpoint directly to propagate user identity into M2M tokens. The Cognito hosted domain is a public HTTPS endpoint with no VPC endpoint available, so outbound internet access via NAT Gateway is needed.
+A NAT Gateway is **required** if you use identity-aware Gateway authentication (Approach 1 in `agent/ledgerlens/tools/gateway.py`). This approach calls the Cognito `/oauth2/token` hosted domain endpoint directly to propagate user identity into M2M tokens. The Cognito hosted domain is a public HTTPS endpoint with no VPC endpoint available, so outbound internet access via NAT Gateway is needed.
 
 If you use the standard `@requires_access_token` decorator (Approach 2), a NAT Gateway is **not required** — the AgentCore Identity service handles the Cognito token exchange server-side within AWS, reachable through the `bedrock-agentcore` VPC endpoint.
 
@@ -340,7 +339,7 @@ Like `cdk destroy`, this removes the FAST stack but not the CDK bootstrap or ass
 4. **Build failures**
 
    - Check CodeBuild logs in the AWS Console
-   - Ensure your agent code in `patterns/` is valid
+   - Ensure your agent code in `agent/` is valid
 
 5. **Permission errors**
    - Verify your AWS credentials have sufficient permissions

@@ -4,5 +4,5 @@ constructs==10.0.79
 pyyaml==6.0.1
 psycopg[binary]>=3.2,<4
 pytest>=7.0.0
-# Same pin as patterns/strands-single-agent/requirements.txt; the agent unit tests import strands.
+# Same pin as agent/ledgerlens/requirements.txt; the agent unit tests import strands.
 strands-agents==1.32.0

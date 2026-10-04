@@ -8,7 +8,7 @@ AgentCore provides two types of memory: **short-term memory** stores raw convers
 
 ## Enabling Long-Term Memory
 
-Long-term memory (LTM) is supported on the **`strands-single-agent`** pattern. It uses a `SemanticMemoryStrategy` to automatically extract and store facts from conversations, enabling the agent to recall information across sessions. Facts are keyed by the Cognito `userId`, so each user gets their own persistent memory.
+Long-term memory (LTM) is supported on the **`ledgerlens`** pattern. It uses a `SemanticMemoryStrategy` to automatically extract and store facts from conversations, enabling the agent to recall information across sessions. Facts are keyed by the Cognito `userId`, so each user gets their own persistent memory.
 
 ### How It Works
 
@@ -39,10 +39,6 @@ LTM incurs additional charges beyond short-term memory:
 - **Retrieval**: $0.50 per 1,000 retrieval calls
 
 When `use_long_term_memory` is `false`, neither cost applies — short-term memory (conversation history) is the only active feature.
-
-### Other Patterns
-
-The **`langgraph-single-agent`** pattern does not currently use long-term memory. It uses `AgentCoreMemorySaver` as a LangGraph checkpointer for short-term conversation persistence only. See the LangGraph section below for details on adding long-term memory via `AgentCoreMemoryStore`.
 
 ---
 
@@ -199,7 +195,7 @@ config = AgentCoreMemoryConfig(
 
 **With long-term memory enabled** (see [Enabling Long-Term Memory](#enabling-long-term-memory) above):
 
-The `strands-single-agent` pattern conditionally enables LTM retrieval based on the `USE_LONG_TERM_MEMORY` environment variable. When enabled, the agent retrieves facts from the `/facts/{actorId}` namespace on each turn:
+The `ledgerlens` pattern conditionally enables LTM retrieval based on the `USE_LONG_TERM_MEMORY` environment variable. When enabled, the agent retrieves facts from the `/facts/{actorId}` namespace on each turn:
 
 ```python
 use_ltm = os.environ.get("USE_LONG_TERM_MEMORY", "false").lower() == "true"
@@ -223,7 +219,7 @@ config = AgentCoreMemoryConfig(
 )
 ```
 
-**💡 Example:** See this approach implemented in `patterns/strands-single-agent/basic_agent.py`
+**💡 Example:** See this approach implemented in `agent/ledgerlens/ledgerlens_agent.py`
 
 **📚 Official AWS Guide:** [Strands SDK Memory Integration](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/strands-sdk-memory.html)
 
@@ -291,110 +287,6 @@ agent = Agent(
 **Use when:** Custom memory loading logic, combining multiple hooks, or fine-grained control needed.
 
 **💡 Complete Example:** See the [AWS AgentCore Samples repository](https://github.com/awslabs/amazon-bedrock-agentcore-samples) for working code examples, including this [Strands with hooks tutorial](https://github.com/awslabs/amazon-bedrock-agentcore-samples/blob/main/01-tutorials/04-AgentCore-memory/01-short-term-memory/01-single-agent/with-strands-agent/).
-
-### Using LangGraph?
-
-For complete LangGraph integration documentation, see the [official LangGraph Memory Integration guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-integrate-lang.html). For working code examples, explore the [LangChain AWS Integration samples](https://github.com/langchain-ai/langchain-aws/tree/main/samples/memory).
-
-**Install:**
-
-```bash
-pip install langgraph-checkpoint-aws langchain-mcp-adapters
-```
-
-**Complete Integration with Gateway Tools:**
-
-```python
-from langchain_aws import ChatBedrock
-from langgraph.prebuilt import create_react_agent
-from langgraph_checkpoint_aws import AgentCoreMemorySaver
-from langchain_mcp_adapters.client import MultiServerMCPClient
-
-# Configure memory checkpointer
-checkpointer = AgentCoreMemorySaver(
-    memory_id=memory_id,
-    region_name="us-east-1"
-)
-
-# Create Bedrock model
-bedrock_model = ChatBedrock(
-    model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    temperature=0.1,
-    streaming=True
-)
-
-# Create MCP client for Gateway tools
-mcp_client = MultiServerMCPClient({
-    "gateway": {
-        "transport": "streamable_http",
-        "url": gateway_url,
-        "headers": {
-            "Authorization": f"Bearer {access_token}"
-        }
-    }
-})
-
-# Load tools from Gateway
-tools = await mcp_client.get_tools()
-
-# Create agent with memory and tools
-graph = create_react_agent(
-    model=bedrock_model,
-    tools=tools,
-    checkpointer=checkpointer
-)
-
-# Invoke with actor and session
-config = {
-    "configurable": {
-        "thread_id": session_id,
-        "actor_id": user_id
-    }
-}
-
-# Stream responses
-async for event in graph.astream(
-    {"messages": [("user", "Hello")]},
-    config=config,
-    stream_mode="messages"
-):
-    message_chunk, metadata = event
-    # Process streaming chunks
-```
-
-**💡 Example:** See this approach implemented in `patterns/langgraph-single-agent/langgraph_agent.py`
-
-**Long-term memory (Store):**
-
-```python
-from langgraph_checkpoint_aws import AgentCoreMemoryStore
-from langchain_core.runnables import RunnableConfig
-import uuid
-
-store = AgentCoreMemoryStore(MEMORY_ID, region_name="us-west-2")
-
-def pre_model_hook(state, config: RunnableConfig, *, store):
-    """Save messages for extraction"""
-    actor_id = config["configurable"]["actor_id"]
-    thread_id = config["configurable"]["thread_id"]
-    namespace = (actor_id, thread_id)
-
-    messages = state.get("messages", [])
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            store.put(namespace, str(uuid.uuid4()), {"message": msg})
-            break
-
-    return {"llm_input_messages": messages}
-
-graph = create_react_agent(
-    model=llm,
-    tools=tools,
-    checkpointer=checkpointer,
-    store=store,
-    pre_model_hook=pre_model_hook
-)
-```
 
 ---
 

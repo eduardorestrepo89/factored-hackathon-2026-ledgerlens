@@ -115,7 +115,7 @@ test("the hand-off Lambda runs outside the VPC with no environment, no SNS and n
 })
 
 test("every tool name the model sees fits Bedrock's 64-character limit", () => {
-  // The agent's MCP client adds prefix="gateway" (patterns/strands-single-agent/tools/gateway.py).
+  // The agent's MCP client adds prefix="gateway" (agent/ledgerlens/tools/gateway.py).
   // One name over the limit makes Bedrock reject every request, not just that tool's.
   const tooLong = TOOLS.map((tool) => `gateway_${TARGETS[tool]}___${specName(tool)}`).filter((n) => n.length > 64)
   expect(tooLong).toEqual([])

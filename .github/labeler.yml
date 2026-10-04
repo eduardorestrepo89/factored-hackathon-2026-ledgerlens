@@ -11,8 +11,7 @@ backend:
   - changed-files:
       - any-glob-to-any-file:
           - "gateway/**"
-          - "patterns/**"
-          - "tools/**"
+          - "agent/**"
 
 documentation:
   - changed-files:

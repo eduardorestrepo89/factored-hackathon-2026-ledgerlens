@@ -1,6 +1,6 @@
 """Unit tests for the Strands agent's short-term memory (conversation manager).
 
-The module lives at ``patterns/strands-single-agent/tools/conversation_memory.py``
+The module lives at ``agent/ledgerlens/tools/conversation_memory.py``
 and is configured from STM_* env vars. It imports strands (requirements-dev.txt).
 """
 
@@ -13,7 +13,7 @@ import pytest
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.handlers.callback_handler import null_callback_handler
 
-_PATTERN_DIR = Path(__file__).resolve().parents[2] / "patterns" / "strands-single-agent"
+_PATTERN_DIR = Path(__file__).resolve().parents[2] / "agent" / "ledgerlens"
 
 STM_ENV = (
     "STM_WINDOW_SIZE",

@@ -2,7 +2,7 @@
 
 _Author's note: for the official name for this solution is the "Fullstack Solution Template for Agentcore" but it is referred to throughout this code base as FAST for convenience._
 
-The Fullstack AgentCore Solution Template (FAST) is a starter project repository that enables users (delivery scientists and engineers) to quickly deploy a secured, web-accessible React frontend connected to an AgentCore backend. Its purpose is to accelerate building full stack applications on AgentCore from weeks to days by handling the undifferentiated heavy lifting of infrastructure setup and to enable vibe-coding style development on top. The only central dependency of FAST is AgentCore. It is agnostic to agent SDK (Strands, LangGraph, etc) and to coding assistant platforms (Q, Kiro, Cline, Claude Code, etc).
+The Fullstack AgentCore Solution Template (FAST) is a starter project repository that enables users (delivery scientists and engineers) to quickly deploy a secured, web-accessible React frontend connected to an AgentCore backend. Its purpose is to accelerate building full stack applications on AgentCore from weeks to days by handling the undifferentiated heavy lifting of infrastructure setup and to enable vibe-coding style development on top. The only central dependency of FAST is AgentCore. It is agnostic to agent SDK (this repository's agent uses Strands) and to coding assistant platforms (Q, Kiro, Cline, Claude Code, etc).
 
 FAST is designed with security and vibe-codability as primary tenets. Best practices and knowledge from experts are codified in _documentation_ in this repository rather than in _code_. By including this documentation in an AI coding assistant's context, or by instructing the AI coding assistant to leverage best practices and code snippets found in the documentation, delivery scientists and developers can quickly vibe-build AgentCore applications for any use case. AI coding assistants can be used to fully customize the frontend and the infrastructure, enabling scientists to focus the areas where their knowledge is most impactful: the actual prompt engineering and GenAI implementation details.
 
@@ -16,13 +16,8 @@ The application is intentionally kept very, very simple to allow developers to e
 
 1. **Gateway Tools** - Lambda-based tools behind AgentCore Gateway with authentication:
    - Text analysis tool (counts words and letter frequency)
-   
-2. **Code Interpreter** - Direct integration with Amazon Bedrock AgentCore Code Interpreter:
-   - Secure Python code execution in isolated sandbox
-   - Session management with state persistence
-   - Pre-built runtime with common libraries
 
-Try asking the agent to analyze text or execute Python code to see these tools in action.
+Try asking the agent to analyze text to see these tools in action.
 
 
 ## FAST User Setup
@@ -131,7 +126,7 @@ uv run --no-project --with-requirements data_load/requirements.txt python -m dat
 
 The Strands agent on AgentCore Runtime answers card questions from the signed-in customer's own records, through three read tools on the Gateway: `list_credit_cards`, `list_card_transactions` and `get_session_context`.
 - **Design:** [docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md](docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md).
-- **Prompt:** `patterns/strands-single-agent/tools/system_prompt.py`. Bump `PROMPT_VERSION` on any change; `tests/unit/test_system_prompt.py` pins each version's hash.
+- **Prompt:** `agent/ledgerlens/tools/system_prompt.py`. Bump `PROMPT_VERSION` on any change; `tests/unit/test_system_prompt.py` pins each version's hash.
 
 **Deploy:** the data stack first (it holds the tool Lambdas), then the agent stack:
 
@@ -208,7 +203,7 @@ The out-of-the-box architecture is shown above. The diagram illustrates the auth
 ### Tech Stack
 
 - **Frontend**: React with TypeScript, Vite, Tailwind CSS, and shadcn components - infinitely flexible and ready for coding assistants
-- **Agent Providers**: Multiple agent providers supported (Strands, LangGraph, etc.) running within AgentCore Runtime
+- **Agent Provider**: Strands agent (`agent/ledgerlens/`) running within AgentCore Runtime
 - **Authentication**: AWS Cognito User Pool with OAuth support for easy swapping out Cognito
 - **Infrastructure**: CDK deployment with Amplify Hosting for frontend and AgentCore backend
 
@@ -216,7 +211,6 @@ The out-of-the-box architecture is shown above. The diagram illustrates the auth
 
 ```
 fullstack-agentcore-solution-template/
-├── .amazonq/               # Amazon Q assistant rules
 ├── .github/                # GitHub Actions workflows
 │   └── workflows/
 ├── docker/                 # Docker development environment
@@ -253,22 +247,16 @@ fullstack-agentcore-solution-template/
 │   │   ├── feedback/       # Feedback API handler
 │   │   └── zip-packager/   # Runtime ZIP packager
 │   └── config.yaml         # Deployment configuration
-├── patterns/               # Agent pattern implementations
-│   ├── strands-single-agent/ # Basic strands agent pattern
-│   │   ├── basic_agent.py  # Agent implementation
-│   │   ├── strands_code_interpreter.py # Code Interpreter wrapper
+├── agent/                  # Agent implementation
+│   ├── ledgerlens/         # LedgerLens Strands agent
+│   │   ├── ledgerlens_agent.py  # Agent implementation
+│   │   ├── tools/          # Agent-side helpers (Gateway client, memory, guardrail, prompt)
+│   │   ├── Dockerfile      # Container configuration
 │   │   ├── requirements.txt # Agent dependencies
-│   │   └── Dockerfile      # Container configuration
-│   ├── langgraph-single-agent/ # LangGraph agent pattern
-│   │   ├── langgraph_agent.py # Agent implementation
-│   │   ├── requirements.txt # Agent dependencies
-│   │   └── Dockerfile      # Container configuration
+│   │   └── README.md       # Agent overview
 │   └── utils/              # Shared agent utilities
 │       ├── auth.py         # Authentication helpers
 │       └── ssm.py          # SSM parameter helpers
-├── tools/                  # Reusable tools (framework-agnostic)
-│   └── code_interpreter/   # AgentCore Code Interpreter integration
-│       └── code_interpreter_tools.py # Core implementation
 ├── gateway/                # Gateway utilities and tools
 │   ├── policies/           # Cedar policy definitions
 │   │   └── policy.cedar    # Per-customer access control policy
@@ -302,21 +290,9 @@ fullstack-agentcore-solution-template/
 │   ├── SESSION_MANAGEMENT.md # Session persistence & resumption guide
 │   ├── CONTEXT_MANAGEMENT.md # Context window management guide
 │   ├── STREAMING.md        # Streaming implementation guide
-│   ├── TOOL_AC_CODE_INTERPRETER.md # Code Interpreter guide
 │   ├── OBSERVABILITY.md    # Observability overview (telemetry & logging)
 │   ├── AGENTCORE_TELEMETRY.md # AgentCore telemetry enablement guide
-│   ├── BEDROCK_MODEL_INVOCATION_LOGGING.md # Bedrock model invocation logging guide
-│   └── VERSION_BUMP_PLAYBOOK.md # Version management
-├── .mkdocs/                # MkDocs build configuration
-│   ├── mkdocs.yml          # MkDocs configuration
-│   ├── requirements.txt    # Documentation dependencies
-│   └── Makefile            # Build and deployment commands
-├── vibe-context/           # AI coding assistant context and rules
-│   ├── AGENTS.md           # Rules for AI assistants
-│   ├── coding-conventions.md # Code style guidelines
-│   └── development-best-practices.md # Development guidelines
-├── .kiro/                  # Kiro CLI configuration
-├── CHANGELOG.md            # Version history
+│   └── BEDROCK_MODEL_INVOCATION_LOGGING.md # Bedrock model invocation logging guide
 ├── Makefile                # Project-level build commands
 └── README.md
 ```

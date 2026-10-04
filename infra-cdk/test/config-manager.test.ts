@@ -15,7 +15,7 @@ function loadBackend(backendLines: string) {
 }
 
 test("short-term memory defaults to a 30-message window without summarization", () => {
-  expect(loadBackend("  pattern: strands-single-agent\n")).toMatchObject({
+  expect(loadBackend("  pattern: ledgerlens\n")).toMatchObject({
     stm_window_size: 30,
     use_stm_summarization: false,
     stm_summary_ratio: 0.3,

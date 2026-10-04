@@ -10,14 +10,8 @@ admin_user_email: # Example: admin@example.com
 
 backend:
   agent_name: ledgerlens_agent # Name for the agent runtime (a-z, A-Z, 0-9, _)
-  pattern: strands-single-agent # See patterns/ for available options
-  # Pattern prefix determines the frontend parser:
-  #   agui-*      → AG-UI parser      (e.g. agui-strands-agent)
-  #   strands-*   → Strands parser    (e.g. strands-single-agent)
-  #   langgraph-* → LangGraph parser  (e.g. langgraph-single-agent)
-  #   claude-*    → Claude parser     (e.g. claude-agent-sdk-single-agent)
-  # The folder name must match exactly and start with the desired parser prefix.
-  deployment_type: docker # Available deployment types: docker (default), zip (not supported for claude-agent-sdk)
+  pattern: ledgerlens # Agent folder under agent/ to deploy
+  deployment_type: docker # Available deployment types: docker (default), zip
   network_mode: PUBLIC # Available network modes: PUBLIC (default), VPC
 
   # Long-term memory uses a SemanticMemoryStrategy to extract and store facts across sessions.

@@ -6,8 +6,8 @@ makes to Amazon Bedrock, using the companion CloudFormation solution:
 **Reference solution:** [enable-bedrock-logging-using-cloudformation](https://github.com/aws-samples/enable-bedrock-logging-using-cloudformation)
 
 While the [AgentCore telemetry enablement](AGENTCORE_TELEMETRY.md) solution
-captures what the agent *did* (logs and traces for Runtime, Gateway, Memory, and
-Code Interpreter), this solution captures what the model *saw and returned* -
+captures what the agent *did* (logs and traces for Runtime, Gateway, and
+Memory), this solution captures what the model *saw and returned* -
 the prompts, completions, and metadata for each Bedrock model invocation.
 
 ## What it does

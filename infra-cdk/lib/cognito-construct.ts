@@ -123,7 +123,7 @@ export class CognitoConstruct extends Construct {
     // These are application-defined claims, not standard JWT/OIDC claims.
     // The claims are read from clientMetadata.verified_user_id (the Cognito sub / UUID),
     // which is passed via the aws_client_metadata parameter in the direct Cognito
-    // /oauth2/token call (see patterns/utils/auth.py — get_gateway_access_token).
+    // /oauth2/token call (see agent/utils/auth.py — get_gateway_access_token).
     //
     // Group assignment uses a UUID-based mapping (USER_ROLE_MAP). On first deploy,
     // all users are assigned "guest/viewer". After deploy, look up user subs and

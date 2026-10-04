@@ -36,13 +36,12 @@ uv run test-scripts/test-agent.py
 uv run test-scripts/test-agent.py --local
 
 # Override pattern for local testing
-uv run test-scripts/test-agent.py --local --pattern strands-single-agent
+uv run test-scripts/test-agent.py --local --pattern ledgerlens
 ```
 
 **Supported Patterns:**
 
-- `strands-single-agent` - Basic Strands agent
-- `langgraph-single-agent` - LangGraph agent with streaming
+- `ledgerlens` - Basic Strands agent
 
 **Prerequisites:**
 

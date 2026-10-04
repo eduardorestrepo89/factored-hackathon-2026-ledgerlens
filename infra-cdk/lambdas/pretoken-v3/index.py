@@ -20,7 +20,7 @@ policy's principal.getTag() references.
 
 The verified_user_id (Cognito sub) is read from clientMetadata, which is
 passed via the aws_client_metadata parameter in the direct Cognito
-/oauth2/token call (see patterns/utils/auth.py — get_gateway_access_token).
+/oauth2/token call (see agent/utils/auth.py — get_gateway_access_token).
 The Cognito sub is an opaque, immutable UUID assigned to each user at
 creation time (e.g., "a1b2c3d4-5678-90ab-cdef-1234567890ab").
 See docs/IDENTITY_POLICY.md for setup instructions.

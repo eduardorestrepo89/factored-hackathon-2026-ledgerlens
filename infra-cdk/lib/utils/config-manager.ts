@@ -270,7 +270,7 @@ export class ConfigManager {
         deploy_scope: deployScope,
         admin_user_email: parsedConfig.admin_user_email || null,
         backend: {
-          pattern: parsedConfig.backend?.pattern || "strands-single-agent",
+          pattern: parsedConfig.backend?.pattern || "ledgerlens",
           deployment_type: deploymentType,
           agent_name: parsedConfig.backend?.agent_name || "LedgerLensAgent",
           network_mode: networkMode,

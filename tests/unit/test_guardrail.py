@@ -1,6 +1,6 @@
 """Unit tests for the Strands agent's Bedrock Guardrail settings.
 
-The module lives at ``patterns/strands-single-agent/tools/guardrail.py`` and is
+The module lives at ``agent/ledgerlens/tools/guardrail.py`` and is
 configured from GUARDRAIL_ID and GUARDRAIL_VERSION, which the CDK backend sets.
 """
 
@@ -13,7 +13,7 @@ import boto3
 import pytest
 from strands.models import BedrockModel
 
-_PATTERN_DIR = Path(__file__).resolve().parents[2] / "patterns" / "strands-single-agent"
+_PATTERN_DIR = Path(__file__).resolve().parents[2] / "agent" / "ledgerlens"
 
 GUARDRAIL_ID = "abc123xyz"
 GUARDRAIL_VERSION = "3"
