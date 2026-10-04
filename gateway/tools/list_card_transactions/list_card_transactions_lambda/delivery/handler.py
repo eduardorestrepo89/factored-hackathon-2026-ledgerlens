@@ -19,14 +19,6 @@ AS_OF (optional) is read once into CLOCK; "today" for the default date window
 is CLOCK.now() on every call, so a warm container never freezes the real clock.
 An invalid AS_OF answers every request with DataSourceUnavailableError's
 message.
-
-TODO(ledgerlens): R1 - no CDK yet: no PythonFunction, Gateway target, env vars
-  (DB_ENGINE, DSQL_CLUSTER_ENDPOINT, DSQL_DB_USER, AS_OF) or dsql:DbConnect grant
-  on the cluster ARN (dsql:DbConnectAdmin only if DSQL_DB_USER=admin). The tool
-  can't be deployed or called by the agent until the CDK spec lands.
-TODO(ledgerlens): R5 - customer_id is trusted from the tool input. Authorization
-  depends on a Cedar policy matching it to the token's customer_id claim; neither
-  the policy nor the claim exists yet (product design sections 5 and 10).
 """
 
 import json
