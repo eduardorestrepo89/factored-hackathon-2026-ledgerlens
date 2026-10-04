@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { flushSync } from "react-dom"
+import { AgentDesk } from "./AgentDesk"
 import { ChatHeader } from "./ChatHeader"
 import { ChatInput } from "./ChatInput"
 import { ChatMessages } from "./ChatMessages"
@@ -11,7 +13,9 @@ import { AgentCoreClient } from "@/lib/agentcore-client"
 import type { AgentPattern } from "@/lib/agentcore-client"
 import { submitFeedback } from "@/services/feedbackService"
 import { useAuth } from "react-oidc-context"
-import { useDefaultTool } from "@/hooks/useToolRenderer"
+import { useDefaultTool, useToolRenderer } from "@/hooks/useToolRenderer"
+import { findHandOff, HAND_OFF_DELAY_MS, HAND_OFF_TOOL, phaseOf, queueFor, type HandOff } from "@/lib/handoff"
+import { HandOffTicket } from "./HandOffTicket"
 import { ToolCallDisplay } from "./ToolCallDisplay"
 
 export default function ChatInterface() {
@@ -20,6 +24,10 @@ export default function ChatInterface() {
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<AgentCoreClient | null>(null)
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
+  const [handOff, setHandOff] = useState<HandOff | null>(null)
+  // the pending split, cancelled by "Nueva conversación"
+  const handOffTimer = useRef<number | undefined>(undefined)
+  const phase = phaseOf(handOff, messages)
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
@@ -31,6 +39,10 @@ export default function ChatInterface() {
   useDefaultTool(({ name, args, status, result }) => (
     <ToolCallDisplay name={name} args={args} status={status} result={result} />
   ))
+
+  // The hand-off renders as a ticket. It carries the shared view-transition name until the
+  // split; then the desk's case card takes the name over and the ticket morphs into it.
+  useToolRenderer(HAND_OFF_TOOL, props => <HandOffTicket {...props} tagged={phase === "ai"} />)
 
   // Load agent configuration and create client on mount
   useEffect(() => {
@@ -82,6 +94,8 @@ export default function ChatInterface() {
 
     setMessages(prev => [...prev, newUserMessage])
     setInput("")
+    // ponytail: after the hand-off a person owns the chat, so the bot is never called again
+    if (handOff) return
     setIsLoading(true)
 
     // Create placeholder for assistant response
@@ -93,6 +107,10 @@ export default function ChatInterface() {
 
     setMessages(prev => [...prev, assistantResponse])
 
+    // Outside the try so the finally block can look for a hand-off in what streamed
+    const segments: MessageSegment[] = []
+    const toolCallMap = new Map<string, ToolCall>()
+
     try {
       // Get auth token from react-oidc-context
       const accessToken = auth.user?.access_token
@@ -100,9 +118,6 @@ export default function ChatInterface() {
       if (!accessToken) {
         throw new Error("Authentication required. Please log in again.")
       }
-
-      const segments: MessageSegment[] = []
-      const toolCallMap = new Map<string, ToolCall>()
 
       const updateMessage = () => {
         // Build content from text segments for backward compat
@@ -202,8 +217,20 @@ export default function ChatInterface() {
         return updated
       })
     } finally {
+      // The turn has finished streaming, so the goodbye is on screen: split after a pause
+      const found = findHandOff([{ ...assistantResponse, segments }])
+      if (found) {
+        handOffTimer.current = window.setTimeout(() => openHandOff(found), HAND_OFF_DELAY_MS)
+      }
       setIsLoading(false)
     }
+  }
+
+  // Animate into the split with the View Transitions API where the browser has it
+  const openHandOff = (found: HandOff) => {
+    const apply = () => flushSync(() => setHandOff(current => current ?? found))
+    if ("startViewTransition" in document) document.startViewTransition(apply)
+    else apply()
   }
 
   // Handle form submission
@@ -248,11 +275,17 @@ export default function ChatInterface() {
   // Start a new chat by clearing messages and generating a fresh session ID.
   // A new UUID is required so the backend treats this as a distinct conversation context.
   const startNewChat = () => {
+    clearTimeout(handOffTimer.current)
+    setHandOff(null)
     setMessages([])
     setInput("")
     setError(null)
     setSessionId(crypto.randomUUID())
   }
+
+  // Laura's messages stay in the browser: they never reach AgentCore
+  const sendAsAgent = (content: string) =>
+    setMessages(prev => [...prev, { role: "human", content, timestamp: new Date().toISOString() }])
 
   // Check if this is the initial state (no messages)
   const isInitialState = messages.length === 0
@@ -260,11 +293,17 @@ export default function ChatInterface() {
   // Check if there are any assistant messages
   const hasAssistantMessages = messages.some(message => message.role === "assistant")
 
+  // Beat 1: the hand-off is done and the split is about to happen
+  const handOffPending = !handOff && findHandOff(messages) !== null
+
+  const profile = auth.user?.profile
+  const customerName = String(profile?.name ?? profile?.given_name ?? "")
+
   return (
-    <div className="flex flex-col h-screen w-full">
+    <div className="flex h-screen w-full flex-col bg-page">
       {/* Fixed header */}
       <div className="flex-none">
-        <ChatHeader onNewChat={startNewChat} canStartNewChat={hasAssistantMessages} />
+        <ChatHeader onNewChat={startNewChat} canStartNewChat={hasAssistantMessages} phase={phase} />
         {error && (
           <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-2">
             <p className="text-sm text-red-700">{error}</p>
@@ -272,20 +311,52 @@ export default function ChatInterface() {
         )}
       </div>
 
-      {/* Conditional layout based on whether there are messages */}
-      {isInitialState ? (
+      {handOff ? (
+        // Hand-off split: the customer's phone and the human agent's desk
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 min-[1100px]:grid-cols-[400px_minmax(0,1fr)] min-[1100px]:overflow-hidden">
+          <section aria-label="Cliente" className="flex min-h-0 flex-col gap-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[.08em] text-muted-foreground">
+              Cliente · App
+            </h2>
+            <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden rounded-[28px] border bg-white shadow-[0_18px_40px_-28px_hsl(200_40%_10%/.45)]">
+              <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
+                <b>LATAM Bank</b>
+                <span className="rounded-full bg-human-bg px-2.5 py-0.5 text-xs font-medium text-human">
+                  {phase === "joined" ? "Laura · Persona" : `En cola · ${queueFor(handOff.reason)}`}
+                </span>
+              </div>
+              <div className="min-h-0 flex-1">
+                <ChatMessages
+                  messages={messages}
+                  messagesEndRef={messagesEndRef}
+                  sessionId={sessionId}
+                  onFeedbackSubmit={handleFeedbackSubmit}
+                />
+              </div>
+              <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} />
+            </div>
+          </section>
+          <AgentDesk
+            handOff={handOff}
+            phase={phase}
+            messages={messages}
+            customerName={customerName}
+            sessionId={sessionId}
+            onSend={sendAsAgent}
+          />
+        </div>
+      ) : isInitialState ? (
         // Initial state - input in the middle
         <>
-          {/* Empty space above */}
           <div className="grow" />
 
-          {/* Centered welcome message */}
           <div className="text-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-800">Welcome to FAST Chat</h2>
-            <p className="text-gray-600 mt-2">Ask me anything to get started</p>
+            <h2 className="text-2xl font-bold text-gray-800">Hola, soy LedgerLens</h2>
+            <p className="text-gray-600 mt-2">
+              Pregúntame por tus tarjetas, tus compras o un cargo que no reconozcas.
+            </p>
           </div>
 
-          {/* Centered input */}
           <div className="px-4 mb-16 max-w-4xl mx-auto w-full">
             <ChatInput
               input={input}
@@ -295,13 +366,11 @@ export default function ChatInterface() {
             />
           </div>
 
-          {/* Empty space below */}
           <div className="grow" />
         </>
       ) : (
         // Chat in progress - normal layout
         <>
-          {/* Scrollable message area */}
           <div className="grow overflow-hidden">
             <div className="max-w-4xl mx-auto w-full h-full">
               <ChatMessages
@@ -313,7 +382,6 @@ export default function ChatInterface() {
             </div>
           </div>
 
-          {/* Fixed input area at bottom */}
           <div className="flex-none">
             <div className="max-w-4xl mx-auto w-full">
               <ChatInput
@@ -321,6 +389,7 @@ export default function ChatInterface() {
                 setInput={setInput}
                 handleSubmit={handleSubmit}
                 isLoading={isLoading}
+                placeholder={handOffPending ? "Conectando con una persona…" : undefined}
               />
             </div>
           </div>
