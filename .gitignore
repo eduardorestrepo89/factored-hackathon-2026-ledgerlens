@@ -37,3 +37,6 @@ public/
 datathon/
 # Superdesign scratch HTML
 .superdesign/tmp/
+
+# Local handoff material (decks, metrics, prompts); never committed
+docs/agent-handoff/
