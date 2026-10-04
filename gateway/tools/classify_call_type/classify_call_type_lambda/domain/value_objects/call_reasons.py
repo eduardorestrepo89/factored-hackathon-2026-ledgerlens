@@ -68,7 +68,8 @@ REASON_RULES: Final[Mapping[CallReason, ReasonRule]] = MappingProxyType(
         CallReason.UNRECOGNIZED_CHARGE_REVIEW: ReasonRule(
             Decimal("70"), _DAYS_30, Decay.PER_DAY
         ),
-        # 60 for an open case; a breached one weighs OPEN_CASE_BREACHED_WEIGHT.
+        # 60 for an open case; a breached one weighs OPEN_CASE_BREACHED_WEIGHT,
+        # a recent one OPEN_CASE_RECENT_WEIGHT.
         CallReason.OPEN_CASE_FOLLOWUP: ReasonRule(Decimal("60"), None, Decay.NONE),
         CallReason.PENDING_TRANSACTION: ReasonRule(
             Decimal("65"), _HOURS_72, Decay.PER_HOUR
@@ -90,6 +91,12 @@ REASON_RULES: Final[Mapping[CallReason, ReasonRule]] = MappingProxyType(
 
 # Weight of an open case whose sla_breached is true; NULL counts as false (60).
 OPEN_CASE_BREACHED_WEIGHT: Final = Decimal("75")
+
+# Weight of an unbreached case created within OPEN_CASE_RECENT_WINDOW of as_of
+# (inclusive). It sits above CARD_NOT_ACTIVE (60), so a claim the fraud flow just
+# opened outranks the card that flow blocked. An undated case isn't recent.
+OPEN_CASE_RECENT_WEIGHT: Final = Decimal("70")
+OPEN_CASE_RECENT_WINDOW: Final = timedelta(days=7)
 
 # The reasons each query feeds; a failed query makes exactly these unavailable.
 SOURCE_REASONS: Final[Mapping[Source, tuple[CallReason, ...]]] = MappingProxyType(

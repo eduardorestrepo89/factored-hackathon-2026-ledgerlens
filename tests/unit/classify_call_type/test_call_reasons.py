@@ -7,6 +7,8 @@ from types import MappingProxyType
 import pytest
 from classify_call_type_lambda.domain.value_objects.call_reasons import (
     OPEN_CASE_BREACHED_WEIGHT,
+    OPEN_CASE_RECENT_WEIGHT,
+    OPEN_CASE_RECENT_WINDOW,
     REASON_RULES,
     SOURCE_REASONS,
     CallReason,
@@ -71,6 +73,12 @@ def test_every_reason_has_a_rule() -> None:
 
 def test_a_breached_case_weighs_75() -> None:
     assert OPEN_CASE_BREACHED_WEIGHT == Decimal("75")
+
+
+def test_a_case_opened_in_the_last_7_days_weighs_70() -> None:
+    # Above CARD_NOT_ACTIVE (60): a fresh claim outranks the card it got blocked.
+    assert OPEN_CASE_RECENT_WEIGHT == Decimal("70")
+    assert OPEN_CASE_RECENT_WINDOW == timedelta(days=7)
 
 
 def test_sources_run_in_this_order() -> None:

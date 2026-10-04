@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
-import { ReceiptText, RotateCcw, ScanSearch, UserRound } from "lucide-react"
+import { ReceiptText, RotateCcw, ScanSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AgentDesk } from "./AgentDesk"
 import { ChatHeader } from "./ChatHeader"
@@ -22,11 +22,10 @@ import { HandOffTicket } from "./HandOffTicket"
 import { LensMark } from "./ChatHeader"
 import { ToolCallDisplay } from "./ToolCallDisplay"
 
-// The empty chat's three ways in; the last one goes to a person, so it wears the human tier
+// The empty chat's ways in
 const STARTERS = [
-  { key: "starter.1", hint: "starterHint.1", Icon: ScanSearch, human: false },
-  { key: "starter.2", hint: "starterHint.2", Icon: ReceiptText, human: false },
-  { key: "starter.3", hint: "starterHint.3", Icon: UserRound, human: true },
+  { key: "starter.1", hint: "starterHint.1", Icon: ScanSearch },
+  { key: "starter.2", hint: "starterHint.2", Icon: ReceiptText },
 ] as const
 
 export default function ChatInterface() {
@@ -446,7 +445,7 @@ export default function ChatInterface() {
               className="mt-8 p-0 sm:p-0"
             />
             <div role="group" aria-label={t("starters")} className="mt-5 divide-y overflow-hidden rounded-3xl border bg-card">
-              {STARTERS.map(({ key, hint, Icon, human }) => (
+              {STARTERS.map(({ key, hint, Icon }) => (
                 <button
                   key={key}
                   type="button"
@@ -454,11 +453,7 @@ export default function ChatInterface() {
                   disabled={!client || isLoading}
                   className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-page focus-visible:bg-page disabled:opacity-50"
                 >
-                  <span
-                    className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
-                      human ? "bg-human-bg text-human" : "bg-ai-bg text-ai"
-                    }`}
-                  >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ai-bg text-ai">
                     <Icon className="h-5 w-5" />
                   </span>
                   <span className="min-w-0">

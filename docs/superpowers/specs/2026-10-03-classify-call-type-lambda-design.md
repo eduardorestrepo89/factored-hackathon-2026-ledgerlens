@@ -103,7 +103,7 @@ The enum is in this order, which is also the final tie-break:
 | `FRAUD_SUSPECTED` | `Approved` and `fraud_score > 50` | 30 days | 95 | per day | `transaction_id` |
 | `DECLINED_TRANSACTION` | `Declined` | 72 hours | 85 | per hour | `transaction_id` |
 | `UNRECOGNIZED_CHARGE_REVIEW` | `Approved` and `30 < fraud_score <= 50` | 30 days | 70 | per day | `transaction_id` |
-| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if `sla_breached` is true, else 60 (NULL counts as false) | none | `complaint_id` |
+| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if `sla_breached` is true; else 70 if created within 7 days of `as_of` (inclusive; undated counts as old); else 60 (NULL `sla_breached` counts as false) | none | `complaint_id` |
 | `PENDING_TRANSACTION` | `Pending` | 72 hours | 65 | per hour | `transaction_id` |
 | `REVERSED_TRANSACTION` | `Reversed` | 72 hours | 65 | per hour | `transaction_id` |
 | `CARD_NOT_ACTIVE` | `product_status` in {`Blocked`, `Suspended`} | state | 60 | none | `card_last4` |
@@ -117,6 +117,7 @@ The enum is in this order, which is also the final tie-break:
 - **FOREIGN country check:** `fold_text(transaction_country) != fold_text(home_country)` when both are non-NULL. "México" equals "Mexico" (D21).
 - **FOREIGN currency check:** both currencies non-NULL and different.
 - **One charge can trigger several reasons.** An approved Brazilian charge scored 62 is both `FRAUD_SUSPECTED` and `FOREIGN_TRANSACTION`. Each reason is ranked on its own.
+- **A claimed charge triggers no reason.** A charge named in a complaint open at `as_of` (§6.1) is that case's follow-up. After the fraud flow blocks a card and opens a claim, the next contact ranks the claim (70) above the blocked card (`CARD_NOT_ACTIVE`, 60) instead of re-raising the same fraud.
 
 ### 3.2 Scoring (`domain/services/reason_ranking.py`)
 
@@ -304,15 +305,31 @@ home AS (
     WHERE c.customer_id = %(customer_id)s
     ORDER BY c.last_updated DESC NULLS LAST
     LIMIT 1
+),
+open_claims AS (
+    SELECT DISTINCT ON (k.complaint_id) k.description
+    FROM complaints AS k
+    WHERE k.customer_id = %(customer_id)s
+      AND k.creation_date <= %(as_of)s
+      AND (k.closing_date > %(as_of)s
+           OR (k.closing_date IS NULL AND k.status NOT IN ('Resolved', 'Closed')))
+    ORDER BY k.complaint_id, k.process_date DESC NULLS LAST
 )
 SELECT x.*, h.country AS home_country
 FROM tx_dedup AS x
 LEFT JOIN home AS h ON TRUE
-WHERE x.transaction_date >= %(as_of)s - INTERVAL '72 hours'
-   OR (x.transaction_status = 'Approved' AND x.fraud_score > %(review_above)s::numeric)
+WHERE (x.transaction_date >= %(as_of)s - INTERVAL '72 hours'
+       OR (x.transaction_status = 'Approved' AND x.fraud_score > %(review_above)s::numeric))
+  AND NOT EXISTS (
+      SELECT 1
+      FROM open_claims AS o
+      WHERE strpos(',' || split_part(o.description, ' | tx: ', 2) || ',',
+                   ',' || x.transaction_id || ',') > 0
+  )
 ORDER BY x.transaction_date DESC NULLS LAST, x.transaction_id
 LIMIT %(limit)s
 ```
+- Charges named in a complaint open at `as_of` are skipped. `open_claim` writes the description as `"<statement> | tx: TRX-A,TRX-B"`. The ids are matched whole, wrapped in commas, so no id matches inside another. The open filter and de-duplication are §6.3's. `open_claim`'s use-case test pins that format.
 - The SQL only narrows the candidates: everything in the last 72 hours, plus 30-day approved charges above the review band. Python applies every reason rule, including the windows again, so the rules have one owner.
 - `review_above` comes from the copied domain constant.
 
@@ -402,11 +419,11 @@ In the doc:
 | File | Covers |
 |---|---|
 | `test_call_reasons.py` | The enum order; each weight, window and decay from §3.1, pinned; `SOURCE_REASONS` covers every reason exactly once; `FRAUD_ABOVE == Decimal("50")` and `REVIEW_ABOVE == Decimal("30")` (pinned, the same as the fraud tool). |
-| `test_reason_ranking.py` | Each reason's rule, with a positive and a negative case per condition: status, band edges (50.00 → review, 50.01 → fraud, 30.00 → nothing), window edges (exactly 72 h in, 72 h + 1 s out), Declined with a score of 62 → only `DECLINED`, `Closed` card → nothing, `Active` with `days_past_due` 0 or NULL → nothing, expiring at +30 days in and +31 out, folded "México"/"Mexico" not foreign, currency differs → foreign, NULL countries. Decay: hourly and daily values, the 40% floor, the future-event clamp, P07's 17.74 days → 0.77, half-up rounding. Best per reason, with tie-breaks. Ranking order and tie-breaks. Top 3. Empty input → `()`. |
+| `test_reason_ranking.py` | Each reason's rule, with a positive and a negative case per condition: status, band edges (50.00 → review, 50.01 → fraud, 30.00 → nothing), window edges (exactly 72 h in, 72 h + 1 s out), Declined with a score of 62 → only `DECLINED`, `Closed` card → nothing, `Active` with `days_past_due` 0 or NULL → nothing, expiring at +30 days in and +31 out, folded "México"/"Mexico" not foreign, currency differs → foreign, NULL countries. Decay: hourly and daily values, the 40% floor, the future-event clamp, P07's 17.74 days → 0.77, half-up rounding. Case weights: exactly 7 days old → 0.70, 7 days + 1 s → 0.60, undated → 0.60, breached and recent → 0.75; a fresh claim ranks above the card it got blocked. Best per reason, with tie-breaks. Ranking order and tie-breaks. Top 3. Empty input → `()`. |
 | `test_classify_call_type_use_case.py` | Each query gets exactly the §4 params with naive UTC `as_of`; `review_above` is the constant. One source failing → its reasons in `unavailable` (enum order), and the rest ranked. A bad row → that source unavailable. All four failing → `DataSourceUnavailableError` when one was a connection error, else `CallReasonLookupError`. The 201-row cap logs and still ranks. Unknown customer → `reasons ()`. |
 | `test_call_classification_presenter.py` | Evidence keys per reason exactly as in §5; amounts as 2-decimal strings; `confidence` as a number; `days_left`; **a recursive walk finds no key containing `fraud` or `score`**. |
 | `test_classify_call_type_handler.py` | As for the sibling tools. |
-| `test_query_contracts.py` | Placeholders match the params exactly in all 4 files; no stray `%`; no `SET`; columns selected; **`is_fraud` appears in no SQL file**; `fraud_score` only in `call_reason_transactions.sql`; `'Tarjeta Crédito'` (transactions, cards), `'Approved'` and `'Error'` NFC with no BOM; the transactions query filters `> %(review_above)s`; the windows `'30 days'`, `'72 hours'`, `'24 hours'`. `tool_spec.json` requires only `customer_id` and its description names all 11 reasons. |
+| `test_query_contracts.py` | Placeholders match the params exactly in all 4 files; no stray `%`; no `SET`; columns selected; **`is_fraud` appears in no SQL file**; `fraud_score` only in `call_reason_transactions.sql`; `'Tarjeta Crédito'` (transactions, cards), `'Approved'` and `'Error'` NFC with no BOM; the transactions query filters `> %(review_above)s`; the windows `'30 days'`, `'72 hours'`, `'24 hours'`; the transactions query skips charges in an open claim's `' | tx: '` list, with `call_reason_cases.sql`'s open filter line for line. `tool_spec.json` requires only `customer_id` and its description names all 11 reasons. |
 | `test_delivery_wiring.py` + the copied infrastructure tests | As in the fraud spec. |
 
 The whole suite passes in one session: `.venv/Scripts/python -m pytest tests/unit -q`.

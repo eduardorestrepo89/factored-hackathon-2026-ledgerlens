@@ -374,7 +374,7 @@ WHERE k.customer_id = :customer_id
 | `FRAUD_SUSPECTED` | `Approved` and `fraud_score > 50` | 30 days | 95 | per day | `transaction_id` |
 | `DECLINED_TRANSACTION` | `Declined` | 72 hours | 85 | per hour | `transaction_id` |
 | `UNRECOGNIZED_CHARGE_REVIEW` | `Approved` and `30 < fraud_score <= 50` | 30 days | 70 | per day | `transaction_id` |
-| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if `sla_breached`, else 60 (NULL counts as false) | none | `complaint_id` |
+| `OPEN_CASE_FOLLOWUP` | Complaint open at `as_of` | any age | 75 if `sla_breached`; else 70 if created within 7 days; else 60 (NULL counts as false) | none | `complaint_id` |
 | `PENDING_TRANSACTION` | `Pending` | 72 hours | 65 | per hour | `transaction_id` |
 | `REVERSED_TRANSACTION` | `Reversed` | 72 hours | 65 | per hour | `transaction_id` |
 | `CARD_NOT_ACTIVE` | `product_status` in {`Blocked`, `Suspended`} | state | 60 | none | `card_last4` |

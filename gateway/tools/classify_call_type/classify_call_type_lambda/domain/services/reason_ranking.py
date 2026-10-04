@@ -23,6 +23,8 @@ from classify_call_type_lambda.domain.entities.candidates import (
 )
 from classify_call_type_lambda.domain.value_objects.call_reasons import (
     OPEN_CASE_BREACHED_WEIGHT,
+    OPEN_CASE_RECENT_WEIGHT,
+    OPEN_CASE_RECENT_WINDOW,
     REASON_RULES,
     CallReason,
     Decay,
@@ -202,12 +204,17 @@ def _score_cases(
 ) -> Iterator[_Scored]:
     reason = CallReason.OPEN_CASE_FOLLOWUP
     for candidate in candidates:
-        weight = (
-            OPEN_CASE_BREACHED_WEIGHT
-            if candidate.sla_breached is True
-            else REASON_RULES[reason].weight
-        )
-        # A case doesn't decay; its creation date only makes the newest win a tie.
+        if candidate.sla_breached is True:
+            weight = OPEN_CASE_BREACHED_WEIGHT
+        elif (
+            candidate.creation_date is not None
+            and as_of - candidate.creation_date <= OPEN_CASE_RECENT_WINDOW
+        ):
+            weight = OPEN_CASE_RECENT_WEIGHT
+        else:
+            weight = REASON_RULES[reason].weight
+        # A case doesn't decay; its creation date sets its weight above and
+        # otherwise only makes the newest win a tie.
         yield _scored(
             reason,
             candidate,
