@@ -33,7 +33,10 @@ export type Phase = "ai" | "connecting" | "joined"
 export function parseHandOffResult(result: string | undefined): HandOffResult | null {
   if (!result) return null
   try {
-    const value: unknown = JSON.parse(result)
+    let value: unknown = JSON.parse(result)
+    // The Gateway may pass the Lambda's whole {"content":[{"text": <JSON>}]} response through
+    const inner = (value as { content?: { text?: unknown }[] } | null)?.content?.[0]?.text
+    if (typeof inner === "string") value = JSON.parse(inner)
     if (typeof value === "object" && value !== null && typeof (value as HandOffResult).hand_off_id === "string") {
       const found = value as HandOffResult
       return { ...found, related_ids: Array.isArray(found.related_ids) ? found.related_ids : [] }
@@ -71,8 +74,9 @@ export function findHandOff(messages: Message[]): HandOff | null {
 export const phaseOf = (handOff: HandOff | null, messages: Message[]): Phase =>
   !handOff ? "ai" : messages.some(m => m.role === "human") ? "joined" : "connecting"
 
+// The ticket shows these to the customer, so they never claim the bank confirmed fraud
 const REASON_LABEL: Record<HandOffReason, string> = {
-  FRAUD_CONFIRMED: "Fraude confirmado",
+  FRAUD_CONFIRMED: "Cargo no reconocido",
   CUSTOMER_REQUEST: "Pidió hablar con una persona",
   UNRESOLVED: "El asistente no pudo resolverlo",
   OUT_OF_SCOPE: "Fuera del alcance del asistente",

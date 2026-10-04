@@ -81,6 +81,16 @@ describe("findHandOff", () => {
 })
 
 describe("parseHandOffResult", () => {
+  it("unwraps the Lambda envelope when the Gateway passes it through as the text", () => {
+    const envelope = JSON.stringify({ content: [{ type: "text", text: JSON.stringify(RESULT) }] })
+    expect(parseHandOffResult(envelope)?.hand_off_id).toBe("HO-7Q3KX2MA")
+  })
+
+  it("ignores an envelope around an error", () => {
+    const envelope = JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ error: "down" }) }] })
+    expect(parseHandOffResult(envelope)).toBeNull()
+  })
+
   it("gives related_ids a default when the result has none", () => {
     const withoutIds: Partial<typeof RESULT> = { ...RESULT }
     delete withoutIds.related_ids
@@ -100,7 +110,8 @@ describe("labels", () => {
   it("names the queue and the reason in Spanish, passing unknown reasons through", () => {
     expect(queueFor("FRAUD_CONFIRMED")).toBe("Fraudes")
     expect(queueFor("OUT_OF_SCOPE")).toBe("Servicio general")
-    expect(reasonLabel("FRAUD_CONFIRMED")).toBe("Fraude confirmado")
+    // the customer sees this label: never claim the bank confirmed fraud
+    expect(reasonLabel("FRAUD_CONFIRMED")).toBe("Cargo no reconocido")
     expect(reasonLabel("SOMETHING_NEW")).toBe("SOMETHING_NEW")
   })
 })

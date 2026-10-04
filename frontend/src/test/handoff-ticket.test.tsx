@@ -19,7 +19,8 @@ describe("HandOffTicket", () => {
 
     expect(screen.getByText("Caso HO-7Q3KX2MA")).toBeInTheDocument()
     expect(screen.getByText("ALTA")).toBeInTheDocument()
-    expect(screen.getByText("Fraude confirmado")).toBeInTheDocument()
+    expect(screen.getByText("Cargo no reconocido")).toBeInTheDocument()
+    expect(screen.queryByText(/Fraude confirmado/)).toBeNull()
     expect(screen.getByText("TX-89")).toBeInTheDocument()
     expect(screen.getByText("Enviado a una persona")).toBeInTheDocument()
   })

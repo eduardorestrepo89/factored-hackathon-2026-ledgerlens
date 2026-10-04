@@ -1,10 +1,9 @@
-import { Fragment, RefObject } from "react"
+import { Fragment, useLayoutEffect, useRef } from "react"
 import { Message } from "./types"
 import { ChatMessage } from "./ChatMessage"
 
 interface ChatMessagesProps {
   messages: Message[]
-  messagesEndRef?: RefObject<HTMLDivElement | null>
   sessionId: string
   onFeedbackSubmit: (
     messageContent: string,
@@ -18,7 +17,6 @@ const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-di
 
 export function ChatMessages({
   messages,
-  messagesEndRef,
   sessionId,
   onFeedbackSubmit,
   hideFeedback = false,
@@ -26,8 +24,18 @@ export function ChatMessages({
   // Laura's first message is the moment she joins the conversation
   const firstHuman = messages.findIndex(m => m.role === "human")
 
+  // Each copy of the thread (chat, phone, desk mirror) keeps its own scroll at the bottom.
+  // A layout effect also runs on mount, so a thread mounted by the split opens at the
+  // ticket and the goodbye; scrolling the container never moves the page around it.
+  const containerRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages])
+
   return (
     <div
+      ref={containerRef}
       className={`h-full p-4 space-y-4 w-full ${
         messages.length > 0 ? "overflow-y-auto" : "overflow-hidden"
       }`}
@@ -55,7 +63,6 @@ export function ChatMessages({
           </Fragment>
         ))
       )}
-      <div ref={messagesEndRef} />
     </div>
   )
 }

@@ -27,13 +27,12 @@ export default function ChatInterface() {
   const [handOff, setHandOff] = useState<HandOff | null>(null)
   // the pending split, cancelled by "Nueva conversación"
   const handOffTimer = useRef<number | undefined>(undefined)
+  // bumped by "Nueva conversación", so a turn still streaming from the old chat can't split the new one
+  const conversation = useRef(0)
   const phase = phaseOf(handOff, messages)
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
-
-  // Ref for message container to enable auto-scrolling
-  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Register default tool renderer (wildcard "*")
   useDefaultTool(({ name, args, status, result }) => (
@@ -75,10 +74,6 @@ export default function ChatInterface() {
     loadConfig()
   }, [])
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
-
   const sendMessage = async (userMessage: string) => {
     if (!userMessage.trim() || !client) return
 
@@ -108,6 +103,7 @@ export default function ChatInterface() {
     setMessages(prev => [...prev, assistantResponse])
 
     // Outside the try so the finally block can look for a hand-off in what streamed
+    const turnConversation = conversation.current
     const segments: MessageSegment[] = []
     const toolCallMap = new Map<string, ToolCall>()
 
@@ -219,7 +215,7 @@ export default function ChatInterface() {
     } finally {
       // The turn has finished streaming, so the goodbye is on screen: split after a pause
       const found = findHandOff([{ ...assistantResponse, segments }])
-      if (found) {
+      if (found && conversation.current === turnConversation) {
         handOffTimer.current = window.setTimeout(() => openHandOff(found), HAND_OFF_DELAY_MS)
       }
       setIsLoading(false)
@@ -275,6 +271,7 @@ export default function ChatInterface() {
   // Start a new chat by clearing messages and generating a fresh session ID.
   // A new UUID is required so the backend treats this as a distinct conversation context.
   const startNewChat = () => {
+    conversation.current++
     clearTimeout(handOffTimer.current)
     setHandOff(null)
     setMessages([])
@@ -328,7 +325,6 @@ export default function ChatInterface() {
               <div className="min-h-0 flex-1">
                 <ChatMessages
                   messages={messages}
-                  messagesEndRef={messagesEndRef}
                   sessionId={sessionId}
                   onFeedbackSubmit={handleFeedbackSubmit}
                 />
@@ -375,7 +371,6 @@ export default function ChatInterface() {
             <div className="max-w-4xl mx-auto w-full h-full">
               <ChatMessages
                 messages={messages}
-                messagesEndRef={messagesEndRef}
                 sessionId={sessionId}
                 onFeedbackSubmit={handleFeedbackSubmit}
               />

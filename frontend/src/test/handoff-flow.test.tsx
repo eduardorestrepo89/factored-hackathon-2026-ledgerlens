@@ -104,6 +104,30 @@ describe("hand-off flow", () => {
     expect(screen.queryByRole("region", DESK)).toBeNull()
   })
 
+  it("starting a new chat while the goodbye is still streaming cancels the split", async () => {
+    const user = userEvent.setup()
+    let finish: () => void = () => {}
+    invoke.mockImplementationOnce(async (_message: string, _session: string, _token: string, onEvent: OnEvent) => {
+      onEvent({ type: "text", content: "Te paso con una persona." })
+      onEvent({ type: "tool_use_start", toolUseId: "t1", name: "human-agent-hand-off-target___human_agent_hand_off" })
+      onEvent({ type: "tool_result", toolUseId: "t1", result: JSON.stringify(HAND_OFF) })
+      await new Promise<void>(resolve => {
+        finish = resolve
+      })
+      onEvent({ type: "text", content: GOODBYE })
+    })
+    await startChat()
+
+    await user.type(screen.getByPlaceholderText("Escribe un mensaje…"), "quiero hablar con una persona{Enter}")
+    await screen.findByText("Pensando…")
+    await user.click(screen.getByRole("button", { name: /Nueva conversación/ }))
+    finish()
+    await turnFinished()
+    await pause(900)
+
+    expect(screen.queryByRole("region", DESK)).toBeNull()
+  })
+
   it("starting a new chat during the pause cancels the split", async () => {
     const user = userEvent.setup()
     agentTurn(JSON.stringify(HAND_OFF))
