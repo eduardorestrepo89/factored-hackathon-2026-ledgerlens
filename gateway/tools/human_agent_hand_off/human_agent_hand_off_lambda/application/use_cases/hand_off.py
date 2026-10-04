@@ -1,25 +1,22 @@
-"""Use case: send the conversation to a human agent."""
+"""Use case: validate a hand-off to a human agent and give it an id."""
 
+import base64
+import hashlib
 import re
 from typing import Final
 
-from human_agent_hand_off_lambda.application.ports.errors import PublishError
-from human_agent_hand_off_lambda.application.ports.hand_off_publisher import (
-    HandOffPublisher,
-)
 from human_agent_hand_off_lambda.domain.entities.hand_off import (
     HandOff,
     HandOffResult,
 )
-from human_agent_hand_off_lambda.domain.errors import (
-    HandOffUnavailableError,
-    InvalidInputError,
-)
+from human_agent_hand_off_lambda.domain.errors import InvalidInputError
 
 PRIORITIES: Final = ("high", "normal")
 REASONS: Final = ("FRAUD_CONFIRMED", "CUSTOMER_REQUEST", "UNRESOLVED", "OUT_OF_SCOPE")
 MAX_SUMMARY_LENGTH: Final = 2000
 MAX_RELATED_IDS: Final = 20
+HAND_OFF_ID_PREFIX: Final = "HO-"
+_HAND_OFF_ID_LENGTH: Final = 8
 _RELATED_ID: Final = re.compile(r"[A-Z0-9-]{1,40}")
 _RELATED_IDS_REASON: Final = (
     f"must be a list of at most {MAX_RELATED_IDS} ids made of letters, "
@@ -28,15 +25,13 @@ _RELATED_IDS_REASON: Final = (
 
 
 class HandOffUseCase:
-    """Validate a hand-off and publish it through the HandOffPublisher port.
+    """Validate a hand-off and give it an id derived from its content.
 
     Every field but the summary is a closed set or an id, so only the summary
-    carries free text written by the model.
+    carries free text written by the model. Nothing is stored or sent: the
+    frontend reads the result from the agent's stream
+    (docs/superpowers/specs/2026-10-03-human-hand-off-frontend-design.md, section 2).
     """
-
-    def __init__(self, publisher: HandOffPublisher) -> None:
-        """Store the publisher port."""
-        self._publisher: HandOffPublisher = publisher
 
     def execute(
         self,
@@ -46,7 +41,7 @@ class HandOffUseCase:
         summary: object,
         related_ids: object,
     ) -> HandOffResult:
-        """Validate every input, then publish the hand-off.
+        """Validate every input, then return the hand-off with its id.
 
         Args:
             customer_id: The customer id exactly as it came in the tool event.
@@ -56,8 +51,7 @@ class HandOffUseCase:
             related_ids: Optional list of related record ids, as it came.
 
         Raises:
-            InvalidInputError: An input is invalid. Raised before publishing.
-            HandOffUnavailableError: The publisher failed.
+            InvalidInputError: An input is invalid.
         """
         hand_off = HandOff(
             customer_id=_clean_customer_id(customer_id),
@@ -66,11 +60,28 @@ class HandOffUseCase:
             summary=_clean_summary(summary),
             related_ids=_clean_related_ids(related_ids),
         )
-        try:
-            reference = self._publisher.publish(hand_off)
-        except PublishError as exc:
-            raise HandOffUnavailableError() from exc
-        return HandOffResult(hand_off_id=reference, priority=hand_off.priority)
+        return HandOffResult(hand_off_id=hand_off_id(hand_off), hand_off=hand_off)
+
+
+def hand_off_id(hand_off: HandOff) -> str:
+    """Return ``HO-`` plus 8 base32 characters of a SHA-256 over the content.
+
+    The same content always gives the same id, so a retried or repeated call
+    never makes a second case. Related ids are sorted, so their order doesn't
+    matter.
+    """
+    content = "|".join(
+        (
+            hand_off.customer_id,
+            hand_off.priority,
+            hand_off.reason,
+            hand_off.summary,
+            ",".join(sorted(hand_off.related_ids)),
+        )
+    )
+    digest = hashlib.sha256(content.encode("utf-8")).digest()
+    encoded = base64.b32encode(digest).decode("ascii")
+    return HAND_OFF_ID_PREFIX + encoded[:_HAND_OFF_ID_LENGTH]
 
 
 def _clean_customer_id(raw: object) -> str:

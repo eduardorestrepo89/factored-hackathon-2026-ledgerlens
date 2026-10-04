@@ -1,10 +1,8 @@
 """Domain errors: the only failures the agent is allowed to see.
 
 Each message says what went wrong and what the agent should do next. Messages
-never contain SDK output, topic ARNs or other internal details.
+are built only from the tool's own input rules, never from internal details.
 """
-
-from typing import ClassVar
 
 
 class DomainError(Exception):
@@ -36,23 +34,3 @@ class InvalidInputError(DomainError):
             f"Invalid value for '{field}': {reason}. "
             "Ask the customer to confirm and retry."
         )
-
-
-class _FixedMessageError(DomainError):
-    """Base for domain errors whose message never varies."""
-
-    MESSAGE: ClassVar[str] = ""
-
-    def __init__(self) -> None:
-        """Use the class-level MESSAGE as the agent-facing message."""
-        super().__init__(self.MESSAGE)
-
-
-class HandOffUnavailableError(_FixedMessageError):
-    """The hand-off couldn't be delivered, or the tool isn't configured."""
-
-    MESSAGE: ClassVar[str] = (
-        "The hand-off to a human agent couldn't be sent right now. Tell the "
-        "customer you couldn't reach a person and that they can contact the "
-        "bank through its usual channels."
-    )

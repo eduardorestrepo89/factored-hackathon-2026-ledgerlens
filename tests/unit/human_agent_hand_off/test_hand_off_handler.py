@@ -2,15 +2,14 @@
 
 import importlib
 import json
+import logging
+import re
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
-from human_agent_hand_off_lambda.application.ports.errors import PublishError
-from human_agent_hand_off_lambda.application.use_cases.hand_off import HandOffUseCase
-from human_agent_hand_off_lambda.domain.errors import HandOffUnavailableError
 
-from .fakes import CUSTOMER_ID, FakePublisher
+from .fakes import CUSTOMER_ID
 
 pytestmark = pytest.mark.unit
 
@@ -34,19 +33,12 @@ def make_context(
 
 @pytest.fixture
 def module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Import the handler module fresh, with no topic configured (no AWS calls)."""
+    """Import the handler module fresh, with an empty environment."""
     for name in ("HANDOFF_TOPIC_ARN", "AWS_REGION"):
         monkeypatch.delenv(name, raising=False)
     import human_agent_hand_off_lambda.delivery.handler as handler_module
 
     return importlib.reload(handler_module)
-
-
-def wire(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch, publisher: FakePublisher
-) -> None:
-    """Point the handler at a use case over ``publisher``."""
-    monkeypatch.setattr(module, "USE_CASE", HandOffUseCase(publisher=publisher))
 
 
 def body(response: dict[str, Any]) -> dict[str, Any]:
@@ -56,61 +48,50 @@ def body(response: dict[str, Any]) -> dict[str, Any]:
     return json.loads(content[0]["text"])
 
 
-def test_success_queues_the_hand_off(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    publisher = FakePublisher(reference="msg-42")
-    wire(module, monkeypatch, publisher)
+def test_the_module_loads_with_an_empty_environment(module: ModuleType) -> None:
+    assert module.USE_CASE is not None
 
-    assert body(module.handler(EVENT, make_context())) == {
-        "hand_off_id": "msg-42",
+
+def test_success_returns_the_full_hand_off(module: ModuleType) -> None:
+    result = body(module.handler(EVENT, make_context()))
+
+    assert re.fullmatch(r"HO-[A-Z2-7]{8}", result["hand_off_id"])
+    assert result == {
+        "hand_off_id": result["hand_off_id"],
         "status": "queued",
         "priority": "high",
+        "reason": "FRAUD_CONFIRMED",
+        "customer_id": CUSTOMER_ID,
+        "summary": EVENT["summary"],
+        "related_ids": ["CMP-4KQ2ZJ7M3XH5TB6RWN2Y"],
     }
-    assert publisher.published[0].reason == "FRAUD_CONFIRMED"
 
 
-def test_related_ids_may_be_left_out(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    publisher = FakePublisher()
-    wire(module, monkeypatch, publisher)
+def test_the_same_event_gets_the_same_id(module: ModuleType) -> None:
+    first = body(module.handler(EVENT, make_context()))["hand_off_id"]
+
+    assert body(module.handler(EVENT, make_context()))["hand_off_id"] == first
+
+
+def test_related_ids_may_be_left_out(module: ModuleType) -> None:
     event = {k: v for k, v in EVENT.items() if k != "related_ids"}
 
-    assert "content" in module.handler(event, make_context())
-    assert publisher.published[0].related_ids == ()
+    assert body(module.handler(event, make_context()))["related_ids"] == []
 
 
 @pytest.mark.parametrize("event", [None, [], "hand off"])
 def test_a_non_object_event_returns_the_customer_id_error(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch, event: object
+    module: ModuleType, event: object
 ) -> None:
-    publisher = FakePublisher()
-    wire(module, monkeypatch, publisher)
-
-    response = module.handler(event, make_context())
-
-    assert "customer_id" in response["error"]
-    assert publisher.published == []
+    assert "customer_id" in module.handler(event, make_context())["error"]
 
 
-def test_a_failed_publish_returns_the_unavailable_message(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    wire(module, monkeypatch, FakePublisher(error=PublishError("down")))
+def test_invalid_input_returns_the_field_error(module: ModuleType) -> None:
+    response = module.handler({**EVENT, "priority": "urgent"}, make_context())
 
-    assert module.handler(EVENT, make_context()) == {
-        "error": HandOffUnavailableError.MESSAGE
-    }
-
-
-def test_missing_configuration_returns_the_unavailable_message(
-    module: ModuleType,
-) -> None:
-    assert module.USE_CASE is None
-
-    assert module.handler(EVENT, make_context()) == {
-        "error": HandOffUnavailableError.MESSAGE
+    assert response == {
+        "error": "Invalid value for 'priority': must be high or normal. "
+        "Ask the customer to confirm and retry."
     }
 
 
@@ -118,27 +99,34 @@ def test_missing_configuration_returns_the_unavailable_message(
     "context", [make_context("open-claim-target___open_claim"), None]
 )
 def test_wrong_or_missing_tool_name_returns_an_error(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch, context: object
+    module: ModuleType, context: object
 ) -> None:
-    publisher = FakePublisher()
-    wire(module, monkeypatch, publisher)
-
     response = module.handler(EVENT, context)
 
     assert set(response) == {"error"}
     assert "human_agent_hand_off" in response["error"]
-    assert publisher.published == []
 
 
 def test_unexpected_exception_returns_a_generic_message(
     module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def explode(**_kwargs: object) -> None:
-        raise RuntimeError("arn:aws:sns:secret")
+        raise RuntimeError("secret internal detail")
 
     monkeypatch.setattr(module, "USE_CASE", SimpleNamespace(execute=explode))
 
     response = module.handler(EVENT, make_context())
 
     assert response == {"error": module.UNEXPECTED_ERROR_MESSAGE}
-    assert "arn:aws" not in response["error"]
+    assert "secret" not in response["error"]
+
+
+def test_the_summary_is_never_logged(
+    module: ModuleType, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    module.handler(EVENT, make_context())
+
+    assert "queued HO-" in caplog.text
+    assert EVENT["summary"] not in caplog.text
