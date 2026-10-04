@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentCoreConfig, StreamCallback } from "./types"
-import { parseStrandsChunk } from "./parsers/strands"
+import { createStrandsParser } from "./parsers/strands"
 import { readSSEStream } from "./utils/sse"
 
 export class AgentCoreClient {
@@ -57,6 +57,6 @@ export class AgentCoreClient {
       throw new Error(`HTTP ${response.status}: ${errorText}`)
     }
 
-    await readSSEStream(response, parseStrandsChunk, onEvent)
+    await readSSEStream(response, createStrandsParser(), onEvent)
   }
 }
