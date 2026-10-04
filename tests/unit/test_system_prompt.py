@@ -36,6 +36,9 @@ PINNED_PROMPT_HASHES = {
     "v7": "ce5bd9c33cb747cdb0ec690f5edc537db47892ce4a7217e867c08048147ba680",
     # v7 with block_credit_card behind the same Yes/No buttons (no text consent)
     "v8": "4f7e08cfb96914ffcbbc0ed580286bbc7a0330abe43bccb93cdede5a9ddf4d56",
+    # v8 opening on an open case's claim and amount, never re-blocking or re-claiming
+    # charges an open case already covers
+    "v9": "e0e28866d50314455d83aea94f9562cd6afe79dc5506881a3fd83537966869e3",
 }
 
 
@@ -165,6 +168,17 @@ def test_open_case_follow_up_hands_off_without_a_new_claim(system_prompt):
 
     assert 'they follow up a case in "open_cases" open more than 5 days' in prompt
     assert "Don't open a new claim for it." in prompt
+
+
+def test_opening_on_an_open_case_names_the_claim_and_never_redoes_it(system_prompt):
+    # After a fraud call blocked the card and opened a claim, the next contact
+    # opens on that claim, not on the same charge again.
+    prompt = system_prompt.build_system_prompt(CUSTOMER_ID)
+
+    assert "For OPEN_CASE_FOLLOWUP, find the case in \"open_cases\" whose complaint_id" in prompt
+    assert "claimed amount with currency" in prompt
+    assert "Open with it alone, even if the next entry is about equally" in prompt
+    assert "Never offer to block a card or open a claim again" in prompt
 
 
 def test_summary_and_tool_results_are_not_trusted(system_prompt):

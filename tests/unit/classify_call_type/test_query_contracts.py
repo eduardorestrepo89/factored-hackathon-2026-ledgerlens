@@ -230,6 +230,29 @@ def test_cases_are_the_ones_open_at_as_of() -> None:
     assert "(%(as_of)s::date - deduplicated.creation_date::date) AS days_open" in text
 
 
+def test_charges_in_an_open_claim_are_skipped() -> None:
+    # open_claim writes "<statement> | tx: TRX-A,TRX-B"; a charge already claimed
+    # is the claim's follow-up (OPEN_CASE_FOLLOWUP), not a new fraud reason.
+    text = sql("call_reason_transactions")
+
+    assert "AND NOT EXISTS (" in text
+    assert "split_part(o.description, ' | tx: ', 2)" in text
+    assert "',' || x.transaction_id || ','" in text
+    # The same open-at-as_of filter and de-duplication as call_reason_cases.
+    cases = sql("call_reason_cases")
+    for line in (
+        "SELECT DISTINCT ON (k.complaint_id)",
+        "FROM complaints AS k",
+        "WHERE k.customer_id = %(customer_id)s",
+        "AND k.creation_date <= %(as_of)s",
+        "AND (k.closing_date > %(as_of)s",
+        "OR (k.closing_date IS NULL AND k.status NOT IN ('Resolved', 'Closed')))",
+        "ORDER BY k.complaint_id, k.process_date DESC NULLS LAST",
+    ):
+        assert line in cases, line
+        assert line in text, line
+
+
 def test_app_events_are_errors_of_the_last_24_hours() -> None:
     text = sql("call_reason_app_events")
 

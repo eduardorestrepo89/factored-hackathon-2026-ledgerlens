@@ -172,6 +172,8 @@ def test_transaction_ids_are_cleaned_and_deduplicated_in_order() -> None:
     assert repository.params_of(TXS)[0]["transaction_ids"] == ["TRX-2", "TRX-1"]
     assert result.claims[0].transaction_ids == ("TRX-2", "TRX-1")
     assert result.claims[0].claimed_amount == Decimal("1480.00")
+    # classify_call_type's call_reason_transactions.sql parses this " | tx: "
+    # list, comma-joined with no spaces, to skip charges already claimed.
     assert repository.params_of(INSERT)[0]["description"] == (
         f"{STATEMENT} | tx: TRX-2,TRX-1"
     )

@@ -454,7 +454,7 @@ def test_a_breached_case_beats_a_lower_id() -> None:
 def test_tied_cases_go_to_the_newest() -> None:
     # Spec 6.3: breached first, then the newest case.
     older = _case(complaint_id="CMP-A", creation_date=AS - timedelta(days=30))
-    newer = _case(complaint_id="CMP-B", creation_date=AS - timedelta(days=2))
+    newer = _case(complaint_id="CMP-B", creation_date=AS - timedelta(days=10))
 
     assert _rank(cases=(older, newer)) == [
         (R.OPEN_CASE_FOLLOWUP, Decimal("0.60"), "CMP-B"),
@@ -489,6 +489,48 @@ def test_an_undated_case_ranks_but_loses_a_tie_to_a_dated_one() -> None:
 def test_null_sla_breached_counts_as_not_breached() -> None:
     assert _rank(cases=(_case(sla_breached=None),)) == [
         (R.OPEN_CASE_FOLLOWUP, Decimal("0.60"), "CMP-A"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("age", "confidence"),
+    [
+        (timedelta(0), "0.70"),
+        (timedelta(days=7), "0.70"),
+        (timedelta(days=7, seconds=1), "0.60"),
+    ],
+)
+def test_a_case_opened_in_the_last_7_days_weighs_70(
+    age: timedelta, confidence: str
+) -> None:
+    assert _rank(cases=(_case(creation_date=AS - age),)) == [
+        (R.OPEN_CASE_FOLLOWUP, Decimal(confidence), "CMP-A"),
+    ]
+
+
+def test_an_undated_case_is_not_recent() -> None:
+    assert _rank(cases=(_case(creation_date=None),)) == [
+        (R.OPEN_CASE_FOLLOWUP, Decimal("0.60"), "CMP-A"),
+    ]
+
+
+def test_a_recent_breached_case_still_weighs_75() -> None:
+    recent = _case(sla_breached=True, creation_date=AS - timedelta(days=1))
+
+    assert _rank(cases=(recent,)) == [
+        (R.OPEN_CASE_FOLLOWUP, Decimal("0.75"), "CMP-A"),
+    ]
+
+
+def test_a_fresh_claim_outranks_the_card_it_got_blocked() -> None:
+    # The fraud flow blocks the card and opens a claim the same day; next contact
+    # is about the claim, not the block.
+    claim = _case(creation_date=AS - timedelta(hours=3))
+    blocked = _card(product_status="Blocked")
+
+    assert _rank(cards=(blocked,), cases=(claim,)) == [
+        (R.OPEN_CASE_FOLLOWUP, Decimal("0.70"), "CMP-A"),
+        (R.CARD_NOT_ACTIVE, Decimal("0.60"), "4497"),
     ]
 
 

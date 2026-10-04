@@ -19,6 +19,13 @@
 -- to the partition days of the 30-day window. Newest first, so when the cap cuts,
 -- the oldest charges are the ones dropped.
 --
+-- Charges named in a complaint open at as_of are skipped: the customer already
+-- reported them, so they are that case's follow-up (OPEN_CASE_FOLLOWUP), not a new
+-- fraud, review or foreign reason. open_claim writes the description as
+-- "<statement> | tx: TRX-A,TRX-B" (ids comma-joined, no spaces); the ids are
+-- matched whole, wrapped in commas, so one id never matches inside another. The
+-- open filter and de-duplication are call_reason_cases.sql's (copies).
+--
 -- TODO(ledgerlens): R3 - not yet run against a real Aurora DSQL cluster. DISTINCT ON,
 --   RIGHT(), interval arithmetic and the binds are standard PostgreSQL, but DSQL
 --   support is unverified. Column names follow docs/LATAM_Bank_ERD.md; smoke-test
@@ -46,11 +53,26 @@ home AS (
     WHERE c.customer_id = %(customer_id)s
     ORDER BY c.last_updated DESC NULLS LAST
     LIMIT 1
+),
+open_claims AS (
+    SELECT DISTINCT ON (k.complaint_id) k.description
+    FROM complaints AS k
+    WHERE k.customer_id = %(customer_id)s
+      AND k.creation_date <= %(as_of)s
+      AND (k.closing_date > %(as_of)s
+           OR (k.closing_date IS NULL AND k.status NOT IN ('Resolved', 'Closed')))
+    ORDER BY k.complaint_id, k.process_date DESC NULLS LAST
 )
 SELECT x.*, h.country AS home_country
 FROM tx_dedup AS x
 LEFT JOIN home AS h ON TRUE
-WHERE x.transaction_date >= %(as_of)s - INTERVAL '72 hours'
-   OR (x.transaction_status = 'Approved' AND x.fraud_score > %(review_above)s::numeric)
+WHERE (x.transaction_date >= %(as_of)s - INTERVAL '72 hours'
+       OR (x.transaction_status = 'Approved' AND x.fraud_score > %(review_above)s::numeric))
+  AND NOT EXISTS (
+      SELECT 1
+      FROM open_claims AS o
+      WHERE strpos(',' || split_part(o.description, ' | tx: ', 2) || ',',
+                   ',' || x.transaction_id || ',') > 0
+  )
 ORDER BY x.transaction_date DESC NULLS LAST, x.transaction_id
 LIMIT %(limit)s

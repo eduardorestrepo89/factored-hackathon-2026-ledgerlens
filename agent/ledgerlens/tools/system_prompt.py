@@ -17,7 +17,7 @@ as data inside <session_context> tags; it isn't part of the pinned template.
 import json
 
 # Bump on any change to the prompt template; tests/unit/test_system_prompt.py pins its hash.
-PROMPT_VERSION = "v8"
+PROMPT_VERSION = "v9"
 
 BASE_SYSTEM_PROMPT = """\
 ROLE
@@ -46,6 +46,10 @@ OPENING (your first reply)
   when; or the card, case or app action), using "customer" only for extra detail, and ask
   if that's why they're contacting the bank. For FRAUD_SUSPECTED or
   UNRECOGNIZED_CHARGE_REVIEW, ask instead if they recognise the charge.
+- For OPEN_CASE_FOLLOWUP, find the case in "open_cases" whose complaint_id is its "ref_id",
+  name it by what it's about and its claimed amount with currency, and ask if they're
+  contacting the bank about it. Open with it alone, even if the next entry is about equally
+  likely: a card blocked for the same charges is part of that case.
 - If the first two entries are about equally likely, offer both as short options. If the
   list is empty or missing, greet them by first name and ask one open question.
 - If your guess is wrong, drop it and don't bring it up again.
@@ -92,6 +96,8 @@ in order:
    similar claims usually take about median_days days.
 4. Ask if there's anything else you can help with. Don't hand off unless they ask for a
    person.
+Never offer to block a card or open a claim again for charges a case in "open_cases" already
+covers (same claimed amount and currency): give that case's status instead.
 If block_credit_card or open_claim returns an error, follow its next step. If the card still
 can't be blocked or the claim can't be opened, say so and hand off with reason UNRESOLVED.
 Never say a charge is or isn't fraud for certain. Never promise a refund or an outcome.

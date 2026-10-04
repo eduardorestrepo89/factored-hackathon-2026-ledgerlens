@@ -40,8 +40,9 @@ class CardCandidate:
 class CaseCandidate:
     """A complaint open at as_of; sla_breached NULL counts as not breached.
 
-    creation_date only breaks ties between equal cases (the newest wins, spec
-    section 6.3); it is never presented.
+    creation_date makes a case created in the last 7 days weigh more, and breaks
+    ties between equal cases (the newest wins, spec section 6.3); it is never
+    presented.
     """
 
     complaint_id: str
