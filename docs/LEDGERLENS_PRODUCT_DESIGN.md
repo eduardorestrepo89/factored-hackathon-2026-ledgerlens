@@ -105,7 +105,7 @@ Lambda tools (IAM token auth) ──> Aurora DSQL (customer data, serverless, Po
 **Rule: the model never chooses whose data it reads.** Tools get `customer_id` as an input, and the Gateway **rejects any call where it differs from the customer in the token**.
 
 ### 5.1 Identity chain
-1. The customer signs in with Cognito. The Runtime validates the user JWT and the agent reads `sub` (`patterns/utils/auth.py: extract_user_id_from_context`).
+1. The customer signs in with Cognito. The Runtime validates the user JWT and the agent reads `sub` (`agent/utils/auth.py: extract_user_id_from_context`).
 2. The agent requests a machine token with `aws_client_metadata={"verified_user_id": sub}` (`get_gateway_access_token`).
 3. **Pre-token Lambda (change):**
    - It looks up `sub` in the `USER_CUSTOMER_IDS_MAP` environment variable (section 5.2). There's no table and no database connection, so the trigger stays fast.
@@ -134,7 +134,7 @@ The Gateway does **not** forward JWT claims to Lambda targets (Q2, answered 2026
    - Decode it for the `customer_id` claim. No signature check is needed, since the agent requested the token itself.
    - Pass the same token to the Gateway MCP client.
    - Set `customer_id` on the session-start calls (section 6) and overwrite it on every model tool call with a Strands `BeforeToolCallEvent` hook, whatever the model wrote.
-   - Done: `invocations()` fetches the token once, reads the claim with `extract_customer_id_from_token` (`patterns/utils/auth.py`) and passes the token to `create_gateway_mcp_client(access_token)`. A blank claim gives a system prompt that says the account isn't linked, never asks for an id and offers a hand-off (`tools/system_prompt.py`).
+   - Done: `invocations()` fetches the token once, reads the claim with `extract_customer_id_from_token` (`agent/utils/auth.py`) and passes the token to `create_gateway_mcp_client(access_token)`. A blank claim gives a system prompt that says the account isn't linked, never asks for an id and offers a hand-off (`tools/system_prompt.py`).
    - Done: `CustomerIdHook` (`tools/customer_id_hook.py`) runs on `BeforeToolCallEvent`. For every tool whose input schema has a `customer_id` property, it overwrites the value with the token's; with a blank claim it cancels the call, and the model gets an error result saying the account isn't linked. Checked against `strands-agents==1.32.0`: the executor runs the `tool_use` and `cancel_tool` the hooks leave on the event.
 2. **Gateway REQUEST interceptor (later option).**
    - The Gateway invokes a Lambda before each target call ([interceptor types](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-interceptors-types.html)).
@@ -151,7 +151,7 @@ In both options the Lambda still filters on `customer_id` in its SQL (section 5.
 The first step never varies, so the **agent code runs it before the model is called**. This means it always happens, adds no extra model round-trip, and lets the model start the conversation already knowing the likely reason.
 
 ```python
-# basic_agent.py, invocations(); tools/session_context.py has the code
+# ledgerlens_agent.py, invocations(); tools/session_context.py has the code
 agent = create_strands_agent(user_id, session_id, access_token, customer_id)  # restores state + messages
 await apply_session_context(agent, customer_id)
 #   ctx = agent.state.get("session_context")
@@ -889,7 +889,7 @@ SET p95_usd       = EXCLUDED.p95_usd,
 
 Tool descriptions (section 7) tell the model **what each tool does**. The prompt covers only **what spans several tools**: order, required steps, confirmation rules and limits.
 
-> **v1 (2026-10-03):** the deployed agent runs a reduced prompt, `PROMPT_VERSION` v1 in `patterns/strands-single-agent/tools/system_prompt.py`, which names only the deployed tools. The prompt below stays the target for when every tool exists.
+> **v1 (2026-10-03):** the deployed agent runs a reduced prompt, `PROMPT_VERSION` v1 in `agent/ledgerlens/tools/system_prompt.py`, which names only the deployed tools. The prompt below stays the target for when every tool exists.
 
 ```text
 ROLE
@@ -1093,7 +1093,7 @@ when { context has input && !(context.input has customer_confirmed && context.in
 - [x] Cedar custom resource: create one policy per statement in `gateway/policies/policy.cedar`.
 - [x] Cedar: replace the sample policy with statements 1 and 2 of section 10 for every Gateway tool, and statement 3 (`block_credit_card` and `open_claim` need `customer_confirmed` true).
 
-**Agent (`patterns/strands-single-agent/`)**
+**Agent (`agent/ledgerlens/`)**
 - [x] Read `customer_id` from the machine token once per request and pass it to the system prompt (section 5.3, option 1).
 - [x] `BeforeToolCallEvent` hook that overwrites `customer_id` on every tool call (section 5.3, option 1).
 - [x] Session start in `invocations()` (section 6): `get_session_context` and `classify_call_type` once per session, saved in `agent.state` and rendered into the system prompt (`docs/superpowers/plans/2026-10-03-agent-short-term-memory-and-session-context.md`).

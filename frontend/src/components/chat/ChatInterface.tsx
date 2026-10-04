@@ -10,7 +10,6 @@ import { Message, MessageSegment, ToolCall } from "./types"
 
 import { useGlobal } from "@/app/context/GlobalContext"
 import { AgentCoreClient } from "@/lib/agentcore-client"
-import type { AgentPattern } from "@/lib/agentcore-client"
 import { submitFeedback } from "@/services/feedbackService"
 import { useAuth } from "react-oidc-context"
 import { useDefaultTool, useToolRenderer } from "@/hooks/useToolRenderer"
@@ -60,7 +59,6 @@ export default function ChatInterface() {
         const agentClient = new AgentCoreClient({
           runtimeArn: config.agentRuntimeArn,
           region: config.awsRegion || "us-east-1",
-          pattern: (config.agentPattern || "strands-single-agent") as AgentPattern,
         })
 
         setClient(agentClient)

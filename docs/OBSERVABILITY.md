@@ -22,8 +22,8 @@ stack:
 FAST's runtime behavior spans two AWS layers, and each layer has its own
 observability solution:
 
-- **AgentCore layer** - the managed Runtime, Gateway, Memory, and Code
-  Interpreter primitives that host and orchestrate your agent. Telemetry for
+- **AgentCore layer** - the managed Runtime, Gateway, and Memory primitives
+  that host and orchestrate your agent. Telemetry for
   these resources is enabled with the
   [AgentCore telemetry enablement](AGENTCORE_TELEMETRY.md) solution. This gives
   you agent application logs, per-resource usage logs, and end-to-end traces in
@@ -43,7 +43,6 @@ flowchart LR
         RT[AgentCore Runtime]
         GW[AgentCore Gateway]
         MEM[AgentCore Memory]
-        CI[Code Interpreter]
     end
 
     RT -->|invokes| BR[Amazon Bedrock model]
@@ -51,7 +50,6 @@ flowchart LR
     RT -. "logs and traces" .-> CW[CloudWatch Logs and X-Ray]
     GW -. "logs and traces" .-> CW
     MEM -. "logs and traces" .-> CW
-    CI -. "logs and traces" .-> CW
     BR -. "invocation logs" .-> S3CW[S3 and CloudWatch Logs]
 
     T1["AgentCore telemetry<br/>enablement stack"] -. "creates telemetry rules for" .-> FAST

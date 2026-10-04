@@ -1,6 +1,6 @@
 """Unit tests for the hook that sets customer_id on every tool call.
 
-The module lives at ``patterns/strands-single-agent/tools/customer_id_hook.py``.
+The module lives at ``agent/ledgerlens/tools/customer_id_hook.py``.
 ``strands`` is an agent-runtime dependency, so ``strands.hooks`` is stubbed in
 ``sys.modules`` with the few names the module imports. The stub event mirrors
 strands-agents 1.32.0's ``BeforeToolCallEvent``: ``selected_tool``, ``tool_use``,
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-_PATTERN_DIR = Path(__file__).resolve().parents[2] / "patterns" / "strands-single-agent"
+_PATTERN_DIR = Path(__file__).resolve().parents[2] / "agent" / "ledgerlens"
 
 CUSTOMER_ID = "CLI-F2DZJYU0POJ9"
 OTHER_CUSTOMER_ID = "CLI-ITIECUE8PRH9"

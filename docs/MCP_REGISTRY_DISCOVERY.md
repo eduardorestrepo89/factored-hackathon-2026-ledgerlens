@@ -36,7 +36,7 @@ When enabled, on each request the agent:
 ```
                          ┌──────────────────────────┐
    Agent Runtime  ──────▶│  AWS Agent Registry       │  list_discoverable_registry_records
- (basic_agent.py)        │  (agent-registry API)     │  batch_get_discoverable_registry_record
+ (ledgerlens_agent.py)        │  (agent-registry API)     │  batch_get_discoverable_registry_record
         │                └──────────────────────────┘
         │  build_registry_mcp_clients()  → remotes[0].url
         ▼
@@ -153,6 +153,6 @@ the agent as `registry_<slug>_<tool_name>`.
 
 ## Files
 
-- `patterns/strands-single-agent/tools/mcp_registry.py` — discovery + client builder
-- `patterns/strands-single-agent/basic_agent.py` — wires discovered clients into the agent
+- `agent/ledgerlens/tools/mcp_registry.py` — discovery + client builder
+- `agent/ledgerlens/ledgerlens_agent.py` — wires discovered clients into the agent
 - `infra-cdk/lib/utils/config-manager.ts`, `infra-cdk/lib/backend-construct.ts`, `infra-cdk/config.yaml` — CDK config, IAM, env

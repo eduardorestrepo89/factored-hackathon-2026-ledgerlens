@@ -73,7 +73,7 @@ frontend:
   certificate_arn: null  # Optional: Set to your ACM certificate ARN
 
 backend:
-  pattern: "strands-single-agent"  # Available patterns: strands-single-agent
+  pattern: "ledgerlens"  # Agent folder under agent/
 ```
 
 ## Project Structure
@@ -148,14 +148,7 @@ The agent container builds use a specific configuration to handle the repository
 
 #### Build Context Strategy
 
-**Problem**: Agent patterns need access to the shared `gateway/` utilities package, but Docker build contexts cannot access parent directories using `../` paths.
-
-**Solution**: Use repository root as build context with optimized file filtering:
-
-1. **Build Context**: Repository root (`/path/to/fullstack-agentcore-solution-template/`)
-2. **Dockerfile Location**: `patterns/{pattern}/Dockerfile` 
-3. **Package Installation**: Install FAST package (`gateway/` + `pyproject.toml`) as proper Python package
-4. **File Filtering**: `.dockerignore` excludes large directories to prevent build hangs
+The Docker build context is the repository root, so the Dockerfile at `agent/ledgerlens/Dockerfile` can copy the shared `agent/utils/` package next to the agent code.
 
 #### Docker Context Optimization
 
@@ -169,22 +162,13 @@ The agent container builds use a specific configuration to handle the repository
 
 **Result**: Build context reduced from ~100MB+ to ~10MB, eliminating hang issues.
 
-#### Package-Based Architecture
+#### Image Contents
 
-Instead of copying files with relative paths, the Dockerfile:
+The Dockerfile installs `agent/ledgerlens/requirements.txt`, then copies only what the agent imports:
 
-1. **Installs FAST package**: `RUN pip install --no-cache-dir -e .`
-   - Makes `gateway` utilities available as `from gateway.utils.*`
-   - Eliminates need for file copying between directories
-   - Works consistently across all agent patterns
-
-2. **Copies only agent code**: `COPY patterns/strands-single-agent/basic_agent.py .`
-   - Minimal file copying for the specific agent
-   - Clean separation between shared utilities and agent logic
-
-3. **Removes problematic requirements**: Cleaned `requirements.txt` to avoid duplicate FAST installation
-
-This approach scales to multiple agent patterns without code duplication while maintaining clean Docker builds.
+- `agent/ledgerlens/ledgerlens_agent.py` (entry point)
+- `agent/ledgerlens/tools/` → `tools/`
+- `agent/utils/` → `utils/`
 
 ### Key Resources Created
 

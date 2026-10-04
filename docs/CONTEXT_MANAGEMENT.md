@@ -4,7 +4,7 @@ Practical guide for managing LLM context windows in long-running or multi-turn a
 
 As agents handle longer conversations — especially those involving many tool calls, large tool results, or iterative workflows — the conversation history can grow to exceed the model's context window. Even before overflow, large contexts degrade model performance, increase latency, and balloon costs. Context management strategies address this by proactively or reactively compressing, trimming, or summarizing conversation history.
 
-This guide covers the built-in options available in Strands and LangGraph, when to use each, and how to implement a fully custom solution when the built-in options don't fit your use case.
+This guide covers the built-in options available in Strands, when to use each, and how to implement a fully custom solution when the built-in options don't fit your use case.
 
 ---
 
@@ -90,7 +90,7 @@ conversation_manager=SlidingWindowConversationManager(
 
 ### Applying to FAST Strands Pattern
 
-To add sliding window management to the `patterns/strands-single-agent/basic_agent.py`, pass the `conversation_manager` parameter when constructing the `Agent`:
+To add sliding window management to the `agent/ledgerlens/ledgerlens_agent.py`, pass the `conversation_manager` parameter when constructing the `Agent`:
 
 ```python
 from strands.agent.conversation_manager import SlidingWindowConversationManager
@@ -99,7 +99,7 @@ from strands.agent.conversation_manager import SlidingWindowConversationManager
 agent = Agent(
     model=model,
     system_prompt=SYSTEM_PROMPT,
-    tools=[gateway_client, code_tools.execute_python_securely],
+    tools=tools,
     conversation_manager=SlidingWindowConversationManager(window_size=40),
     session_manager=session_manager,
 )
@@ -180,7 +180,7 @@ from strands.agent.conversation_manager import SummarizingConversationManager
 agent = Agent(
     model=model,
     system_prompt=SYSTEM_PROMPT,
-    tools=[gateway_client, code_tools.execute_python_securely],
+    tools=tools,
     conversation_manager=SummarizingConversationManager(
         summary_ratio=0.3,
         preserve_recent_messages=10,
@@ -202,81 +202,7 @@ agent = Agent(
 
 ---
 
-## Option 3: LangGraph Middleware (Trim / Summarize)
-
-LangGraph provides middleware-based approaches for context management using `@before_model` decorators.
-
-### Trim Messages
-
-Remove older messages before each model call, keeping only recent ones:
-
-```python
-from langchain.messages import RemoveMessage
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
-from langchain.agents import create_agent, AgentState
-from langchain.agents.middleware import before_model
-from langgraph.runtime import Runtime
-from typing import Any
-
-
-@before_model
-def trim_messages(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
-    """Keep only the last few messages to fit context window."""
-    messages = state["messages"]
-    if len(messages) <= 10:
-        return None
-
-    first_msg = messages[0]
-    recent_messages = messages[-10:]
-    return {
-        "messages": [
-            RemoveMessage(id=REMOVE_ALL_MESSAGES),
-            first_msg,
-            *recent_messages,
-        ]
-    }
-```
-
-### Summarize Messages
-
-Use the built-in `SummarizationMiddleware` for automatic summarization:
-
-```python
-from langchain.agents import create_agent
-from langchain.agents.middleware import SummarizationMiddleware
-from langgraph.checkpoint.memory import InMemorySaver
-
-agent = create_agent(
-    model="us.anthropic.claude-sonnet-4-20250514-v1:0",
-    tools=tools,
-    middleware=[
-        SummarizationMiddleware(
-            model="us.anthropic.claude-sonnet-4-20250514-v1:0",
-            trigger=("tokens", 4000),   # Trigger when token count exceeds 4000
-            keep=("messages", 20),      # Keep last 20 messages verbatim
-        )
-    ],
-    checkpointer=InMemorySaver(),
-)
-```
-
-### Applying to FAST LangGraph Pattern
-
-In the `patterns/langgraph-single-agent/langgraph_agent.py`, you would add middleware when constructing the graph or agent. Since the FAST LangGraph pattern uses `create_react_agent` from LangGraph, you can add trimming logic as a state modifier or middleware depending on your LangGraph version.
-
-### Pros and Cons
-
-| Pros | Cons |
-|------|------|
-| Native LangGraph integration | Requires LangGraph-specific patterns |
-| Composable with other middleware | Different API than Strands |
-| `SummarizationMiddleware` handles complexity | Token counting adds minor overhead |
-
-📚 **LangGraph Docs**: [Short-term Memory & Summarization](https://docs.langchain.com/oss/python/langchain/short-term-memory)
-
----
-
-## Option 4: Custom Hook-Based Context Management (Strands)
+## Option 3: Custom Hook-Based Context Management (Strands)
 
 For advanced use cases — particularly long-running autonomous agents — the built-in managers may not provide enough control. You can implement a fully custom solution using Strands hooks.
 
@@ -590,8 +516,7 @@ When manipulating `agent.messages` directly, ensure:
 |----------|---------------------|
 | Simple chatbot, short conversations | Sliding Window (Option 1) |
 | Multi-turn assistant, moderate length | Summarizing Manager (Option 2) with proactive compression |
-| LangGraph-based agent | LangGraph Middleware (Option 3) |
-| Long-running autonomous agent (hours) | Custom Hook (Option 4) with external memory re-injection |
+| Long-running autonomous agent (hours) | Custom Hook (Option 3) with external memory re-injection |
 | Agent with large tool results (images, files) | Sliding Window with `per_turn=True` and truncation |
 
 ---
@@ -602,6 +527,4 @@ When manipulating `agent.messages` directly, ensure:
 - [Strands SlidingWindowConversationManager](https://strandsagents.com/docs/api/python/strands.agent.conversation_manager.sliding_window_conversation_manager/)
 - [Strands SummarizingConversationManager](https://strandsagents.com/docs/api/python/strands.agent.conversation_manager.summarizing_conversation_manager/)
 - [Strands Hooks API](https://strandsagents.com/docs/api/python/strands.hooks.events/)
-- [LangGraph Short-term Memory](https://docs.langchain.com/oss/python/langchain/short-term-memory)
-- [LangMem Summarization Guide](https://langchain-ai.github.io/langmem/guides/summarization/)
 - [FAST Memory Integration Guide](./MEMORY_INTEGRATION.md)

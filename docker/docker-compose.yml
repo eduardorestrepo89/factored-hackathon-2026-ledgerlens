@@ -5,7 +5,7 @@ services:
   agent:
     build:
       context: ..
-      dockerfile: patterns/strands-single-agent/Dockerfile
+      dockerfile: agent/ledgerlens/Dockerfile
       platforms:
         - linux/arm64
     ports:

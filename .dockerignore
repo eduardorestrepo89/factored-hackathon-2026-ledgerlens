@@ -18,6 +18,4 @@ build/
 .idea/
 
 # Keep only what we need for Docker builds
-!gateway/
-!pyproject.toml
-!patterns/
+!agent/

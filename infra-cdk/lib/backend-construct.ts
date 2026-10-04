@@ -110,7 +110,7 @@ export class BackendConstruct extends Construct {
   }
 
   private createAgentCoreRuntime(config: AppConfig): void {
-    const pattern = config.backend?.pattern || "strands-single-agent"
+    const pattern = config.backend?.pattern || "ledgerlens"
 
     const stack = cdk.Stack.of(this)
     const deploymentType = config.backend.deployment_type
@@ -119,20 +119,10 @@ export class BackendConstruct extends Construct {
     let agentRuntimeArtifact: agentcore.AgentRuntimeArtifact
     let zipPackagerResource: cdk.CustomResource | undefined
 
-    if (
-      deploymentType === "zip" &&
-      (pattern === "claude-agent-sdk-single-agent" || pattern === "claude-agent-sdk-multi-agent")
-    ) {
-      throw new Error(
-        "claude-agent-sdk patterns require Docker deployment (deployment_type: docker) " +
-          "because they need Node.js and the claude-code CLI installed at build time."
-      )
-    }
-
     if (deploymentType === "zip") {
       // ZIP DEPLOYMENT: Use Lambda to package and upload to S3 (no Docker required)
       const repoRoot = path.resolve(__dirname, "..", "..") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const patternDir = path.join(repoRoot, "patterns", pattern) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const patternDir = path.join(repoRoot, "agent", pattern) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
 
       // Create S3 bucket for agent code
       const agentCodeBucket = new s3.Bucket(this, "AgentCodeBucket", {
@@ -171,21 +161,9 @@ export class BackendConstruct extends Construct {
       }
       readPatternFiles(patternDir, "")
 
-      // Read shared modules — gateway/ keeps its name, repo-root tools/ is
-      // packaged as agentcore_tools/ to match the Dockerfile convention and
-      // avoid conflicts with the pattern's own tools/ directory
-      const gatewayDir = path.join(repoRoot, "gateway") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      if (fs.existsSync(gatewayDir)) {
-        this.readDirRecursive(gatewayDir, "gateway", agentCode)
-      }
-      const repoToolsDir = path.join(repoRoot, "tools") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      if (fs.existsSync(repoToolsDir)) {
-        this.readDirRecursive(repoToolsDir, "agentcore_tools", agentCode)
-      }
-
-      // Read shared utilities (patterns/utils/) — contains auth.py and ssm.py
-      // used by all agent patterns for JWT extraction and SSM parameter access
-      const utilsDir = path.join(repoRoot, "patterns", "utils") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      // Read shared utilities (agent/utils/) — auth.py and ssm.py, used by the
+      // agent for JWT extraction and SSM parameter access
+      const utilsDir = path.join(repoRoot, "agent", "utils") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       if (fs.existsSync(utilsDir)) {
         this.readDirRecursive(utilsDir, "utils", agentCode)
       }
@@ -225,11 +203,8 @@ export class BackendConstruct extends Construct {
         description: "S3 bucket for agent code deployment packages",
       })
 
-      // Determine the main agent file for the pattern.
-      // Each pattern has a different entry point:
-      //   strands-single-agent → basic_agent.py
-      //   langgraph-single-agent → langgraph_agent.py
-      //   agui-*, claude-* → agent.py
+      // The entry point is the agent folder's only top-level .py file
+      // (agent/ledgerlens → ledgerlens_agent.py).
       const mainFiles = fs.readdirSync(patternDir).filter(
         (f: string) => f.endsWith(".py") && f !== "__init__.py"
       )
@@ -251,7 +226,7 @@ export class BackendConstruct extends Construct {
         path.resolve(__dirname, "..", ".."), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         {
           platform: ecr_assets.Platform.LINUX_ARM64,
-          file: `patterns/${pattern}/Dockerfile`,
+          file: `agent/${pattern}/Dockerfile`,
         }
       )
     }
@@ -438,6 +413,8 @@ export class BackendConstruct extends Construct {
       // See config.yaml: ltm_top_k and ltm_relevance_score.
       LTM_TOP_K: String(config.backend.ltm_top_k),
       LTM_RELEVANCE_SCORE: String(config.backend.ltm_relevance_score),
+      // The agent's Bedrock model. See config.yaml: model_id.
+      MODEL_ID: config.backend.model_id,
       // Short-term memory: sliding window, optionally summarizing what falls out.
       // See config.yaml: stm_window_size, use_stm_summarization, stm_summary_ratio,
       // stm_preserve_recent_messages, stm_summarization_model_id, stm_summarization_prompt.
@@ -454,14 +431,9 @@ export class BackendConstruct extends Construct {
       // config.yaml: mcp_registry and docs/MCP_REGISTRY_DISCOVERY.md.
       MCP_REGISTRY_DISCOVERY_ENABLED: config.backend.mcp_registry.enabled ? "true" : "false",
       MCP_REGISTRY_ID: config.backend.mcp_registry.registry_id,
-      // Read by patterns/strands-single-agent/tools/guardrail.py.
+      // Read by agent/ledgerlens/tools/guardrail.py.
       GUARDRAIL_ID: guardrail.guardrailId,
       GUARDRAIL_VERSION: guardrail.guardrailVersion,
-    }
-
-    // Add claude-agent-sdk specific environment variable
-    if (pattern === "claude-agent-sdk-single-agent" || pattern === "claude-agent-sdk-multi-agent") {
-      envVars["CLAUDE_CODE_USE_BEDROCK"] = "1"
     }
 
     // Create the runtime using L2 construct
@@ -481,13 +453,6 @@ export class BackendConstruct extends Construct {
       },
       description: `${pattern} agent runtime for ${config.stack_name_base}`,
     })
-
-    // AGUI protocol override — CloudFormation doesn't support AGUI enum yet
-    // (only MCP | HTTP | A2A). Runtime deploys as HTTP, which also works properly.
-    // if (pattern.startsWith("agui-")) {
-    //   const cfnRuntime = this.agentRuntime.node.defaultChild as cdk.CfnResource
-    //   cfnRuntime.addPropertyOverride("ProtocolConfiguration", "AGUI")
-    // }
 
     // Make sure that ZIP is uploaded before Runtime is created
     if (zipPackagerResource) {

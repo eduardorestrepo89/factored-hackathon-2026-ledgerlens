@@ -8,7 +8,7 @@ FAST supports any agent framework that can run in a container. This guide covers
 
 ### Strands Single Agent Pattern
 
-**Location**: `patterns/strands-single-agent/`
+**Location**: `agent/ledgerlens/`
 
 A basic conversational agent using the Strands framework with AgentCore Memory integration.
 
@@ -21,12 +21,12 @@ A basic conversational agent using the Strands framework with AgentCore Memory i
 - Authenticated via Cognito (user identity tracked in memory)
 
 **Key Configuration Files**:
-- **Agent Logic**: `patterns/strands-single-agent/basic_agent.py` - Main agent implementation with memory integration, model configuration, and streaming logic
-- **Python Dependencies**: `patterns/strands-single-agent/requirements.txt` - Required Python packages (Strands, bedrock-agentcore, etc.)
-- **Container Config**: `patterns/strands-single-agent/Dockerfile` - Docker container definition (only used for `deployment_type: docker`)
+- **Agent Logic**: `agent/ledgerlens/ledgerlens_agent.py` - Main agent implementation with memory integration, model configuration, and streaming logic
+- **Python Dependencies**: `agent/ledgerlens/requirements.txt` - Required Python packages (Strands, bedrock-agentcore, etc.)
+- **Container Config**: `agent/ledgerlens/Dockerfile` - Docker container definition (only used for `deployment_type: docker`)
 - **Infrastructure**: `infra-cdk/lib/backend-stack.ts` - CDK configuration for memory resource and runtime deployment
 
-**Model Configuration** (`patterns/strands-single-agent/basic_agent.py`):
+**Model Configuration** (`agent/ledgerlens/ledgerlens_agent.py`):
 
 ```python
 bedrock_model = BedrockModel(
@@ -35,59 +35,10 @@ bedrock_model = BedrockModel(
 )
 ```
 
-**System Prompt** (`patterns/strands-single-agent/basic_agent.py`):
+**System Prompt** (`agent/ledgerlens/ledgerlens_agent.py`):
 
 ```python
 system_prompt = """You are a helpful assistant. Answer questions clearly and concisely."""
-```
-
-**After making changes**: See [Deployment Guide](DEPLOYMENT.md) for redeployment instructions.
-
-### LangGraph Single Agent Pattern
-
-**Location**: `patterns/langgraph-single-agent/`
-
-A conversational agent using LangGraph with AgentCore Memory and Gateway integration.
-
-**What This Agent Does**:
-
-- Multi-turn conversational chat with LangGraph
-- Maintains conversation history with AgentCore Memory checkpointer
-- Streams responses token-by-token for better UX
-- Integrates with AgentCore Gateway for tool execution via MCP
-- Uses MultiServerMCPClient for automatic session management
-
-**Key Configuration Files**:
-- **Agent Logic**: `patterns/langgraph-single-agent/langgraph_agent.py` - Main agent implementation with memory, Gateway tools, and streaming
-- **Python Dependencies**: `patterns/langgraph-single-agent/requirements.txt` - Required Python packages (LangGraph, langchain-aws, etc.)
-- **Container Config**: `patterns/langgraph-single-agent/Dockerfile` - Docker container definition (only used for `deployment_type: docker`)
-- **Infrastructure**: `infra-cdk/lib/backend-stack.ts` - CDK configuration for memory resource and runtime deployment
-
-**Model Configuration** (`patterns/langgraph-single-agent/langgraph_agent.py`):
-
-```python
-bedrock_model = ChatBedrock(
-    model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",  # ← Change model here
-    temperature=0.1,
-    streaming=True
-)
-```
-
-**Gateway Integration** (`patterns/langgraph-single-agent/langgraph_agent.py`):
-
-```python
-# Create MCP client for Gateway with user identity propagation
-mcp_client = await create_gateway_mcp_client(user_id)
-
-# Load tools from Gateway
-tools = await mcp_client.get_tools()
-
-# Create agent with tools
-graph = create_react_agent(
-    model=bedrock_model,
-    tools=tools,
-    checkpointer=checkpointer
-)
 ```
 
 **After making changes**: See [Deployment Guide](DEPLOYMENT.md) for redeployment instructions.
@@ -99,8 +50,8 @@ graph = create_react_agent(
 ### Step 1: Create Pattern Directory
 
 ```bash
-mkdir -p patterns/my-custom-agent
-cd patterns/my-custom-agent
+mkdir -p agent/my-custom-agent
+cd agent/my-custom-agent
 ```
 
 ### Step 2: Implement Your Agent
@@ -158,7 +109,7 @@ EXPOSE 8080
 CMD ["python", "your_agent.py"]
 ```
 
-**For ZIP deployment**: No Dockerfile is needed. The ZIP packager automatically bundles your `patterns/<pattern>/` directory along with `patterns/utils/`, `gateway/`, and `tools/` directories, plus dependencies from `requirements.txt`.
+**For ZIP deployment**: No Dockerfile is needed. The ZIP packager automatically bundles your `agent/<pattern>/` directory along with `agent/utils/` (as `utils/`), plus dependencies from `requirements.txt`.
 
 ### Step 4: Update CDK Configuration
 
@@ -166,7 +117,7 @@ In `infra-cdk/config.yaml`:
 
 ```yaml
 backend:
-  pattern: "my-custom-agent" # Your pattern directory name
+  pattern: "my-custom-agent" # Your agent directory name under agent/
 ```
 
 **If your agent needs additional AWS services** (Knowledge Bases, DynamoDB, S3, etc.), modify the CDK stacks in `infra-cdk/lib/`:

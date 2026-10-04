@@ -4,7 +4,7 @@ import { createHash } from "crypto"
 import { Construct } from "constructs"
 
 // Shown in place of a blocked message. It is fixed text, so it covers the three
-// languages the agent speaks (patterns/strands-single-agent/tools/system_prompt.py, STYLE).
+// languages the agent speaks (agent/ledgerlens/tools/system_prompt.py, STYLE).
 const BLOCKED_MESSAGE = [
   "Solo puedo ayudarte con tus tarjetas de crédito: tus tarjetas, tus movimientos y los cargos que no reconozcas.",
   "Só posso ajudar com seus cartões de crédito: seus cartões, suas transações e cobranças que você não reconhece.",

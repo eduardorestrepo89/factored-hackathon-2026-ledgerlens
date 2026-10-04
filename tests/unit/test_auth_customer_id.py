@@ -1,6 +1,6 @@
 """Unit tests for reading the customer_id claim from the Gateway machine token.
 
-``patterns/utils/auth.py`` imports ``bedrock_agentcore.runtime`` and
+``agent/utils/auth.py`` imports ``bedrock_agentcore.runtime`` and
 ``utils.ssm`` (which needs boto3 at import time). Missing agent-runtime
 dependencies are stubbed in ``sys.modules`` before the import, so the tests run
 without the agent's container dependencies.
@@ -14,7 +14,7 @@ from pathlib import Path
 import jwt
 import pytest
 
-_PATTERNS_DIR = Path(__file__).resolve().parents[2] / "patterns"
+_AGENT_DIR = Path(__file__).resolve().parents[2] / "agent"
 
 CUSTOMER_ID = "CLI-F2DZJYU0POJ9"
 
@@ -33,10 +33,10 @@ def _install_dependency_stubs() -> None:
 
 @pytest.fixture(scope="module")
 def auth():
-    """Import patterns/utils/auth.py as ``utils.auth``."""
+    """Import agent/utils/auth.py as ``utils.auth``."""
     _install_dependency_stubs()
-    if str(_PATTERNS_DIR) not in sys.path:
-        sys.path.insert(0, str(_PATTERNS_DIR))
+    if str(_AGENT_DIR) not in sys.path:
+        sys.path.insert(0, str(_AGENT_DIR))
     return importlib.import_module("utils.auth")
 
 

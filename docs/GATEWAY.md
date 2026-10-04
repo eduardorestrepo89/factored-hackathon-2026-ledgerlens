@@ -198,9 +198,9 @@ The gateway is created using native CloudFormation L1 constructs in `infra-cdk/l
 - JWT authorization configured via Cognito
 - Automatic lifecycle management by CloudFormation
 
-### 2. Sample Tool Lambda
+### 2. Tool Lambdas
 
-Located in `patterns/gateway/sample_tool_lambda.py`:
+Located in `gateway/tools/<tool>/` (for example `gateway/tools/list_credit_cards/`), each with a `tool_spec.json` and a `<tool>_lambda/delivery/handler.py`:
 
 - Demonstrates proper Lambda target implementation
 - Shows how to parse AgentCore Gateway event format
@@ -248,39 +248,7 @@ The gateway integrates with AgentCore Runtime through:
 
 ### Integration with Agents via MCP
 
-Agents connect to the Gateway using the Model Context Protocol (MCP). FAST provides two integration approaches:
-
-#### LangGraph with MultiServerMCPClient
-
-The `MultiServerMCPClient` from `langchain-mcp-adapters` provides automatic session management:
-
-```python
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
-
-# Create MCP client with Gateway configuration
-mcp_client = MultiServerMCPClient({
-    "gateway": {
-        "transport": "streamable_http",
-        "url": gateway_url,
-        "headers": {
-            "Authorization": f"Bearer {access_token}"
-        }
-    }
-})
-
-# Load tools from Gateway
-tools = await mcp_client.get_tools()
-
-# Create agent with tools
-graph = create_react_agent(
-    model=bedrock_model,
-    tools=tools,
-    checkpointer=checkpointer
-)
-```
-
-**Example:** See `patterns/langgraph-single-agent/langgraph_agent.py` for complete implementation.
+Agents connect to the Gateway using the Model Context Protocol (MCP).
 
 #### Strands with Direct MCP Session
 
@@ -301,7 +269,7 @@ async with streamablehttp_client(
         # Use tools with agent
 ```
 
-**Example:** See `patterns/strands-single-agent/basic_agent.py` for complete implementation.
+**Example:** See `agent/ledgerlens/ledgerlens_agent.py` for complete implementation.
 
 ## Adding New Tools
 
@@ -319,7 +287,7 @@ To add a new tool to the gateway:
 const weatherLambda = new lambda.Function(this, 'WeatherToolLambda', {
   runtime: lambda.Runtime.PYTHON_3_13,
   handler: 'weather_tool.handler',
-  code: lambda.Code.fromAsset(path.join(__dirname, '../../patterns/gateway')),
+  code: lambda.Code.fromAsset(path.join(__dirname, '../../gateway/tools/get_weather')),
 });
 
 const weatherToolSchema = {

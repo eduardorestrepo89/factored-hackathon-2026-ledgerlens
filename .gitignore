@@ -31,6 +31,9 @@ frontend/public/aws-exports.json
 scripts/zip-artifact/
 public/
 .mkdocs/public/
-
+.codegraph/
+.superdesign/
+.superpowers/
+datathon/
 # Superdesign scratch HTML
 .superdesign/tmp/

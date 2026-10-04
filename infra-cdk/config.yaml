@@ -10,14 +10,8 @@ admin_user_email: # Example: admin@example.com
 
 backend:
   agent_name: ledgerlens_agent # Name for the agent runtime (a-z, A-Z, 0-9, _)
-  pattern: strands-single-agent # See patterns/ for available options
-  # Pattern prefix determines the frontend parser:
-  #   agui-*      → AG-UI parser      (e.g. agui-strands-agent)
-  #   strands-*   → Strands parser    (e.g. strands-single-agent)
-  #   langgraph-* → LangGraph parser  (e.g. langgraph-single-agent)
-  #   claude-*    → Claude parser     (e.g. claude-agent-sdk-single-agent)
-  # The folder name must match exactly and start with the desired parser prefix.
-  deployment_type: docker # Available deployment types: docker (default), zip (not supported for claude-agent-sdk)
+  pattern: ledgerlens # Agent folder under agent/ to deploy
+  deployment_type: docker # Available deployment types: docker (default), zip
   network_mode: PUBLIC # Available network modes: PUBLIC (default), VPC
 
   # Long-term memory uses a SemanticMemoryStrategy to extract and store facts across sessions.
@@ -28,6 +22,11 @@ backend:
   ltm_top_k: 10             # Number of facts to retrieve per turn (default: 10)
   ltm_relevance_score: 0.3  # Minimum similarity threshold for retrieval (default: 0.3)
 
+  # Bedrock model the agent runs on, passed to the runtime as MODEL_ID. Use a model ID or an
+  # inference profile ID (e.g. "us.anthropic.claude-haiku-4-5-20251001-v1:0"). Third-party
+  # models need their Marketplace agreement accepted first. The agent sends temperature 0.1,
+  # which GPT-6 models reject.
+  model_id: "deepseek.v3.2"
   # Short-term memory: how many recent messages the agent sends to the model per turn.
   # Counts messages, not turns (one tool-using question is ~4-6 messages).
   stm_window_size: 30
@@ -36,7 +35,7 @@ backend:
   use_stm_summarization: false
   stm_summary_ratio: 0.3            # Share of messages summarized each time (0.1-0.8)
   stm_preserve_recent_messages: 10  # Newest messages never summarized; must be < stm_window_size
-  # Model that writes the summaries. Empty = the agent's own model (Claude Sonnet 4.5).
+  # Model that writes the summaries. Empty = the agent's own model (model_id).
   # A cheaper model cuts the cost of each summary, e.g.
   # "us.anthropic.claude-haiku-4-5-20251001-v1:0".
   stm_summarization_model_id: ""

@@ -75,14 +75,13 @@ This section describes how _FAST contributors_ should get started. If you are a 
 
 Familiarize yourself with the project structure:
 
+- `agent/`: The LedgerLens agent (`agent/ledgerlens/`) and shared agent utilities (`agent/utils/`) deployed into AgentCore
 - `docs/`: Documentation files
 - `frontend/`: Web UI components (React)
 - `gateway/`: Shared utilities and tools for AgentCore Gateway integration
 - `infra-cdk/`: Infrastructure as Code (CDK)
-- `patterns/`: Implementation of Agentic patterns to be deployed into AgentCore
 - `scripts/`: Utility scripts for development, testing, and deployment
 - `tests/`: Unit and integration tests
-- `vibe-context/`: AI coding assistant context and rules
 
 # Development Workflow
 

@@ -136,13 +136,13 @@ To confirm that denied tools are being filtered from `tools/list`:
    - `aws.agentcore.policy.denied_tools`: tools filtered out
    - `aws.agentcore.gateway.policy.mode`: should show `ENFORCE`
 
-> **Verifying at the Runtime level:** Add a log line in the agent code to confirm which tools the agent received after Cedar policy filtering. Examples for the two primary agent patterns:
+> **Verifying at the Runtime level:** Add a log line in the agent code to confirm which tools the agent received after Cedar policy filtering. Example for the Strands agent:
 >
-> **Strands pattern** (`patterns/strands-single-agent/basic_agent.py`) — add after `Agent()` creation:
+> **Strands agent** (`agent/ledgerlens/ledgerlens_agent.py`) — add after `Agent()` creation:
 > ```python
 > agent = Agent(
 >     name="strands_agent",
->     tools=[gateway_client, code_tools.execute_python_securely],
+>     tools=tools,
 >     ...
 > )
 > specs = agent.tool_registry.get_all_tool_specs()
@@ -150,14 +150,6 @@ To confirm that denied tools are being filtered from `tools/list`:
 > return agent
 > ```
 > **Where to find:** CloudWatch → Log groups → `/aws/bedrock-agentcore/runtimes/{runtime_name}` → log stream `otel-rt-logs`. Search for `[GATEWAY] Raw tool specs`.
->
-> **LangGraph pattern** (`patterns/langgraph-single-agent/langgraph_agent.py`) — add after `mcp_client.get_tools()`:
-> ```python
-> mcp_client = await create_gateway_mcp_client(user_id)
-> tools = await mcp_client.get_tools()
-> logger.info(f"[GATEWAY] Tools loaded: {[t.name for t in tools]}")
-> ```
-> **Where to find:** CloudWatch → Log groups → `/aws/bedrock-agentcore/runtimes/{runtime_name}` → log stream `otel-rt-logs`. Search for `[GATEWAY] Tools loaded`.
 
 ### Summary
 

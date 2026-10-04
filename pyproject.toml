@@ -42,18 +42,9 @@ agent-strands = [
     "mcp==1.28.1",
 ]
 
-# LangGraph agent dependencies (for local development)
-agent-langgraph = [
-    "langgraph==1.0.10rc1",
-    "langchain-aws==1.0.0",
-    "langchain-mcp-adapters==0.1.13",
-    "langgraph-checkpoint-aws==1.0.1",
-    "mcp==1.28.1",
-]
-
 # All dependencies for local development
 all = [
-    "fullstack-agentcore-solution-template[dev,agent-strands,agent-langgraph]",
+    "fullstack-agentcore-solution-template[dev,agent-strands]",
 ]
 
 [project.urls]
@@ -65,7 +56,7 @@ Issues = "https://github.com/aws-samples/fullstack-agentcore-solution-template/i
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["gateway*", "scripts*"]
-exclude = ["tests*", "infra-cdk*", "frontend*", "patterns*"]
+exclude = ["tests*", "infra-cdk*", "frontend*", "agent*"]
 
 [tool.ruff]
 line-length = 88

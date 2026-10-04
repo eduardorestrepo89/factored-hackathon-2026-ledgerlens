@@ -1,7 +1,7 @@
 [
   {
     "name": "block_credit_card",
-    "description": "Blocks one of the customer's credit cards immediately so it can't be charged again. Only call after the customer explicitly said yes, in this conversation, to blocking the card with these last 4 digits. Can't be undone through this assistant. Returns JSON with 'card_last4', 'status' and 'already_blocked' (true when the card was already blocked; that is not an error).",
+    "description": "Blocks one of the customer's credit cards immediately so it can't be charged again. Call it as soon as a card should be blocked: the app asks the customer to confirm with Yes/No buttons before it runs, so don't ask in text first. Can't be undone through this assistant. Returns JSON with 'card_last4', 'status' and 'already_blocked' (true when the card was already blocked; that is not an error).",
     "inputSchema": {
       "type": "object",
       "properties": {
