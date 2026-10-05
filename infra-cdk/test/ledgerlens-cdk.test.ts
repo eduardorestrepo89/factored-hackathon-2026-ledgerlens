@@ -1,4 +1,5 @@
 import * as cdk from "aws-cdk-lib"
+import { Template } from "aws-cdk-lib/assertions"
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -48,4 +49,18 @@ test("-c deploy_scope=full overrides deploy_scope: data in config.yaml", () => {
 
 test("an unknown -c deploy_scope stops the synth", () => {
   expect(() => build("", { deploy_scope: "backend" })).toThrow(/deploy_scope/)
+})
+
+test("the Amplify app sends a CSP and the other security headers", () => {
+  const app = Template.fromStack(build().stacks.main!).findResources("AWS::Amplify::App")
+  const headers = JSON.stringify(Object.values(app)[0].Properties.CustomHeaders)
+  for (const expected of [
+    "Content-Security-Policy",
+    "script-src 'self'",
+    "https://bedrock-agentcore.",
+    "frame-ancestors 'none'",
+    "Strict-Transport-Security",
+    "X-Content-Type-Options",
+  ])
+    expect(headers).toContain(expected)
 })

@@ -35,9 +35,9 @@ describe("Configuration Verification Tests", () => {
       expect(viteConfig).toContain("./src")
     })
 
-    it("should have sourcemap enabled", () => {
+    it("should not publish source maps", () => {
       const viteConfig = readFileSync(resolve(__dirname, "../../vite.config.ts"), "utf-8")
-      expect(viteConfig).toContain("sourcemap: true")
+      expect(viteConfig).toContain("sourcemap: false")
     })
 
     it("should have React plugin configured", () => {
