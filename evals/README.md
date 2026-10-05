@@ -98,3 +98,19 @@ blends into a baseline.
   4. scores instead of `SpanEventParsingException` mean the limitation is gone.
 - **Other routes if it stays:** a code-based evaluator (a Lambda reading the spans, deferred in the
   spec), trace-level evaluation of the traces without an interrupt, or an AWS support case.
+
+## Model decision, 2026-10-05
+
+Prompt v10, 10 cases × 3 runs per model (`evals/results/baseline-v10`, `evals/results/haiku-v10`):
+
+| | DeepSeek V3.2 | Claude Haiku 4.5 | gpt-oss-120b |
+|---|---|---|---|
+| pass^1 | 60% | **80%** | 47% |
+| pass^3 | 4/10 (17-69%) | **8/10 (49-94%)** | 4/10 (17-69%) |
+| bare tool names ("Unknown tool" after a Yes) | 3 | 0 | 1 |
+| malformed arguments (string arrays, enum values outside the spec) | 5 | 0 | 0 |
+| write proposals without text | 3 of 18 | 0 of 12 | 20 of 22 |
+| model cost for 30 sessions | $0.27 | $0.55 | $0.08 |
+
+The production `model_id` moved from `deepseek.v3.2` to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
+Haiku's remaining failure (E2b, E4a) is offering a person in text instead of calling the hand-off.

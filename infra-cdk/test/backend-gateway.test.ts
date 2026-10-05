@@ -220,3 +220,9 @@ test("the user pool has the evaluators group", () => {
   t.hasResourceProperties("AWS::Cognito::UserPoolGroup", { GroupName: "evaluators" })
 })
 
+
+test("the runtime runs Claude Haiku 4.5, the model the 2026-10-05 evaluation chose", () => {
+  // evals/results: Haiku 8/10 cases on every run vs DeepSeek 4/10, without DeepSeek's bare tool names
+  const [runtime] = Object.values(t.findResources("AWS::BedrockAgentCore::Runtime"))
+  expect(runtime.Properties.EnvironmentVariables.MODEL_ID).toBe("global.anthropic.claude-haiku-4-5-20251001-v1:0")
+})
