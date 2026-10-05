@@ -38,12 +38,12 @@ def test_the_shipped_cases_load():
     assert all(c["customer_id"].startswith("CLI-") for c in loaded)
 
 
-def test_v10_file_is_the_released_prompt():
+def test_the_released_version_file_is_the_released_prompt():
     if str(_PATTERN_DIR) not in sys.path:
         sys.path.insert(0, str(_PATTERN_DIR))
     system_prompt = importlib.import_module("tools.system_prompt")
 
-    assert cases_mod.load_prompt("v10") == system_prompt.BASE_SYSTEM_PROMPT
+    assert cases_mod.load_prompt(system_prompt.PROMPT_VERSION) == system_prompt.BASE_SYSTEM_PROMPT
 
 
 def test_prompt_files_are_read_with_lf_and_no_trailing_newline(tmp_path):

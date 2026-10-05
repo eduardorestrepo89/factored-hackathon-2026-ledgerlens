@@ -38,7 +38,7 @@ $PY -m evals.report evals/results/baseline-v10 --out evals/results/report
 ## Files
 
 - `cases.yaml`: the cases (frozen after the pilot).
-- `prompts/<name>.md`: base prompts; `v10.md` is pinned to the released prompt.
+- `prompts/<name>.md`: base prompts; the file named by `PROMPT_VERSION` (now `v12.md`) is pinned to the released prompt.
 - `graders.py`: the checks.
 - `results/<run>/`:
   - `sessions.jsonl`, `run.json`, `aws_eval.jsonl` per run;
