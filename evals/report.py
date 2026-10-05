@@ -110,6 +110,16 @@ def grid(rows: list[dict]) -> dict[str, dict[tuple, str]]:
     return {case: {cfg: "".join(marks) for cfg, marks in by_cfg.items()} for case, by_cfg in cells.items()}
 
 
+def grid_table(rows: list[dict], configs: list[tuple]) -> list[str]:
+    """The per-case grid as Markdown table lines, one column per (model, prompt)."""
+    g = grid(rows)
+    lines = ["| Case | " + " | ".join(f"{m} {p}" for m, p in configs) + " |",
+             "|---|" + "---|" * len(configs)]
+    lines += [f"| {case_id} | " + " | ".join(g[case_id].get(cfg, "") for cfg in configs) + " |"
+              for case_id in sorted(g)]
+    return lines
+
+
 def regressions(rows: list[dict], before: str, after: str) -> list[tuple[str, str, str]]:
     """(model, case, check) failing in some `after` run but in no `before` run."""
     failed: dict[tuple, set] = defaultdict(set)
@@ -166,12 +176,7 @@ def write_report(run_dirs: list[Path], out_dir: Path) -> Path:
         for evaluator, a in s["aws"].items():
             lines.append(f"| {s['model']} | {s['prompt']} | {evaluator} | {a['mean']:.2f} | "
                          f"{_pct(a['agreement'])} | {a['n']} |")
-    g = grid(rows)
-    lines += ["", "## Per-case grid (✓ pass, ✗ fail, E harness error)", "",
-              "| Case | " + " | ".join(f"{m} {p}" for m, p in configs) + " |",
-              "|---|" + "---|" * len(configs)]
-    for case_id in sorted(g):
-        lines.append(f"| {case_id} | " + " | ".join(g[case_id].get(cfg, "") for cfg in configs) + " |")
+    lines += ["", "## Per-case grid (✓ pass, ✗ fail, E harness error)", ""] + grid_table(rows, configs)
     prompts = sorted({p for _, p in configs})
     if len(prompts) >= 2:
         before, after = prompts[0], prompts[-1]

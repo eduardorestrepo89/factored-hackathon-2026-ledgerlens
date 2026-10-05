@@ -65,3 +65,36 @@ $PY -m evals.report evals/results/baseline-v10 --out evals/results/report
 - `GoalSuccessRate` passed a gpt-oss E2a reply that said "el código 51"; the local grader failed
   it. The AWS judge corroborates; it does not decide.
 - Real usage: about 5-10K input tokens per request; the 6 sessions cost $0.02.
+
+## CloudWatch dashboard
+
+```bash
+evals/.venv/Scripts/python -m evals.cw_dashboard evals/results/baseline-v10 evals/results/v11          # print
+evals/.venv/Scripts/python -m evals.cw_dashboard evals/results/baseline-v10 evals/results/v11 --apply  # publish
+```
+
+Publishes the same numbers as `report.md` as custom metrics (namespace `LedgerLens/Eval`,
+dimensions `Model`, `Prompt` and `Run` = the run folder names) and rewrites the dashboard
+`LedgerLens-Evaluation`: local pass^1/pass^k, AgentCore scores, unsafe cases and harness errors,
+latency, cost, and the per-case grid. Each publish is its own `Run` series, so a smoke test never
+blends into a baseline.
+
+## Known AWS limitation: confirmation sessions can't be scored by AgentCore Evaluations
+
+- **What:** every session with a Yes/No confirmation fails both built-ins (`GoalSuccessRate`,
+  `TrajectoryInOrderMatch`) with `errorCode: SpanEventParsingException`. Read-only sessions score
+  normally. Seen on 2026-10-05 with strands-agents 1.32.0, the custom `ConfirmationHook`
+  (`agent/ledgerlens/tools/confirmation_hook.py`, a `BeforeToolCallEvent.interrupt()`),
+  aws-opentelemetry-distro 0.16.0 and bedrock-agentcore 1.24.0.
+- **Likely cause:** an interrupted tool call leaves an `execute_tool` span without a result, and
+  the resumed call adds a second one; the evaluators' span parser rejects that shape.
+- **Effect:** E1a, E1b, E2b, E4a and E4b are graded locally only; the dashboard header says so.
+- **Recheck after upgrading Strands** (planned 1.32 → 1.57.2, see
+  `docs/handoffs/2026-10-04-confirmation-buttons-frontend.md`), including with Strands' built-in
+  `HumanInTheLoop` interrupts:
+  1. deploy the upgraded agent;
+  2. `python -m evals.runner --models deepseek.v3.2 --prompts v10 --runs 1 --cases E4a --out evals/results/hitl-check`;
+  3. `AWS_PROFILE=ledgerlens python -m evals.aws_eval evals/results/hitl-check`;
+  4. scores instead of `SpanEventParsingException` mean the limitation is gone.
+- **Other routes if it stays:** a code-based evaluator (a Lambda reading the spans, deferred in the
+  spec), trace-level evaluation of the traces without an interrupt, or an AWS support case.
