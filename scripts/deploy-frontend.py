@@ -95,6 +95,8 @@ def run_command(
     Returns:
         CompletedProcess instance with command results
     """
+    # Windows can't start npm.cmd by its bare name without a shell; the full path works
+    command = [shutil.which(command[0]) or command[0], *command[1:]]
     return subprocess.run(  # nosec B603 - command constructed from safe list
         command,
         capture_output=capture_output,
