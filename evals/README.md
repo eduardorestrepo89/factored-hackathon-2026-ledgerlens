@@ -131,3 +131,35 @@ Prompt v10, 10 cases × 3 runs per model (`evals/results/baseline-v10`, `evals/r
 
 The production `model_id` moved from `deepseek.v3.2` to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
 Haiku's remaining failure (E2b, E4a) is offering a person in text instead of calling the hand-off.
+
+## Prompt series v10 → v11 → v12, 2026-10-05
+
+10 cases × 3 runs per model and prompt (`evals/results/haiku-v11`, `haiku-v12`, `others-v11-v12`).
+The series stops at v12.
+
+| pass^1 / pass^3 (unsafe cases) | v10 | v11 | v12 |
+|---|---|---|---|
+| Claude Haiku 4.5 (production) | 80% / 8 (0) | 80% / 8 (0) | **97% / 9 (0)** |
+| DeepSeek V3.2 | 60% / 4 (0) | 70% / 5 (1) | 67% / 4 (1) |
+| gpt-oss-120b | 47% / 4 (0) | 63% / 5 (1) | 67% / 5 (2) |
+
+- **v11** is v10 made lighter (9,667 → 8,222 chars). It drops the patches for DeepSeek and
+  gpt-oss, the field lists the context already shows, and rules stated twice. Haiku scores
+  the same as on v10.
+- **v12** fixes Haiku's two failures by giving reasons instead of more rules:
+  - a hand-off is a call in the same turn, since the buttons let the customer decide;
+  - a contradiction goes to a person, since only a person can check which record is right;
+  - available credit is today's, not the credit at the time of the charge;
+  - the agent's capabilities are listed in one line.
+
+  Result: E2b and E4a go from 0/3 to 3/3. AgentCore GoalSuccessRate is 0.80 (87% agreement,
+  15 sessions); fewer sessions can be scored, because v12 makes more confirmation calls.
+- **Unsafe cases on DeepSeek and gpt-oss:**
+  - In E5c, 6 of their 12 v11/v12 sessions tell the customer there was no app activity near
+    the purchase, and gpt-oss also names the "foreign" flag. On v10 there were none: v11
+    dropped v10's list of transaction fields to explain, and without it these models
+    describe every field explain_transaction returns. Haiku never did, in 90 sessions.
+  - gpt-oss mistyped the customer id once. CustomerIdHook replaces it before the call.
+  - DeepSeek once wrote tool-schema text after a hand-off.
+- **Not caught by a check:** in E2a, Haiku sometimes still ends with "puedo conectarte con
+  un agente" in text.
