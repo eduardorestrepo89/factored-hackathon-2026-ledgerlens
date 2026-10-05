@@ -165,11 +165,13 @@ def test_percent_charts_have_a_fixed_0_to_100_axis_and_the_80_percent_target():
         assert props["annotations"]["horizontal"][0]["value"] == 80, start
 
 
-def test_eval_widgets_show_the_latest_publish_and_only_the_history_has_a_time_axis():
+def test_bars_aggregate_the_range_and_only_the_history_has_a_time_axis():
+    """A bar chart without setPeriodToTimeRange draws one time bucket and drops configs published in
+    another; republished values are identical, so the range aggregate equals the latest publish."""
     for w in body()["widgets"]:
         props = w["properties"]
         if w["type"] == "metric" and series(w) and not props["title"].startswith("Live"):
-            assert not props.get("setPeriodToTimeRange"), props["title"]
+            assert bool(props.get("setPeriodToTimeRange")) == (props["view"] == "bar"), props["title"]
             assert props["view"] != "timeSeries" or "by prompt version" in props["title"], props["title"]
 
 
@@ -219,6 +221,9 @@ def test_live_rows_use_the_current_gateway_and_the_runtime_log_stream_only():
 
     assert "ledgerlens-bank-assistant-gateway-0emkqlikrv" in json.dumps(guards)
     assert guards["properties"]["sparkline"] and guards["properties"]["setPeriodToTimeRange"]
+    # Converse calls publish interventions per guardrail ARN; Operation=ApplyGuardrail is another API.
+    assert "{AWS/Bedrock/Guardrails,GuardrailArn,GuardrailVersion}" in json.dumps(guards)
+    assert "ApplyGuardrail" not in json.dumps(guards)
     assert decisions["type"] == "log"
     assert decisions["properties"]["query"].startswith("SOURCE '/aws/bedrock-agentcore/runtimes/agent-ABC-DEFAULT'")
     assert "runtime-logs" in decisions["properties"]["query"]  # each line is also in otel-rt-logs

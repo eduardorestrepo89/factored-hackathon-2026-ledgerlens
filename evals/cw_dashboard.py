@@ -257,10 +257,12 @@ def _rows(*items: tuple[str, str]) -> list[list]:
 
 
 def _metric(title, metrics, w=8, h=6, view="bar", stat="Maximum", period=300, **extra):
-    """A metric widget. Without setPeriodToTimeRange a bar, pie, gauge or number shows each series'
-    latest value, which for an eval metric is its latest publish."""
+    """A metric widget. Without setPeriodToTimeRange a pie, gauge or number shows each series'
+    latest value, which for an eval metric is its latest publish. A bar chart draws one time bucket
+    instead and drops configs published in another, so bars aggregate the range: republished
+    values are identical, so the aggregate is the latest publish too."""
     props = {"title": title, "view": view, "region": config.REGION, "stat": stat, "period": period,
-             "metrics": metrics, **extra}
+             "metrics": metrics, **({"setPeriodToTimeRange": True} if view == "bar" else {}), **extra}
     return {"type": "metric", "width": w, "height": h, "properties": props}
 
 
@@ -350,11 +352,14 @@ def dashboard_body(summaries: list[dict], fams: dict, grid_markdown: str, labels
     if live:
         guards = [["AWS/Bedrock-AgentCore", "DenyDecisions", "OperationName", "AuthorizeAction", "TargetResource",
                    live["gateway_id"], {"id": "m0", "visible": False}],
-                  ["AWS/Bedrock/Guardrails", "InvocationsIntervened", "Operation", "ApplyGuardrail",
-                   {"id": "m1", "visible": False}],
+                  # Converse calls publish interventions per guardrail ARN and version, not per Operation
+                  [{"expression": "SUM(SEARCH('{AWS/Bedrock/Guardrails,GuardrailArn,GuardrailVersion} "
+                                  "MetricName=\"InvocationsIntervened\"', 'Sum', 3600))",
+                    "id": "m1", "visible": False}],
                   *_rows(("FILL(m0, 0)", "Cedar denies on AuthorizeAction"),
                          ("FILL(m1, 0)", "Guardrail interventions"))]
-        w.append(_metric("Live guards (sum over the range): a Cedar deny means a hook was bypassed, expect 0", guards,
+        w.append(_metric("Live guards (sum over the range): Cedar denies, expect 0 (one means a hook was bypassed)",
+                         guards,
                          w=12, h=7, **tiles))
     # 5. cost and latency
     latency = lambda stat: [_eval(c, "RequestLatency", f"{c['label']}: ${{LAST}} s",  # noqa: E731
