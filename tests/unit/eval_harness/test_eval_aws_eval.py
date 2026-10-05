@@ -51,3 +51,21 @@ def test_a_failing_call_is_recorded_not_raised():
     out = aws_eval.evaluate_session(SESSION, CASE, run, refs, "a")
 
     assert out["error"] == "RuntimeError: no spans" and out["results"] == []
+
+
+def test_no_results_means_the_spans_are_not_there_yet():
+    out = aws_eval.evaluate_session(SESSION, CASE, lambda **kw: [], refs, "a")
+
+    assert out["error"] == aws_eval.NO_RESULTS
+
+
+def test_only_successful_scores_count_as_done(tmp_path):
+    import json
+
+    path = tmp_path / "aws_eval.jsonl"
+    path.write_text(json.dumps({"session_id": "a", "error": None, "results": [{"value": 1}]}) + "\n"
+                    + json.dumps({"session_id": "b", "error": "no spans", "results": []}) + "\n",
+                    encoding="utf-8")
+
+    assert aws_eval.evaluated_ids(path) == {"a"}
+    assert aws_eval.evaluated_ids(tmp_path / "missing.jsonl") == set()

@@ -41,8 +41,9 @@ def grade_runs(run_dirs: list[Path], cases_by_id: dict) -> list[dict]:
     aws: dict[str, dict] = {}
     for run_dir in run_dirs:
         for record in _jsonl(run_dir / "aws_eval.jsonl"):
-            aws[record["session_id"]] = {r["evaluatorId"]: r["value"] for r in record["results"]
-                                         if r.get("value") is not None}
+            if not record.get("error"):  # a failed attempt never hides a later success
+                aws[record["session_id"]] = {r["evaluatorId"]: r["value"] for r in record["results"]
+                                             if r.get("value") is not None}
         for session in _jsonl(run_dir / "sessions.jsonl"):
             k = session["key"]
             latest[(k["case"], k["model"], k["prompt"], k["run"])] = session
@@ -54,6 +55,7 @@ def grade_runs(run_dirs: list[Path], cases_by_id: dict) -> list[dict]:
         rows.append({
             "case": case_id, "model": model, "prompt": prompt, "run": run,
             "status": graded["status"], "passed": graded["passed"], "unsafe": graded["unsafe"],
+            "harness_error": graded.get("harness_error"),
             "failures": graded["failures"], "first_failure": graded["first_failure"],
             "session_id": session["session_id"], "tokens_in": tokens_in, "tokens_out": tokens_out,
             "latency_s": sum(r["latency_s"] for r in session["requests"]),
@@ -183,6 +185,15 @@ def write_report(run_dirs: list[Path], out_dir: Path) -> Path:
             reason = r["failures"][0]["reason"].replace("|", "/")[:120]
             lines.append(f"| {r['model']} | {r['prompt']} | {r['case']} | {r['run']} | "
                          f"{r['first_failure']} | {reason} | `{r['session_id']}` |")
+    # Spec section 8 keeps these out of the pass rates; section 12 makes them findings
+    # (e.g. a model that can't call the tools), so every reason is listed here.
+    lines += ["", "## Harness and agent errors (retried once, not graded)", "",
+              "| Model | Prompt | Case | Run | Reason | Session |", "|---|---|---|---|---|---|"]
+    for r in rows:
+        if r["status"] == "harness_error":
+            reason = str(r["harness_error"]).replace("|", "/").replace("\n", " ")[:160]
+            lines.append(f"| {r['model']} | {r['prompt']} | {r['case']} | {r['run']} | {reason} | "
+                         f"`{r['session_id']}` |")
     path = out_dir / "report.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path

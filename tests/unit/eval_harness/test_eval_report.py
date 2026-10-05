@@ -81,3 +81,18 @@ def test_write_report_writes_markdown_csv_and_grades(tmp_path):
     assert "deepseek.v3.2" in text and "E5a" in text and "pass^1" in text
     assert (tmp_path / "report" / "report.csv").exists()
     assert json.loads((tmp_path / "report" / "grades.jsonl").read_text(encoding="utf-8").splitlines()[0])["passed"]
+
+
+def test_report_lists_harness_and_agent_errors_with_reasons(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    session = {"key": {"case": "E5a", "model": "openai.gpt-oss-120b-1:0", "prompt": "v10", "run": 1},
+               "session_id": "ll-err", "case_id": "E5a", "persona": "P03", "customer_id": "CLI-70U0WJ1NH1MN",
+               "requests": [], "unexpected_confirmations": [], "missing_confirmations": [],
+               "harness_error": "ValidationException: The model returned an invalid tool call"}
+    (run_dir / "sessions.jsonl").write_text(json.dumps(session) + "\n", encoding="utf-8")
+
+    text = report.write_report([run_dir], tmp_path / "report").read_text(encoding="utf-8")
+
+    assert "## Harness and agent errors" in text
+    assert "ValidationException: The model returned an invalid tool call" in text

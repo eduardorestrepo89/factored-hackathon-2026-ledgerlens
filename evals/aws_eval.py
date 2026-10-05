@@ -18,7 +18,8 @@ from evals.cases import load_cases
 
 TRAJECTORY = "Builtin.TrajectoryInOrderMatch"
 GOAL = "Builtin.GoalSuccessRate"
-INGESTION_WAIT_S = 180
+INGESTION_WAIT_S = 300  # AWS: 2-5 minutes for CloudWatch to ingest spans
+NO_RESULTS = "no evaluation results (spans not ingested yet?)"
 _FIELDS = ("evaluatorId", "value", "label", "explanation", "errorCode")
 
 
@@ -40,9 +41,19 @@ def evaluate_session(session: dict, case: dict, run, make_refs, agent_id: str) -
         items = run(evaluator_ids=evaluator_ids(case), agent_id=agent_id,
                     session_id=session["session_id"], reference_inputs=make_refs(**refs))
         out["results"] = [{name: _field(item, name) for name in _FIELDS} for item in items]
+        if not out["results"]:  # the SDK returns [] when it finds no spans; retry on a rerun
+            out["error"] = NO_RESULTS
     except Exception as e:  # one failed session must not stop the rest
         out["error"] = f"{type(e).__name__}: {e}"
     return out
+
+
+def evaluated_ids(path: Path) -> set[str]:
+    """Session ids already scored without an error (a rerun retries the rest)."""
+    if not path.exists():
+        return set()
+    records = (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    return {r["session_id"] for r in records if not r.get("error")}
 
 
 def main(argv=None) -> int:
@@ -60,9 +71,7 @@ def main(argv=None) -> int:
     agent_id = json.loads((args.run_dir / "run.json").read_text(encoding="utf-8"))["agent_runtime_arn"].split("/")[-1]
     cases = {c["id"]: c for c in load_cases()}
     out_path = args.run_dir / "aws_eval.jsonl"
-    done = set()
-    if out_path.exists():
-        done = {json.loads(line)["session_id"] for line in out_path.read_text(encoding="utf-8").splitlines()}
+    done = evaluated_ids(out_path)
     client = EvaluationClient(region_name=config.REGION)
     with out_path.open("a", encoding="utf-8") as f:
         for line in sessions_path.read_text(encoding="utf-8").splitlines():

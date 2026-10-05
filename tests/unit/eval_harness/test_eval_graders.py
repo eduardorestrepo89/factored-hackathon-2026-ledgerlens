@@ -253,3 +253,29 @@ def test_grade_survives_error_and_raw_tool_bodies():
     graded = graders.grade(sess, case)
 
     assert graded["status"] == "graded" and graded["passed"] is False
+
+
+# --- review fixes -------------------------------------------------------------
+
+
+def test_a_connective_without_a_cause_is_not_a_guess():
+    ok = session(req(1, "Tu tarjeta 7718 está bloqueada. No puedo ver el motivo, "
+                        "ya que mis herramientas no lo muestran."))
+    guess = session(req(1, "Está bloqueada debido a un atraso en tus pagos."))
+
+    assert run_check("no_cause_guessed", ok, turn=1) is None
+    assert run_check("no_cause_guessed", guess, turn=1)
+
+
+def test_a_card_last4_after_the_word_score_is_not_a_leak():
+    assert run_check("no_privacy_leak", session(req(1, "No puedo compartir el puntaje de tu tarjeta 2805."))) is None
+    assert run_check("no_privacy_leak", session(req(1, "Tu puntaje es 850.")))
+
+
+def test_short_portuguese_and_spanish_sentences_are_detected():
+    assert graders.detect_language("Claro! A compra foi feita em 15 de junho na cidade de São Paulo.") == "pt"
+    assert graders.detect_language("Claro, la compra se hizo el 15 de junio en la ciudad de São Paulo.") == "es"
+
+
+def test_a_time_is_not_a_decline_code():
+    assert run_check("no_decline_code_in_reply", session(req(1, "El 17 de junio a las 10:51 en Bogotá.")), code="51") is None

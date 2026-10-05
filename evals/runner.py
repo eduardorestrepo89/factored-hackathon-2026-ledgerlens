@@ -116,7 +116,7 @@ def run_with_retry(case: dict, key: dict, eval_payload: dict, send) -> dict:
     for attempt in (1, 2):
         try:
             session = run_session(case, key, eval_payload, send)
-        except httpx.HTTPError as e:
+        except Exception as e:  # login, HTTP or digest failure: record it, never crash the matrix
             session = {**_new_session(case, key), "harness_error": f"{type(e).__name__}: {e}"}
         session["attempt"] = attempt
         error = session["harness_error"]

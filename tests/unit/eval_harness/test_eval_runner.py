@@ -237,3 +237,13 @@ def test_cost_guard_stops_at_the_cap():
     assert not guard.exhausted
     guard.add(0.5)
     assert guard.exhausted
+
+
+def test_any_error_during_a_session_is_a_harness_error_not_a_crash():
+    def broken(session_id, body):
+        raise RuntimeError("NotAuthorizedException: Incorrect username or password")
+
+    session = runner.run_with_retry(case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, broken)
+
+    assert session["harness_error"] == "RuntimeError: NotAuthorizedException: Incorrect username or password"
+    assert session["attempt"] == 2

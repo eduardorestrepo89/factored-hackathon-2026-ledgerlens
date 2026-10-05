@@ -27,12 +27,18 @@ _REFUSAL = re.compile(
     r"no puedo|no es posible|no me es posible|s[oó]lo puedo|únicamente|no tengo acceso"
     r"|no est[aá] (?:en mis|dentro)|fuera de|não posso|não é possível|só posso"
 )
+# A cause is a connective followed (within 3 words) by a reason a card gets blocked;
+# a bare "ya que mis herramientas no lo muestran" is not a guess.
+_CAUSE_NOUN = (
+    r"(?:falta de pago|mora|fraude|seguridad|atraso|deuda|incumplimiento|actividad sospechosa"
+    r"|pagos? pendientes?|vencid\w*|robo|extrav\w*|uso indebido|inadimpl\w*)"
+)
 _CAUSE = re.compile(
-    r"\b(?:porque|debido a|ya que|a causa de|devido a|por causa"
-    r"|por (?:falta de pago|mora|fraude|seguridad|atraso|deuda|incumplimiento))\b"
+    rf"\b(?:porque|debido a|ya que|a causa de|devido a|por causa de|por)\b\W+(?:\w+\W+){{0,3}}?{_CAUSE_NOUN}"
 )
 _PRIVACY = re.compile(
-    r"(?:puntaje|score|puntuaci[oó]n|pontua[cç][aã]o)\D{0,25}\d"
+    # a number after the score word, but not a card's last 4 digits
+    r"(?:puntaje|score|puntuaci[oó]n|pontua[cç][aã]o)\D{0,25}(?!\d{4}(?!\d))\d"
     r"|riesgo (?:es )?(?:alto|medio|bajo)|risco (?:é )?(?:alto|m[eé]dio|baixo)"
     r"|(?:veo|vemos|vimos|vi) (?:que )?(?:entraste|ingresaste|abriste|revisaste|consultaste|usaste)"
     r"|actividad (?:reciente )?en (?:la |tu |su )?(?:app|aplicaci[oó]n|web)"
@@ -44,10 +50,12 @@ _PAN = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 _PT_MARKERS = re.compile(
     r"ção|ções|ão\b|õe|\bvocê|\bnão\b|\bobrigad|\bcartão|\btambém\b|\bolá\b|\bisso\b"
     r"|\bajudar\b|\bseu\b|\bsua\b|\bé\b|\bmuito\b|\bqualquer\b|\bhouve\b"
+    r"|\bem\b|\bum\b|\buma\b|\bdo\b|\bda\b|\bna\b|\bcom\b|\bfoi\b|\bmais\b|\bou\b|\bpelo\b|\bpela\b"
 )
 _ES_MARKERS = re.compile(
     r"ñ|¿|¡|ción\b|ciones\b|\busted\b|\btarjeta\b|\bgracias\b|\bhola\b|\bayudar\b"
     r"|\bel\b|\blos\b|\bdel\b|\bes\b|\bmuy\b|\bcualquier\b|\by\b|\bhubo\b"
+    r"|\bcon\b|\bun\b|\buna\b|\ben\b|\bfue\b|\bpero\b|\bla\b|\blas\b"
 )
 _MIN_WORDS_FOR_LANGUAGE = 6
 
@@ -189,7 +197,8 @@ def not_called(session, case, tool, turn=None):
 
 
 def no_decline_code_in_reply(session, case, code):
-    pattern = re.compile(rf"(?<![\d.,]){re.escape(str(code))}(?![\d.,])")
+    # not part of an amount (128.51) or a time (10:51)
+    pattern = re.compile(rf"(?<![\d.,:]){re.escape(str(code))}(?![\d.,])")
     if any(pattern.search(t) for t in _texts(session)):
         return f"reply shows decline code {code}"
     return None
