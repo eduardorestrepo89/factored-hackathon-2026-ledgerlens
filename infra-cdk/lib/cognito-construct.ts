@@ -87,6 +87,14 @@ export class CognitoConstruct extends Construct {
       preventUserExistenceErrors: true,
     })
 
+    // Evaluation logins (evals/eval_users.py). Members may switch the agent's model and
+    // base prompt per session; see agent/ledgerlens/tools/eval_override.py.
+    new cognito.CfnUserPoolGroup(this, "EvaluatorsGroup", {
+      userPoolId: userPool.userPoolId,
+      groupName: "evaluators",
+      description: "LedgerLens evaluation logins: may override the model and base prompt",
+    })
+
     // Create domain without managedLoginVersion initially to avoid race condition
     // with CfnManagedLoginBranding. The domain is updated to v2 after branding is created
     // via L1 escape hatch below. This resolves "Internal error from downstream service"

@@ -208,3 +208,15 @@ test("the agent role may apply the guardrail", () => {
   expect(apply.Action).toBe("bedrock:ApplyGuardrail")
   expect(apply.Resource).toContainEqual({ "Fn::GetAtt": [guardrailId, "GuardrailArn"] })
 })
+
+test("the runtime gets the evaluation model allowlist from config.yaml", () => {
+  const [runtime] = Object.values(t.findResources("AWS::BedrockAgentCore::Runtime"))
+  expect(runtime.Properties.EnvironmentVariables.EVAL_MODEL_IDS).toBe(
+    "deepseek.v3.2,openai.gpt-oss-120b-1:0"
+  )
+})
+
+test("the user pool has the evaluators group", () => {
+  t.hasResourceProperties("AWS::Cognito::UserPoolGroup", { GroupName: "evaluators" })
+})
+

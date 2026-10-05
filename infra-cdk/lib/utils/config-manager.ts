@@ -89,6 +89,11 @@ export interface AppConfig {
     use_stm_summarization: boolean
     /** Bedrock model or inference profile the agent runs on. Defaults to "deepseek.v3.2". */
     model_id: string
+    /**
+     * Models an evaluation login (Cognito group "evaluators") may switch the agent to per
+     * session; see agent/ledgerlens/tools/eval_override.py. Defaults to [model_id].
+     */
+    eval_model_ids: string[]
     /** Share of messages summarized each time, from 0.1 to 0.8. Defaults to 0.3. */
     stm_summary_ratio: number
     /**
@@ -236,6 +241,17 @@ export class ConfigManager {
       if (typeof modelId !== "string" || !modelId.trim()) {
         throw new Error(`backend.model_id in ${configPath} must be a non-empty string.`)
       }
+      // Models the evaluators group may pick per session (agent/ledgerlens/tools/eval_override.py)
+      const evalModelIds = parsedConfig.backend?.eval_model_ids ?? [modelId]
+      if (
+        !Array.isArray(evalModelIds) ||
+        evalModelIds.length === 0 ||
+        evalModelIds.some((id: unknown) => typeof id !== "string" || !id.trim())
+      ) {
+        throw new Error(
+          `backend.eval_model_ids in ${configPath} must be a non-empty list of model ids.`
+        )
+      }
 
       // Validate short-term memory (the agent's conversation window and summarization)
       const stmWindowSize = parsedConfig.backend?.stm_window_size ?? 30
@@ -286,6 +302,7 @@ export class ConfigManager {
           ltm_top_k: parsedConfig.backend?.ltm_top_k ?? 10,
           ltm_relevance_score: parsedConfig.backend?.ltm_relevance_score ?? 0.3,
           model_id: modelId.trim(),
+          eval_model_ids: evalModelIds.map((id: string) => id.trim()),
           stm_window_size: stmWindowSize,
           use_stm_summarization: useStmSummarization,
           stm_summary_ratio: stmSummaryRatio,

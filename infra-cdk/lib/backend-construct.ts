@@ -415,6 +415,8 @@ export class BackendConstruct extends Construct {
       LTM_RELEVANCE_SCORE: String(config.backend.ltm_relevance_score),
       // The agent's Bedrock model. See config.yaml: model_id.
       MODEL_ID: config.backend.model_id,
+      // Models the "evaluators" Cognito group may pick per session. See config.yaml: eval_model_ids.
+      EVAL_MODEL_IDS: config.backend.eval_model_ids.join(","),
       // Short-term memory: sliding window, optionally summarizing what falls out.
       // See config.yaml: stm_window_size, use_stm_summarization, stm_summary_ratio,
       // stm_preserve_recent_messages, stm_summarization_model_id, stm_summarization_prompt.
