@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { GlobalContextProvider } from "@/app/context/GlobalContext"
+import { SCAN_MS } from "@/components/chat/ConfirmCard"
 
 const { invoke, created } = vi.hoisted(() => ({ invoke: vi.fn(), created: vi.fn() }))
 
@@ -89,7 +90,7 @@ describe("confirmation card (agent ConfirmationHook)", () => {
     await waitFor(() => expect(composer()).toBeEnabled())
   })
 
-  it("asks to block the card by its last 4 digits and shows the resumed block on Yes", async () => {
+  it("asks to block the card by its last 4 digits, runs the biometric check on Yes, then the block", async () => {
     paused("gateway_block-target___block_credit_card", "tu7", "int-3", { card_last4: "4497", reason: "lost" })
     const user = await ask("perdí mi tarjeta")
 
@@ -102,9 +103,38 @@ describe("confirmation card (agent ConfirmationHook)", () => {
     })
     await user.click(within(card).getByRole("button", { name: "Sí" }))
 
-    expect(await screen.findByText("Bloqueando la tarjeta")).toBeInTheDocument()
+    // Nothing reaches the agent until the check passes
+    expect(within(card).getByRole("status")).toHaveTextContent("Verificando tu identidad")
+    expect(invoke).toHaveBeenCalledTimes(1)
+
+    expect(await screen.findByText("Bloqueando la tarjeta", {}, { timeout: SCAN_MS + 1500 })).toBeInTheDocument()
+    expect(invoke).toHaveBeenLastCalledWith("Sí", expect.any(String), "token", expect.any(Function), {
+      confirmations: [{ interruptId: "int-3", approved: true }],
+    })
     expect(await screen.findByText("Listo: tu tarjeta 4497 quedó bloqueada.")).toBeInTheDocument()
-  })
+    expect(within(card).getByText("Identidad verificada")).toBeInTheDocument()
+    // The check answers on the card: no "Sí" bubble in the thread
+    expect(screen.queryByText("Sí")).toBeNull()
+  }, SCAN_MS + 5000)
+
+  it("sends approved false when the customer cancels the biometric check", async () => {
+    paused("gateway_block-target___block_credit_card", "tu7", "int-3", { card_last4: "4497", reason: "lost" })
+    const user = await ask("perdí mi tarjeta")
+
+    const card = await screen.findByRole("group", { name: "¿Bloqueamos tu tarjeta •••• 4497?" })
+    invoke.mockImplementationOnce(async () => {})
+    await user.click(within(card).getByRole("button", { name: "Sí" }))
+    await user.click(within(card).getByRole("button", { name: "Cancelar" }))
+
+    expect(invoke).toHaveBeenLastCalledWith("No", expect.any(String), "token", expect.any(Function), {
+      confirmations: [{ interruptId: "int-3", approved: false }],
+    })
+    expect(within(card).getByText("No se pudo verificar")).toBeInTheDocument()
+    expect(screen.queryByText("No")).toBeNull()
+    // The cancelled check never approves later
+    await new Promise(r => setTimeout(r, SCAN_MS + 200))
+    expect(invoke).toHaveBeenCalledTimes(2)
+  }, SCAN_MS + 5000)
 
   it("sends approved false on No", async () => {
     paused(CLAIM, "tu2", "int-1", { transaction_ids: ["TRX-1"], claim_type: "fraud" })

@@ -9,7 +9,7 @@ import { ChatHeader } from "./ChatHeader"
 import { ChatInput } from "./ChatInput"
 import { ChatMessages } from "./ChatMessages"
 import { ConfirmContext } from "./ConfirmCard"
-import { Confirmation, Message, MessageSegment, ToolCall } from "./types"
+import { BiometricCheck, Confirmation, Message, MessageSegment, ToolCall } from "./types"
 
 import { useGlobal } from "@/app/context/GlobalContext"
 import { AgentCoreClient } from "@/lib/agentcore-client"
@@ -84,8 +84,12 @@ export default function ChatInterface() {
     loadConfig()
   }, [])
 
-  // `answer` resumes a tool call the agent paused for the customer's Yes/No
-  const sendMessage = async (userMessage: string, answer?: { confirm: Confirmation; approved: boolean }) => {
+  // `answer` resumes a tool call the agent paused for the customer's Yes/No. After a biometric
+  // check the card shows the outcome, so the answer goes to the agent without a bubble
+  const sendMessage = async (
+    userMessage: string,
+    answer?: { confirm: Confirmation; approved: boolean; check?: BiometricCheck }
+  ) => {
     if (!userMessage.trim() || !client) return
 
     // Clear any previous errors
@@ -107,12 +111,13 @@ export default function ChatInterface() {
             type: "confirm",
             confirm: {
               ...s.confirm,
-              answer: s.confirm.id === answer?.confirm.id ? (answer.approved ? "yes" : "no") : "typed",
+              answer:
+                s.confirm.id === answer?.confirm.id ? (answer.check ?? (answer.approved ? "yes" : "no")) : "typed",
             },
           }
     setMessages(prev => [
       ...prev.map(m => (m.segments ? { ...m, segments: m.segments.map(closed) } : m)),
-      newUserMessage,
+      ...(answer?.check ? [] : [newUserMessage]),
     ])
     setInput("")
     // ponytail: after the hand-off a person owns the chat, so the bot is never called again
@@ -472,7 +477,7 @@ export default function ChatInterface() {
             <div className="max-w-3xl mx-auto w-full h-full">
               {/* Only the customer's live chat answers Yes/No cards */}
               <ConfirmContext.Provider
-                value={isLoading ? null : (confirm, approved, label) => sendMessage(label, { confirm, approved })}
+                value={isLoading ? null : (confirm, approved, label, check) => sendMessage(label, { confirm, approved, check })}
               >
                 <ChatMessages
                   messages={messages}
