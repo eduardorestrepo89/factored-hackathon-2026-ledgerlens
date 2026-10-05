@@ -151,7 +151,7 @@ export class CognitoConstruct extends Construct {
         // Cognito sub -> LedgerLens customer_id, as a JSON string. The v1 demo login
         // (demo@ledgerlens.example) defaults to persona P03; switch personas in the
         // Lambda console (README, "LedgerLens Agent (v1)"). A redeploy resets it here.
-        USER_CUSTOMER_IDS_MAP: '{"44b8f4a8-60d1-70bc-daa4-b5edd9e3270b": "CLI-70U0WJ1NH1MN"}',
+        USER_CUSTOMER_IDS_MAP: '{"34f8a418-d0f1-7026-db7f-133537a23bf5": "CLI-EX6BOAOEFZHQ", "44b8f4a8-60d1-70bc-daa4-b5edd9e3270b": "CLI-70U0WJ1NH1MN", "44c8c448-4081-70a4-959c-33f98f0984ca": "CLI-1GL7QBDG3QG0", "642884b8-20b1-7009-3ea3-2f6e4d578862": "CLI-N4FPJIEGD917", "7438f488-c051-70bc-d384-e65834c78632": "CLI-50OIF5EIYSWK", "9468c438-d0f1-7085-21e4-04f8b2ea6c9f": "CLI-UBR2NCZWTD4K", "c448e418-1021-703a-ba36-c604d128ef4d": "CLI-70U0WJ1NH1MN", "d4e854b8-5041-7077-0e9e-e63cc228954a": "CLI-PV0OIEA8DAAE", "e45804c8-9081-70a4-a625-84b2e1f1964c": "CLI-Z3V3SBS18YWQ"}',
       },
       logGroup: new logs.LogGroup(this, "PreTokenLambdaLogGroup", {
         logGroupName: `/aws/lambda/${config.stack_name_base}-pretoken-v3`,
