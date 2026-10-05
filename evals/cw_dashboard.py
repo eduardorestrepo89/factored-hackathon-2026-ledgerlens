@@ -4,8 +4,9 @@
   python -m evals.cw_dashboard evals/results/baseline-v10 evals/results/v11 --apply  # publish
 
 The numbers come from evals.report (the same grading), so the dashboard matches
-report.md. Metrics: namespace LedgerLens/Eval, dimensions Model, Prompt and Run (the
-run folder names), so a smoke test never blends into a baseline in the charts.
+report.md. Metrics: namespace LedgerLens/Eval, dimensions Model, Prompt and Run (the run
+folder that recorded the config), stamped at publish time; a smoke test never blends
+into a baseline, and republishing a run extends its own series.
 """
 
 import argparse
@@ -35,30 +36,31 @@ Traces: CloudWatch → GenAI Observability → Bedrock AgentCore → LedgerLensA
 (filter spans by `model.id` and `prompt.version`)."""
 
 
-def run_label(run_dirs: list[Path]) -> str:
-    """The Run dimension: the run folder names, e.g. baseline-v10+v11."""
-    return "+".join(d.name for d in run_dirs)[:255]
+def run_labels(run_dirs: list[Path]) -> dict[tuple[str, str], str]:
+    """(model, prompt) -> the name of the run folder that recorded it; a later folder wins.
 
-
-def run_starts(run_dirs: list[Path]) -> dict[tuple[str, str], dt.datetime]:
-    """(model, prompt) -> the start of the run that recorded it; a later run wins."""
-    starts = {}
+    One Run value per run, so republishing a run extends its own series instead of
+    starting a new one.
+    """
+    labels = {}
     for run_dir in run_dirs:
         path = run_dir / "run.json"
         if not path.exists():
             continue
         run = json.loads(path.read_text(encoding="utf-8"))
-        started = dt.datetime.fromisoformat(run["started_at"])
         for model in run["models"]:
             for prompt in run["prompts"]:
-                starts[(model, prompt)] = started
-    return starts
+                labels[(model, prompt)] = run_dir.name[:255]
+    return labels
 
 
-def metric_data(summaries: list[dict], starts: dict[tuple[str, str], dt.datetime], label: str) -> list[dict]:
-    """CloudWatch MetricData: one datum per metric per model × prompt."""
+def metric_data(summaries: list[dict], labels: dict[tuple[str, str], str], when: dt.datetime) -> list[dict]:
+    """CloudWatch MetricData: one datum per metric per model × prompt, stamped `when`.
+
+    Stamp at publish time: CloudWatch shows data stamped hours back late and drops
+    it after two weeks.
+    """
     data = []
-    now = dt.datetime.now(dt.timezone.utc)
     for s in summaries:
         values = {
             "PassRate1": (100 * s["pass1"], "Percent"),
@@ -72,15 +74,15 @@ def metric_data(summaries: list[dict], starts: dict[tuple[str, str], dt.datetime
             if evaluator in s["aws"]:
                 values[name] = (100 * s["aws"][evaluator]["mean"], "Percent")
         dims = [{"Name": "Model", "Value": s["model"]}, {"Name": "Prompt", "Value": s["prompt"]},
-                {"Name": "Run", "Value": label}]
-        when = starts.get((s["model"], s["prompt"]), now)
+                {"Name": "Run", "Value": labels.get((s["model"], s["prompt"]), "unlabelled")}]
         data += [{"MetricName": name, "Dimensions": dims, "Timestamp": when, "Value": value, "Unit": unit}
                  for name, (value, unit) in values.items()]
     return data
 
 
-def _series(summaries: list[dict], metrics: list[str], label: str) -> list[list]:
-    return [[NAMESPACE, metric, "Model", s["model"], "Prompt", s["prompt"], "Run", label,
+def _series(summaries: list[dict], metrics: list[str], labels: dict) -> list[list]:
+    return [[NAMESPACE, metric, "Model", s["model"], "Prompt", s["prompt"],
+             "Run", labels.get((s["model"], s["prompt"]), "unlabelled"),
              {"label": f"{config.model_slug(s['model'])} {s['prompt']} {metric}"}]
             for metric in metrics for s in summaries]
 
@@ -91,17 +93,17 @@ def _chart(title: str, series: list[list], y: int, x: int = 0, width: int = 12, 
                            "period": 300, "setPeriodToTimeRange": True, "metrics": series}}
 
 
-def dashboard_body(summaries: list[dict], grid_markdown: str, label: str) -> dict:
+def dashboard_body(summaries: list[dict], grid_markdown: str, labels: dict) -> dict:
     """The dashboard JSON: header, charts per model × prompt, and the per-case grid."""
     return {"start": "-P14D", "widgets": [
-        {"type": "text", "x": 0, "y": 0, "width": 24, "height": 7, "properties": {"markdown": HEADER + f"  Run: `{label}`"}},
-        _chart("Local pass rate (%): pass^1 and pass^k", _series(summaries, ["PassRate1", "PassRateK"], label), 7),
+        {"type": "text", "x": 0, "y": 0, "width": 24, "height": 7, "properties": {"markdown": HEADER + "  Runs: " + ", ".join(f"`{r}`" for r in sorted(set(labels.values())))}},
+        _chart("Local pass rate (%): pass^1 and pass^k", _series(summaries, ["PassRate1", "PassRateK"], labels), 7),
         _chart("AgentCore Evaluations (%): GoalSuccessRate, TrajectoryInOrderMatch",
-               _series(summaries, ["AwsGoalSuccess", "AwsTrajectory"], label), 7, x=12),
-        _chart("Unsafe cases and harness errors", _series(summaries, ["UnsafeCases", "HarnessErrors"], label), 13,
+               _series(summaries, ["AwsGoalSuccess", "AwsTrajectory"], labels), 7, x=12),
+        _chart("Unsafe cases and harness errors", _series(summaries, ["UnsafeCases", "HarnessErrors"], labels), 13,
                view="singleValue"),
-        _chart("Median latency per session (s)", _series(summaries, ["MedianLatencySeconds"], label), 13, x=12, width=6),
-        _chart("Model cost (USD)", _series(summaries, ["CostUSD"], label), 13, x=18, width=6),
+        _chart("Median latency per session (s)", _series(summaries, ["MedianLatencySeconds"], labels), 13, x=12, width=6),
+        _chart("Model cost (USD)", _series(summaries, ["CostUSD"], labels), 13, x=18, width=6),
         {"type": "text", "x": 0, "y": 19, "width": 24, "height": 8,
          "properties": {"markdown": "## Per-case grid (✓ pass, ✗ fail, E harness error)\n\n" + grid_markdown}},
     ]}
@@ -121,9 +123,9 @@ def main(argv=None) -> int:
     rows = report.grade_runs(args.run_dirs, {c["id"]: c for c in load_cases()})
     summaries = report.summarize(rows)
     configs = [(s["model"], s["prompt"]) for s in summaries]
-    label = run_label(args.run_dirs)
-    data = metric_data(summaries, run_starts(args.run_dirs), label)
-    body = dashboard_body(summaries, "\n".join(report.grid_table(rows, configs)), label)
+    labels = run_labels(args.run_dirs)
+    data = metric_data(summaries, labels, dt.datetime.now(dt.timezone.utc))
+    body = dashboard_body(summaries, "\n".join(report.grid_table(rows, configs)), labels)
     print(f"{len(data)} metric data points for {len(summaries)} configurations; dashboard {DASHBOARD}")
     if not args.apply:
         for d in data:
