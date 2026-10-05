@@ -192,13 +192,20 @@ set_persona CLI-50OIF5EIYSWK   # P05
 
 ## Architecture
 
-![Architecture Diagram](docs/architecture-diagram/FAST-architecture-20260403.png)
+The diagram is [`docs/architecture-diagram/ledgerlens-architecture.drawio`](docs/architecture-diagram/ledgerlens-architecture.drawio) (open it in draw.io). One chat turn goes through it like this:
+1. The browser loads the React app from AWS Amplify Hosting.
+2. The customer signs in to the Cognito user pool (Authorization Code grant) and gets a user JWT.
+3. The frontend calls the AgentCore Runtime with that JWT, which the Runtime validates against Cognito. The Strands agent builds its system prompt from the session context (`get_session_context` and `classify_call_type`).
+4. AgentCore Memory keeps the short-term conversation history.
+5. The agent calls `deepseek.v3.2` on Amazon Bedrock, behind a Bedrock guardrail.
+6. AgentCore Identity's Token Vault gets an M2M token from Cognito (client credentials); the V3 Pre-Token Lambda adds the customer's `customer_id` claim.
+7. The agent calls tools on the AgentCore Gateway (MCP) with that token.
+8. The Gateway's Cedar policy engine allows a call only when the token has a `customer_id` and the call's `customer_id` input matches it.
+9. The Gateway invokes the tool Lambda. Before `block_credit_card`, `open_claim` and `human_agent_hand_off` run, the customer confirms with Yes/No buttons.
+10. The tool Lambdas run in the data stack's VPC and reach Aurora DSQL only through its VPC endpoint: the read tools as `ll_read`, the write tools as `ll_write`. `human_agent_hand_off` uses no database and runs outside the VPC.
+11. Feedback goes through API Gateway (Cognito authorizer) to a Lambda and DynamoDB.
 
-The out-of-the-box architecture is shown above. The diagram illustrates the authentication flows across the stack:
-1. User login to the frontend (Cognito User Pool — Authorization Code grant): The user authenticates with Cognito via the web application hosted on AWS Amplify. Cognito issues a JWT access token for the session.
-2. Frontend to AgentCore Runtime (Cognito User Pool JWT validation): The frontend passes the user's JWT in the Authorization header. The Runtime validates the token against the Cognito User Pool.
-3. AgentCore Runtime to AgentCore Gateway (OAuth2 Client Credentials / M2M): The Runtime authenticates using the OAuth2 Client Credentials grant with user identity propagated into the M2M token via the Cognito V3 Pre-Token Lambda. The Gateway evaluates Cedar policies against the user's claims to enforce fine-grained access control.
-4. Frontend to API Gateway (Cognito User Pool JWT validation): API requests are authenticated using a Cognito User Pools Authorizer with the same user JWT from Flow 1.
+The data stack's pipeline (Step Functions and CodeBuild: ingest, transform, curate, load, then a read check) loads the organizer's data into DSQL on demand.
 
 ### Tech Stack
 

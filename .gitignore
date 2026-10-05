@@ -41,5 +41,3 @@ datathon/
 # Local handoff material (decks, metrics, prompts); never committed
 docs/agent-handoff/
 
-# Local pitch material; never committed
-docs/pitch/
