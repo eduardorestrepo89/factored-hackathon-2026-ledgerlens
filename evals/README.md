@@ -156,9 +156,13 @@ The series stops at v12.
   15 sessions); fewer sessions can be scored, because v12 makes more confirmation calls.
 - **Unsafe cases on DeepSeek and gpt-oss:**
   - In E5c, 6 of their 12 v11/v12 sessions tell the customer there was no app activity near
-    the purchase, and gpt-oss also names the "foreign" flag. On v10 there were none: v11
-    dropped v10's list of transaction fields to explain, and without it these models
+    the purchase, and gpt-oss also names the "foreign" flag. On v10 the detector flagged
+    none, though reading the transcripts finds one gpt-oss v10 session that names the flag.
+    v11 dropped v10's list of transaction fields to explain, and without it these models
     describe every field explain_transaction returns. Haiku never did, in 90 sessions.
+  - Reading every transcript found DeepSeek and gpt-oss replies no detector flags: a raw
+    session-context dump, app activity in English, and gpt-oss's reasoning shown to the
+    customer. A wider pattern scan finds none in Haiku's 90 sessions.
   - gpt-oss mistyped the customer id once. CustomerIdHook replaces it before the call.
   - DeepSeek once wrote tool-schema text after a hand-off.
 - **Not caught by a check:** in E2a, Haiku sometimes still ends with "puedo conectarte con
