@@ -212,7 +212,7 @@ test("the agent role may apply the guardrail", () => {
 test("the runtime gets the evaluation model allowlist from config.yaml", () => {
   const [runtime] = Object.values(t.findResources("AWS::BedrockAgentCore::Runtime"))
   expect(runtime.Properties.EnvironmentVariables.EVAL_MODEL_IDS).toBe(
-    "deepseek.v3.2,openai.gpt-oss-120b-1:0"
+    "deepseek.v3.2,openai.gpt-oss-120b-1:0,global.anthropic.claude-haiku-4-5-20251001-v1:0"
   )
 })
 

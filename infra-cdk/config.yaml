@@ -29,7 +29,7 @@ backend:
   model_id: "deepseek.v3.2"
   # Models an evaluation login (Cognito group "evaluators") may switch to per session,
   # used by the harness in evals/. Customers always get model_id.
-  eval_model_ids: ["deepseek.v3.2", "openai.gpt-oss-120b-1:0"]
+  eval_model_ids: ["deepseek.v3.2", "openai.gpt-oss-120b-1:0", "global.anthropic.claude-haiku-4-5-20251001-v1:0"]
   # Short-term memory: how many recent messages the agent sends to the model per turn.
   # Counts messages, not turns (one tool-using question is ~4-6 messages).
   stm_window_size: 30

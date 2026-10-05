@@ -26,12 +26,14 @@ PERSONAS = {
 PRICES = {
     "deepseek.v3.2": (0.62, 1.85),
     "openai.gpt-oss-120b-1:0": (0.15, 0.60),
+    "global.anthropic.claude-haiku-4-5-20251001-v1:0": (1.00, 5.00),  # global profile, 2026-09-01
 }
 
 # Tokens per session (input, output) for the dry-run estimate (spec section 10).
 ESTIMATED_TOKENS = {
     "deepseek.v3.2": (60_000, 1_500),
     "openai.gpt-oss-120b-1:0": (60_000, 5_000),
+    "global.anthropic.claude-haiku-4-5-20251001-v1:0": (60_000, 1_500),
 }
 
 
