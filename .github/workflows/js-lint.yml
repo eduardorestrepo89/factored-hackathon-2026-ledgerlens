@@ -84,6 +84,11 @@ jobs:
             echo "No files to check"
           fi
 
+      # build.test.ts checks the build output, so the build runs first
+      - name: Build and run tests
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: npm run build && npm test
+
       - name: Skip message
         if: steps.changed-files.outputs.any_changed == 'false'
         run: echo "No JavaScript/TypeScript files changed - skipping JS/TS linting"
