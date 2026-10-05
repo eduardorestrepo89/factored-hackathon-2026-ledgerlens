@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LedgerLens Final</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M15.2 2.5A18.2 18.2 0 0 0 15.2 29.5Z' fill='%232e46e8'/%3E%3Cpath d='M16.8 2.5A18.2 18.2 0 0 1 16.8 29.5Z' fill='%23f2a31b'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@300..800&family=Funnel+Sans:wght@300..800&display=swap" rel="stylesheet">
+<style>
+/* Palette from the app (frontend/src/styles/globals.css): ink, cobalt = AI, mango = human.
+   Shell copied from ledgerlens-pitch.html. */
+:root {
+  --bg: #07081a;
+  --ink: #161a33;
+  --text: #f4f6fb;
+  --soft: #9aa0bb;
+  --faint: #3a3f5c;
+  --line: rgba(244, 246, 251, 0.09);
+  --cobalt: #2e46e8;
+  --cobalt-hi: #6f82ff;
+  --mango: #f2a31b;
+  --green: #3fbf8f;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --display: "Funnel Display", "Funnel Sans", system-ui, sans-serif;
+  --sans: "Funnel Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--cobalt-hi); outline-offset: 4px; border-radius: 6px; }
+
+/* ---------- deck shell ---------- */
+.deck { position: relative; width: 100vw; height: 100vh; height: 100dvh; }
+.slide {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  padding: clamp(56px, 8vh, 96px) clamp(16px, 6vw, 96px);
+  opacity: 0; visibility: hidden; transform: scale(1.02);
+  transition: opacity .9s var(--ease), transform 1.1s var(--ease), visibility 0s .9s;
+  overflow: hidden;
+}
+.slide.active { opacity: 1; visibility: visible; transform: none; transition: opacity .9s var(--ease), transform 1.1s var(--ease), visibility 0s; }
+.slide.past { transform: scale(.98); }
+.inner { width: min(1180px, 100%); position: relative; }
+
+/* Reveal: [data-step=n] shows once the slide reaches step n */
+[data-step] { opacity: 0; transform: translateY(18px); filter: blur(6px); transition: opacity .9s var(--ease), transform .9s var(--ease), filter .9s var(--ease); }
+[data-step].on { opacity: 1; transform: none; filter: none; }
+[data-stagger] > * { opacity: 0; transform: translateY(14px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
+[data-stagger].on > * { opacity: 1; transform: none; }
+[data-stagger].on > *:nth-child(2) { transition-delay: .12s; }
+[data-stagger].on > *:nth-child(3) { transition-delay: .24s; }
+
+.eyebrow { font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: var(--soft); }
+h1, h2 { font-family: var(--display); font-weight: 300; letter-spacing: -0.035em; line-height: 1.02; }
+h1 { font-size: clamp(44px, 8.4vw, 124px); }
+h2 { font-size: clamp(36px, 5.6vw, 84px); }
+.grad { background: linear-gradient(100deg, var(--cobalt-hi) 0%, #a9b6ff 45%, var(--mango) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lede { font-size: clamp(17px, 1.6vw, 22px); line-height: 1.5; color: var(--soft); max-width: 40ch; }
+
+/* chrome */
+.progress { position: fixed; left: 0; top: 0; height: 2px; background: linear-gradient(90deg, var(--cobalt), var(--mango)); width: 0; transition: width .8s var(--ease); z-index: 10; }
+.brand { position: fixed; left: clamp(16px, 3vw, 32px); top: 22px; display: flex; align-items: center; gap: 10px; font-family: var(--display); font-size: 15px; letter-spacing: -0.01em; color: var(--soft); z-index: 10; opacity: 0; transition: opacity .8s; }
+.brand.show { opacity: 1; }
+.brand svg { width: 18px; height: 18px; }
+.hud { position: fixed; right: clamp(16px, 3vw, 32px); bottom: 20px; display: flex; align-items: center; gap: 6px; z-index: 10; font-size: 13px; color: var(--soft); font-variant-numeric: tabular-nums; }
+.hud button { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line); transition: background .3s, border-color .3s; }
+.hud button:hover { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.2); }
+.hud .count { padding: 0 8px; }
+.hint { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); z-index: 10; transition: opacity .6s; }
+
+/* ---------- lens mark ---------- */
+.mark { position: relative; width: var(--s, 120px); height: var(--s, 120px); }
+.mark .half { position: absolute; top: 0; width: 50%; height: 100%; transition: transform 1.4s var(--ease), opacity 1s; }
+.mark .half svg { width: 100%; height: 100%; overflow: visible; }
+.mark .l { left: 0; } .mark .r { right: 0; }
+.mark.split .l { transform: translateX(-60%); opacity: 0; }
+.mark.split .r { transform: translateX(60%); opacity: 0; }
+.mark .glow { position: absolute; inset: -60%; border-radius: 50%; background: radial-gradient(closest-side, rgba(46,70,232,.35), rgba(242,163,27,.10) 60%, transparent 75%); opacity: 0; transition: opacity 2s var(--ease); pointer-events: none; }
+.mark:not(.split) .glow { opacity: 1; animation: breathe 6s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.08); opacity: .75; } }
+
+/* ---------- shared: cards, source tags ---------- */
+.card { position: relative; padding: 24px 24px 26px; border-radius: 22px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.012)); }
+.card .k { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--cobalt-hi); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.card .k::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 12px currentColor; }
+.card.warn .k { color: var(--mango); }
+.card p { color: var(--soft); font-size: 15px; line-height: 1.5; }
+.tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
+.src { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; letter-spacing: .04em; color: #7d83a3; }
+.src::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dot); }
+.src.data { --dot: var(--green); }
+.src.build { --dot: var(--cobalt-hi); }
+.src.bench { --dot: var(--mango); }
+.src.assume { --dot: var(--soft); }
+
+/* ---------- shared: cost tooltips (hover and keyboard focus) ---------- */
+.cost { position: relative; cursor: help; border-bottom: 1px dotted rgba(244,246,251,.35); }
+.cost .tip {
+  position: absolute; left: 50%; bottom: calc(100% + 12px); z-index: 20;
+  width: max-content; max-width: min(380px, 80vw); padding: 14px 16px; border-radius: 14px;
+  background: #0f1230; border: 1px solid rgba(111,130,255,.35); box-shadow: 0 20px 60px -20px rgba(0,0,0,.8);
+  color: var(--text); font: 400 13.5px/1.55 var(--sans); letter-spacing: 0; text-align: left; text-transform: none; white-space: normal;
+  opacity: 0; visibility: hidden; pointer-events: none; transform: translate(-50%, 6px);
+  transition: opacity .25s, transform .25s, visibility 0s .25s;
+}
+.cost .tip b { display: block; color: var(--cobalt-hi); font-weight: 500; margin-bottom: 4px; }
+.cost .tip .f { display: block; font-family: var(--mono); font-size: 12.5px; color: #c9cff0; margin: 4px 0 8px; }
+.cost:hover .tip, .cost:focus .tip, .cost:focus-within .tip { opacity: 1; visibility: visible; transform: translate(-50%, 0); transition: opacity .25s, transform .25s, visibility 0s; }
+.cost.tip-left .tip { left: auto; right: 0; transform: translateY(6px); }
+.cost.tip-left:hover .tip, .cost.tip-left:focus .tip, .cost.tip-left:focus-within .tip { transform: none; }
+.cost.tip-right .tip { left: 0; transform: translateY(6px); }
+.cost.tip-right:hover .tip, .cost.tip-right:focus .tip, .cost.tip-right:focus-within .tip { transform: none; }
+.cost.tip-down .tip { bottom: auto; top: calc(100% + 12px); }
+
+/* ---------- slide 1: problem ---------- */
+.s-problem .inner { display: grid; gap: clamp(18px, 3vh, 32px); }
+.s-problem h2 { font-size: clamp(32px, 4.4vw, 64px); max-width: 22ch; margin-top: 12px; }
+.beats { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(14px, 2vw, 26px); }
+.big { font-family: var(--display); font-weight: 300; font-size: clamp(38px, 3.8vw, 56px); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+.big small { font-family: var(--sans); font-size: 15px; color: var(--soft); letter-spacing: 0; }
+.bars { display: grid; gap: 6px; margin: 16px 0 14px; }
+.bar { position: relative; display: flex; justify-content: space-between; font-size: 12.5px; color: var(--soft); padding: 4px 8px; }
+.bar::before { content: ""; position: absolute; inset: 0; width: var(--w); border-radius: 6px; background: rgba(255,255,255,.06); transform-origin: left; transform: scaleX(0); transition: transform 1.2s var(--ease) .3s; }
+.on .bar::before { transform: scaleX(1); }
+.bar.hi { color: var(--text); }
+.bar.hi::before { background: linear-gradient(90deg, rgba(46,70,232,.55), rgba(46,70,232,.2)); }
+.bar span, .bar b { position: relative; font-weight: 400; }
+.facts { list-style: none; display: grid; gap: 8px; margin-top: 14px; font-size: 14.5px; color: var(--soft); }
+.facts b { color: var(--text); font-weight: 500; margin-right: 4px; }
+.foot { margin-top: 4px; font-size: 14px; }
+.foot b { color: var(--text); font-weight: 500; }
+
+/* ---------- slide 2: solution ---------- */
+.s-solution .inner { display: grid; justify-items: center; text-align: center; gap: clamp(14px, 2.6vh, 28px); }
+.s-solution .hero { display: grid; justify-items: center; gap: 14px; }
+.s-solution h1 { font-size: clamp(36px, 5vw, 72px); }
+.s-solution .lede { max-width: 56ch; margin-inline: auto; }
+.wordmark { font-family: var(--display); font-weight: 400; font-size: clamp(18px, 2vw, 24px); letter-spacing: -0.01em; color: var(--soft); }
+.pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(14px, 2vw, 28px); text-align: left; width: min(1080px, 100%); }
+.pillar { padding: 24px 24px 26px; border-radius: 22px; background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015)); border: 1px solid var(--line); }
+.pillar .k { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--cobalt-hi); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.pillar .k::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 12px currentColor; }
+.pillar:nth-child(3) .k { color: var(--mango); }
+.pillar h3 { font-family: var(--display); font-weight: 400; font-size: clamp(22px, 2.1vw, 30px); letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 10px; }
+.pillar p { color: var(--soft); line-height: 1.5; font-size: 15.5px; }
+.outcomes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: min(1080px, 100%); }
+.outcome { display: grid; gap: 4px; padding: 14px 18px; border-radius: 16px; border: 1px solid rgba(111,130,255,.28); background: rgba(46,70,232,.08); text-align: left; }
+.outcome b { font-weight: 500; font-size: 16px; }
+.outcome span { font-size: 13.5px; color: var(--soft); }
+.s-solution .tags { justify-content: center; }
+.s-solution .line { font-family: var(--display); font-size: clamp(16px, 1.5vw, 20px); color: var(--text); }
+
+/* ---------- slide 3: scope ---------- */
+.s-scope .inner { display: grid; gap: clamp(16px, 2.6vh, 28px); }
+.s-scope h2 { margin-top: 12px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(14px, 2vw, 26px); }
+.chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.chips li { padding: 8px 14px; border-radius: 99px; border: 1px solid rgba(111,130,255,.3); background: rgba(46,70,232,.1); font-size: 15px; }
+.out { display: grid; gap: 12px; padding: 18px 22px; border-radius: 20px; border: 1.5px dashed rgba(242,163,27,.4); }
+.out-h { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--mango); }
+.out-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.out-grid b { display: block; font-weight: 500; margin-bottom: 4px; }
+.out-grid span { color: var(--soft); font-size: 14px; line-height: 1.5; }
+.out-grid span b { display: inline; color: var(--text); }
+
+/* ---------- slide 4: architecture ---------- */
+.s-arch .inner { width: min(1320px, 100%); display: grid; gap: clamp(12px, 2vh, 22px); }
+.s-arch h2 { font-size: clamp(30px, 3.6vw, 54px); margin-top: 10px; }
+.s-arch .arch svg { width: 100%; height: auto; max-height: calc(100dvh - 300px); display: block; }
+.s-arch .line { font-family: var(--display); font-size: clamp(16px, 1.5vw, 20px); }
+.arch .node rect { fill: rgba(255,255,255,.04); stroke: rgba(255,255,255,.16); stroke-width: 1.2; transition: fill .5s, stroke .5s; }
+.arch .node.ai rect { stroke: rgba(111,130,255,.55); fill: rgba(46,70,232,.12); }
+.arch .node.human rect { stroke: rgba(242,163,27,.6); fill: rgba(242,163,27,.08); }
+.arch .node { transition: opacity .5s; }
+.arch text { fill: var(--text); font-family: var(--sans); font-size: 15px; text-anchor: middle; }
+.arch .d { fill: var(--soft); font-size: 12px; }
+.arch .lane-t { fill: var(--soft); font-size: 12px; letter-spacing: .18em; }
+.arch .box { fill: none; stroke: rgba(111,130,255,.35); stroke-dasharray: 5 5; }
+.arch .box.vpc { stroke: rgba(63,191,143,.5); }
+.arch .box-t { text-anchor: start; font-size: 12px; fill: var(--cobalt-hi); letter-spacing: .06em; }
+.arch .box-t.vpc-t { fill: var(--green); }
+.arch .edge { fill: none; stroke: rgba(111,130,255,.6); stroke-width: 1.6; stroke-dasharray: 6 6; animation: flow 1.6s linear infinite; }
+.arch .edge.soft { stroke: rgba(154,160,187,.35); }
+.arch .el { fill: var(--soft); font-size: 11.5px; text-anchor: start; }
+@keyframes flow { to { stroke-dashoffset: -12; } }
+.arch.focusing .node { opacity: .28; }
+.arch.focusing .node.focus { opacity: 1; }
+.arch.focusing .node.focus rect { stroke: var(--cobalt-hi); fill: rgba(46,70,232,.28); }
+.arch.focusing .node.human.focus rect { stroke: var(--mango); fill: rgba(242,163,27,.2); }
+
+/* ---------- slide 5: technical solution ---------- */
+.s-how .inner { width: min(1320px, 100%); display: grid; gap: clamp(12px, 2vh, 22px); }
+.s-how h2 { font-size: clamp(30px, 3.6vw, 52px); margin-top: 10px; }
+.how { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(12px, 2vh, 20px); }
+.walk { list-style: none; counter-reset: w; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.walk li { counter-increment: w; position: relative; padding: 12px 0 0 36px; border-top: 2px solid var(--line); transition: border-color .4s, opacity .9s var(--ease), transform .9s var(--ease), filter .9s var(--ease); }
+.walk li.current { border-top-color: var(--cobalt-hi); }
+.walk li::before { content: counter(w); position: absolute; left: 0; top: 10px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; background: rgba(46,70,232,.2); color: var(--cobalt-hi); }
+.walk li b { display: block; font-weight: 500; font-size: 16.5px; line-height: 1.3; }
+.walk-detail { display: grid; }
+.walk-detail > div { grid-area: 1 / 1; opacity: 0; visibility: hidden; transform: translateY(8px); transition: opacity .5s var(--ease), transform .5s var(--ease), visibility 0s .5s; }
+.walk-detail > div.current { opacity: 1; visibility: visible; transform: none; transition: opacity .5s var(--ease) .1s, transform .5s var(--ease) .1s, visibility 0s; }
+.walk-detail span { color: var(--soft); font-size: 17px; line-height: 1.55; }
+.walk li[data-step].on:not(.current) { opacity: .45; }
+.toolset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; }
+.toolset div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.toolset i { font-style: normal; font-size: 14px; color: var(--soft); margin-right: 4px; }
+.toolset code { font-family: var(--mono); font-size: 13.5px; padding: 3px 8px; border-radius: 8px; background: rgba(46,70,232,.14); color: #c9cff0; }
+.badge { font-style: normal; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; border: 1px solid rgba(111,130,255,.5); color: var(--cobalt-hi); margin-right: 4px; }
+.badge.human { border-color: rgba(242,163,27,.6); color: var(--mango); }
+.arch-mini svg { width: 100%; height: auto; display: block; }
+
+/* ---------- slide 6: profitability ---------- */
+.s-profit .inner { width: min(1320px, 100%); display: grid; gap: clamp(14px, 2.4vh, 26px); }
+.s-profit h2 { font-size: clamp(30px, 3.6vw, 54px); margin-top: 10px; }
+.profit { display: grid; grid-template-columns: 1.05fr .95fr; gap: clamp(14px, 2vw, 26px); align-items: start; }
+.rung { display: grid; grid-template-columns: minmax(150px, 34%) 1fr auto; gap: 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.who { font-size: 15px; }
+.who small { display: block; font-size: 12px; color: var(--soft); }
+.track { height: 14px; border-radius: 99px; background: rgba(255,255,255,.04); overflow: hidden; }
+.fill { display: flex; height: 100%; width: var(--w); border-radius: 99px; background: var(--cobalt-hi); transform-origin: left; transform: scaleX(0); transition: transform 1.3s var(--ease) .2s; }
+.rung.on .fill { transform: scaleX(1); }
+.rung.human .fill { background: var(--mango); }
+.fill i { display: block; height: 100%; }
+.fill i:nth-child(1) { background: var(--cobalt-hi); }
+.fill i:nth-child(2) { background: #a9b6ff; }
+.fill i:nth-child(3) { background: var(--green); }
+.fill i:nth-child(4) { background: var(--soft); }
+.amt { font-family: var(--display); font-size: clamp(22px, 2vw, 30px); font-variant-numeric: tabular-nums; }
+.ref { font-size: 13.5px; color: var(--soft); padding: 6px 0 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; font-size: 12.5px; color: var(--soft); }
+.lg::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; background: var(--c); vertical-align: -1px; }
+.lg.tok { --c: var(--cobalt-hi); } .lg.grd { --c: #a9b6ff; } .lg.var { --c: var(--green); } .lg.fix { --c: var(--soft); }
+.savings { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.savings th, .savings td { text-align: left; padding: 10px 8px; border-top: 1px solid var(--line); font-weight: 400; }
+.savings thead th { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); border-top: 0; }
+.savings tbody th { font-size: 14.5px; }
+.savings td { font-family: var(--display); font-size: clamp(18px, 1.6vw, 24px); }
+.savings td small { font-family: var(--sans); font-size: 12.5px; color: var(--green); margin-left: 4px; }
+.caveat { margin-top: 12px; font-size: 13px; color: var(--soft); }
+.sources { margin-top: 10px; }
+.sources summary { cursor: pointer; font-size: 12px; color: #7d83a3; letter-spacing: .04em; }
+.sources ul { margin-top: 8px; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: #7d83a3; }
+.sources a { color: var(--cobalt-hi); }
+.big-save { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(16px, 3vw, 48px); text-align: center; }
+.big-save .cost { display: inline-block; font-family: var(--display); font-weight: 300; font-size: clamp(48px, min(7.5vw, 10vh), 120px); line-height: 1; letter-spacing: -0.04em; color: var(--green); }
+.big-save .lbl { display: block; margin-top: 8px; font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--soft); }
+.s-profit .close { font-family: var(--display); font-weight: 300; font-size: clamp(22px, 2.4vw, 34px); letter-spacing: -0.02em; text-align: center; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 900px) {
+  html, body { overflow: auto; }
+  .slide { place-items: start center; overflow-y: auto; padding-top: 72px; padding-bottom: 80px; }
+  .beats, .pillars, .outcomes, .cols, .out-grid, .how, .walk, .toolset, .profit, .big-save { grid-template-columns: 1fr !important; }
+  .hint { display: none; }
+  /* Phone: a tooltip becomes a sheet across the bottom of the screen */
+  .cost .tip { position: fixed; left: 16px; right: 16px; top: auto; bottom: 16px; width: auto; max-width: none; transform: none !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; transition-delay: 0s !important; }
+}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<div class="brand" id="brand" aria-hidden="true">
+  <svg viewBox="0 0 32 32"><path d="M15.2 2.5A18.2 18.2 0 0 0 15.2 29.5Z" fill="#2e46e8"/><path d="M16.8 2.5A18.2 18.2 0 0 1 16.8 29.5Z" fill="#f2a31b"/></svg>
+  LedgerLens
+</div>
+
+<main class="deck" id="deck">
+
+  <!-- 1 · The problem -->
+  <section class="slide s-problem" data-steps="3" aria-label="The problem">
+    <div class="inner">
+      <div data-step="0">
+        <div class="eyebrow">The problem</div>
+        <h2>A bank has to be <span class="grad">profitable.</span><br>Its contact center is one of its biggest costs.</h2>
+      </div>
+      <div class="beats">
+        <div class="card beat" data-step="1">
+          <div class="k">#1 reason to contact the bank</div>
+          <div class="big"><span data-count="35" data-format="pct">35.0%</span></div>
+          <p>are questions about a transaction: what a charge is, why it was declined.</p>
+          <div class="bars" aria-label="Contacts by reason">
+            <div class="bar hi" style="--w:100%"><span>Transactional</span><b>35.0%</b></div>
+            <div class="bar" style="--w:62.9%"><span>Product</span><b>22.0%</b></div>
+            <div class="bar" style="--w:48.9%"><span>Complaint</span><b>17.1%</b></div>
+            <div class="bar" style="--w:42.9%"><span>Technical</span><b>15.0%</b></div>
+            <div class="bar" style="--w:22.9%"><span>Commercial</span><b>8.0%</b></div>
+            <div class="bar" style="--w:8.6%"><span>Retention</span><b>3.0%</b></div>
+          </div>
+          <p class="foot"><b data-count="6661">6,661</b> a month · <b data-count="4663">4,663</b> of them inbound calls</p>
+        </div>
+        <div class="card beat" data-step="2">
+          <div class="k">#1 complaint</div>
+          <div class="big"><span data-count="12297">12,297</span></div>
+          <p>charges the customer doesn't recognize: 18.3% of all complaints, 90.6% of transaction complaints.</p>
+          <ul class="facts">
+            <li><b>50.4%</b> came in through the call center</li>
+            <li><b>15.4 days</b> on average to resolve one</li>
+          </ul>
+        </div>
+        <div class="card beat warn" data-step="3">
+          <div class="k">Today, people answer every one</div>
+          <div class="big"><span data-count="288">288</span><small> agent-hours a month</small></div>
+          <p>4,663 inbound transactional calls × 3.7 min of handling. And customers still leave unhappy:</p>
+          <ul class="facts">
+            <li><b>−69.9</b> NPS</li>
+            <li><b>2.91 / 4</b> CSAT</li>
+            <li><b>70.1%</b> first-contact resolution (proxy)</li>
+          </ul>
+        </div>
+      </div>
+      <div class="tags" data-step="1">
+        <span class="src data">Source: provided contact-center dataset · 686,296 contacts, Jun 2023 to Jun 2026 (35 full months)</span>
+        <span class="src assume">The dataset appears synthetic: its NPS answers range only from 2 to 7</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · The solution -->
+  <section class="slide s-solution" data-steps="2" aria-label="The solution">
+    <div class="inner">
+      <div class="hero" data-step="0">
+        <div class="mark split" id="heroMark" style="--s: clamp(54px, 6vw, 84px)">
+          <div class="glow"></div>
+          <div class="half l"><svg viewBox="0 0 16 32"><path d="M15.2 2.5A18.2 18.2 0 0 0 15.2 29.5Z" fill="#2e46e8"/></svg></div>
+          <div class="half r"><svg viewBox="16 0 16 32"><path d="M16.8 2.5A18.2 18.2 0 0 1 16.8 29.5Z" fill="#f2a31b"/></svg></div>
+        </div>
+        <div class="wordmark">LedgerLens</div>
+        <h1>Your customer's <span class="grad">right hand.</span></h1>
+        <p class="lede">Not another chatbot. A partner who already knows them, for whatever they need from the bank.</p>
+      </div>
+      <div class="pillars" data-stagger data-step="1">
+        <div class="pillar">
+          <div class="k">Hyperpersonalized</div>
+          <h3>Knows them before hello.</h3>
+          <p>Their cards, charges, open cases, previous contacts and app events are loaded before the first word.</p>
+        </div>
+        <div class="pillar">
+          <div class="k">Intent</div>
+          <h3>Knows why they're here.</h3>
+          <p>It anticipates why the customer is reaching out, so the first message already answers it.</p>
+        </div>
+        <div class="pillar">
+          <div class="k">Fraud check</div>
+          <h3>Has their back.</h3>
+          <p>It checks an unrecognized charge, then blocks the card and opens the claim, only after the customer taps Yes.</p>
+        </div>
+      </div>
+      <div class="outcomes" data-step="2">
+        <div class="outcome"><b>Lower cost per contact</b><span>today: 3.7 min of a person per contact</span></div>
+        <div class="outcome"><b>Higher first-contact resolution</b><span>today: 70.1% (proxy)</span></div>
+        <div class="outcome"><b>Higher satisfaction</b><span>today: CSAT 2.91 / 4 · NPS −69.9</span></div>
+      </div>
+      <div class="tags" data-step="2">
+        <span class="src data">Today's values: provided contact-center dataset</span>
+        <span class="src assume">The outcomes are goals, not measured results</span>
+        <span class="line">Credit cards today. Any use case the bank wants tomorrow.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Technical scope -->
+  <section class="slide s-scope" data-steps="3" aria-label="Technical scope">
+    <div class="inner">
+      <div data-step="0">
+        <div class="eyebrow">Technical scope</div>
+        <h2>We focused on <span class="grad">two things.</span></h2>
+      </div>
+      <div class="cols">
+        <div class="card" data-step="1">
+          <div class="k">Agentic AI</div>
+          <ul class="chips">
+            <li>Prompt engineering</li><li>Tool use</li><li>Short-term memory</li>
+            <li>Context window truncation</li><li>Context window compaction (summarization)</li>
+            <li>Guardrails</li><li>Model evaluation</li>
+          </ul>
+        </div>
+        <div class="card" data-step="2">
+          <div class="k">AI cloud architecture &amp; production</div>
+          <ul class="chips">
+            <li>Scalable, highly available services</li><li>Security</li><li>Serverless tools</li>
+            <li>Infrastructure as code</li><li>Observability</li><li>Build and ship to production</li>
+          </ul>
+        </div>
+      </div>
+      <div class="out" data-step="3">
+        <div class="out-h">Scoped out, on purpose</div>
+        <div class="out-grid">
+          <div><b>Data engineering</b><span>Light cleaning and an ingest pipeline into the database. We know the data has quality gaps and took it as is.</span></div>
+          <div><b>Data science / ML</b><span>The intent and fraud models are heuristic mocks. They serve as agent tools and show where the product scales.</span></div>
+          <div><b>Data analysis</b><span>Done, not shipped. A full EDA asked whether fraud could be flagged minutes after an approved charge. No variable related to the fraud label (test ROC-AUC <b>0.46</b>, PR-AUC 0.0008 vs a 0.0009 base rate), so the fraud tool is a mock.</span></div>
+        </div>
+        <span class="src build">From the LedgerLens build · EDA in the sibling repo testing-AI-driven-fraud-detection-model</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · Architecture (redrawn from docs/architecture-diagram/ledgerlens-architecture.drawio) -->
+  <section class="slide s-arch" data-steps="3" aria-label="Architecture">
+    <div class="inner">
+      <div data-step="0">
+        <div class="eyebrow">Architecture</div>
+        <h2>Serverless, secure, <span class="grad">in production on AWS.</span></h2>
+      </div>
+      <div class="arch">
+        <svg id="archSvg" viewBox="0 0 1200 540" role="img" aria-label="LedgerLens architecture on AWS">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#6f82ff"/></marker>
+          </defs>
+
+          <g class="lane" data-step="0">
+            <text class="lane-t" x="135" y="24">CHANNEL</text>
+            <g class="node" data-node="customer"><rect x="20" y="44" width="230" height="50" rx="12"/><text x="135" y="74">Customer</text></g>
+            <g class="node" data-node="amplify"><rect x="20" y="130" width="230" height="64" rx="12"/><text x="135" y="157">React web chat<tspan class="d" x="135" dy="20">Amplify Hosting</tspan></text></g>
+            <g class="node" data-node="cognito"><rect x="20" y="230" width="230" height="64" rx="12"/><text x="135" y="257">Amazon Cognito<tspan class="d" x="135" dy="20">OIDC · Auth Code + PKCE</tspan></text></g>
+            <g class="node" data-node="pretoken"><rect x="20" y="330" width="230" height="64" rx="12"/><text x="135" y="357">Pre-Token V3 Lambda<tspan class="d" x="135" dy="20">adds customer_id</tspan></text></g>
+            <path class="edge" d="M135 94 V128" marker-end="url(#ah)"/>
+            <path class="edge" d="M135 194 V228" marker-end="url(#ah)"/>
+            <path class="edge" d="M135 294 V328" marker-end="url(#ah)"/>
+          </g>
+
+          <g class="lane" data-step="1">
+            <text class="lane-t" x="440" y="24">AGENT ENGINE</text>
+            <rect class="box" x="290" y="40" width="300" height="340" rx="16"/>
+            <text class="box-t" x="306" y="60">AgentCore Runtime</text>
+            <g class="node ai" data-node="agent"><rect x="310" y="72" width="260" height="64" rx="12"/><text x="440" y="99">Strands agent<tspan class="d" x="440" dy="20">prompt v10 · Yes/No confirmation hook</tspan></text></g>
+            <g class="node ai" data-node="memory"><rect x="310" y="152" width="125" height="60" rx="12"/><text x="372" y="177">Memory<tspan class="d" x="372" dy="19">short-term</tspan></text></g>
+            <g class="node ai" data-node="identity"><rect x="445" y="152" width="125" height="60" rx="12"/><text x="507" y="177">Identity<tspan class="d" x="507" dy="19">token vault</tspan></text></g>
+            <g class="node ai" data-node="bedrock"><rect x="310" y="228" width="260" height="64" rx="12"/><text x="440" y="255">Amazon Bedrock<tspan class="d" x="440" dy="20">DeepSeek v3.2 · Haiku 4.5 · Sonnet 4.5</tspan></text></g>
+            <g class="node ai" data-node="guardrail"><rect x="310" y="308" width="260" height="52" rx="12"/><text x="440" y="339">Bedrock Guardrail</text></g>
+            <g class="node" data-node="observability"><rect x="290" y="400" width="300" height="52" rx="12"/><text x="440" y="431">CloudWatch observability</text></g>
+            <path class="edge" d="M250 162 H270 V104 H308" marker-end="url(#ah)"/>
+            <text class="el" x="256" y="96">JWT</text>
+          </g>
+
+          <g class="lane" data-step="2">
+            <text class="lane-t" x="770" y="24">TOOLS</text>
+            <g class="node ai" data-node="gateway"><rect x="630" y="72" width="280" height="64" rx="12"/><text x="770" y="99">AgentCore Gateway (MCP)<tspan class="d" x="770" dy="20">Cedar policy approves each call</tspan></text></g>
+            <rect class="box vpc" x="630" y="160" width="280" height="214" rx="16"/>
+            <text class="box-t vpc-t" x="646" y="180">VPC · no public IP</text>
+            <g class="node" data-node="tools"><rect x="650" y="192" width="240" height="64" rx="12"/><text x="770" y="219">8 tool Lambdas<tspan class="d" x="770" dy="20">cards · charges · fraud · intent</tspan></text></g>
+            <g class="node" data-node="dsql"><rect x="650" y="290" width="240" height="64" rx="12"/><text x="770" y="317">Aurora DSQL<tspan class="d" x="770" dy="20">VPC endpoint · IAM auth</tspan></text></g>
+            <g class="node human" data-node="handoff"><rect x="630" y="394" width="280" height="64" rx="12"/><text x="770" y="421">human_agent_hand_off<tspan class="d" x="770" dy="20">outside the VPC · no DB</tspan></text></g>
+            <path class="edge" d="M570 104 H628" marker-end="url(#ah)"/>
+            <text class="el" x="580" y="96">MCP</text>
+            <path class="edge" d="M770 136 V190" marker-end="url(#ah)"/>
+            <path class="edge" d="M770 256 V288" marker-end="url(#ah)"/>
+            <path class="edge" d="M910 104 H924 V426 H912" marker-end="url(#ah)"/>
+          </g>
+
+          <g class="lane" data-step="3">
+            <text class="lane-t" x="1065" y="24">DATA &amp; FEEDBACK</text>
+            <g class="node" data-node="sfn"><rect x="950" y="72" width="230" height="48" rx="12"/><text x="1065" y="101">Step Functions</text></g>
+            <g class="node" data-node="codebuild"><rect x="950" y="140" width="230" height="64" rx="12"/><text x="1065" y="167">CodeBuild<tspan class="d" x="1065" dy="20">ingest · transform · curate · load</tspan></text></g>
+            <g class="node" data-node="s3"><rect x="950" y="224" width="230" height="48" rx="12"/><text x="1065" y="253">Amazon S3</text></g>
+            <g class="node" data-node="feedback"><rect x="950" y="394" width="230" height="64" rx="12"/><text x="1065" y="421">Feedback API<tspan class="d" x="1065" dy="20">API Gateway → Lambda → DynamoDB</tspan></text></g>
+            <path class="edge" d="M1065 120 V138" marker-end="url(#ah)"/>
+            <path class="edge" d="M1065 204 V222" marker-end="url(#ah)"/>
+            <path class="edge" d="M950 248 H936 V322 H892" marker-end="url(#ah)"/>
+            <text class="el" x="944" y="290" text-anchor="end">load</text>
+            <path class="edge soft" d="M20 162 H8 V500 H1065 V460" marker-end="url(#ah)"/>
+            <text class="el" x="600" y="494">thumbs up / down from the chat</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tags" data-step="3">
+        <span class="line">Everything deployed as code with AWS CDK.</span>
+        <span class="src build">From the LedgerLens build · docs/architecture-diagram/ledgerlens-architecture.drawio</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · Technical solution -->
+  <section class="slide s-how" data-steps="4" aria-label="Technical solution">
+    <div class="inner">
+      <div data-step="0">
+        <div class="eyebrow">The technical solution</div>
+        <h2>One chat turn, <span class="grad">end to end.</span></h2>
+      </div>
+      <div class="how">
+        <div class="arch arch-mini" id="archMini" aria-hidden="true"></div>
+        <ol class="walk">
+          <li data-step="0" data-focus="customer amplify cognito pretoken"><b>Sign in</b></li>
+          <li data-step="1" data-focus="amplify agent memory bedrock guardrail"><b>Session</b></li>
+          <li data-step="2" data-focus="agent identity gateway"><b>Every tool call is authorized</b></li>
+          <li data-step="3" data-focus="gateway tools dsql handoff"><b>The tools</b></li>
+          <li data-step="4" data-focus="tools handoff"><b>Honest about the mocks</b></li>
+        </ol>
+        <div class="walk-detail">
+          <div>
+            <span>The React chat signs the customer in with Amazon Cognito over OIDC (Authorization Code + PKCE). The token goes with every call to the agent's invocation entry point.</span>
+          </div>
+          <div>
+            <span>AgentCore Runtime validates the token and opens the session: short-term memory, context truncation (30-message sliding window, active) and compaction (summarization, built and switchable by config). Bedrock runs DeepSeek v3.2; Haiku 4.5 or Sonnet 4.5 swap in by config. A Guardrail screens input and output.</span>
+          </div>
+          <div>
+            <span>The agent presents a Cognito token from the Identity token vault to the MCP Gateway. A Cedar policy approves the call only if the token carries a linked customer_id, the call is about that same customer and, to block a card or open a claim, the customer confirmed.</span>
+          </div>
+          <div>
+            <div class="toolset">
+              <div><i>Session start</i><code>get_session_context</code><code>classify_call_type</code></div>
+              <div><i>Cards &amp; charges</i><code>list_credit_cards</code><code>list_card_transactions</code><code>explain_transaction</code></div>
+              <div><i>Fraud</i><code>transaction_fraud_detection</code></div>
+              <div><i>Actions, on the customer's Yes</i><code>block_credit_card</code><code>open_claim</code><code>human_agent_hand_off</code></div>
+            </div>
+          </div>
+          <div>
+            <span><em class="badge">Mock models</em> Intent and fraud are heuristic rules that simulate a model's decision, deliberately out of scope. <em class="badge human">Simulated</em> The hand-off is a web simulation that triggers a human-agent hand-off.</span>
+          </div>
+        </div>
+      </div>
+      <div class="tags" data-step="0">
+        <span class="src build">From the LedgerLens build · agent/ledgerlens, gateway/policies/policy.cedar, infra-cdk</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 · Profitability -->
+  <section class="slide s-profit" data-steps="3" aria-label="Profitability">
+    <div class="inner">
+      <div data-step="0">
+        <div class="eyebrow">Profitability</div>
+        <h2>Your contact center is expensive.<br><span class="grad">Keep it low, and increase your margins.</span></h2>
+      </div>
+      <div class="profit">
+        <div class="card ladder">
+          <div class="k">Cost per contact</div>
+          <div class="rung human" data-step="1">
+            <div class="who">Person, LATAM bank<small>conservative baseline</small></div>
+            <div class="track"><div class="fill" style="--w:100%"></div></div>
+            <span class="cost amt" tabindex="0">$1.23<span class="tip" role="tooltip"><b>How we got $1.23</b><span class="f">$16/hr ÷ 60 × 3.7 min ÷ 0.8 = $1.23</span>$16/hr is the midpoint of the $12–20/hr fully loaded agent cost in Colombia (FusionCX, 2026). 3.7 min is the average handle time of a transactional contact in the dataset. 0.8 assumes agents spend 80% of paid time on calls (our assumption). Range: $0.93–1.54 at $12–20/hr. The 2.0 min wait is left out: it costs the customer's time, not the agent's.</span></span>
+          </div>
+          <p class="ref" data-step="1">Global reference: <span class="cost" tabindex="0">$7.20 per inbound call<span class="tip" role="tooltip"><b>Global benchmark</b>ContactBabel, 2026 US Contact Center Decision-Makers' Guide: $7.20 average cost per inbound call. Gartner's 2019 poll gives $8.01 per live-channel contact. Published benchmarks run higher than our LATAM figure because they assume longer calls and include after-call work, technology and overhead.</span></span></p>
+          <div class="rung" data-step="2">
+            <div class="who">LedgerLens · DeepSeek v3.2<small>deployed</small></div>
+            <div class="track"><div class="fill" style="--w:8.0%"><i style="flex:554"></i><i style="flex:72"></i><i style="flex:322"></i><i style="flex:38"></i></div></div>
+            <span class="cost amt" tabindex="0">$0.099<span class="tip" role="tooltip"><b>DeepSeek v3.2: $0.099 per contact</b><span class="f">tokens $0.0554 + Guardrail $0.0072 + variable infra $0.0322 + fixed $0.0038</span>One contact is a 9-turn session: 12 model calls and 7 tool calls. Tokens: about 85.2K in × $0.62 per 1M + 1.4K out × $1.85 per 1M (Bedrock on-demand, us-east-1). Calibrated on Bedrock token metrics from our AWS account; unit prices match Cost Explorer. Bedrock offers no prompt caching for DeepSeek.</span></span>
+          </div>
+          <div class="rung" data-step="2">
+            <div class="who">LedgerLens · Haiku 4.5</div>
+            <div class="track"><div class="fill" style="--w:12.7%"><i style="flex:1134"></i><i style="flex:72"></i><i style="flex:322"></i><i style="flex:38"></i></div></div>
+            <span class="cost amt" tabindex="0">$0.157<span class="tip" role="tooltip"><b>Claude Haiku 4.5: $0.157 per contact</b><span class="f">tokens $0.1134 + Guardrail $0.0072 + variable infra $0.0322 + fixed $0.0038</span>Same 9-turn session with 12 model calls. Tokens: about 95.5K in × $1.10 per 1M + 1.5K out × $5.50 per 1M (us geo inference profile, us-east-1). Unit prices match Cost Explorer. With prompt caching of the system prompt and tools: about $0.091.</span></span>
+          </div>
+          <div class="rung" data-step="2">
+            <div class="who">LedgerLens · Sonnet 4.5</div>
+            <div class="track"><div class="fill" style="--w:31.2%"><i style="flex:3401"></i><i style="flex:72"></i><i style="flex:322"></i><i style="flex:38"></i></div></div>
+            <span class="cost amt" tabindex="0">$0.383<span class="tip" role="tooltip"><b>Claude Sonnet 4.5: $0.383 per contact</b><span class="f">tokens $0.3401 + Guardrail $0.0072 + variable infra $0.0322 + fixed $0.0038</span>Same 9-turn session with 12 model calls. Tokens: about 95.5K in × $3.30 per 1M + 1.5K out × $16.50 per 1M (us geo inference profile, us-east-1). Unit prices match Cost Explorer. With prompt caching of the system prompt and tools: about $0.186.</span></span>
+          </div>
+          <div class="legend" data-step="2">
+            <span class="cost lg tok tip-right" tabindex="0">Tokens<span class="tip" role="tooltip"><b>Tokens</b>Input and output tokens per contact × the Bedrock on-demand price in us-east-1, per 1M tokens in / out: DeepSeek v3.2 $0.62 / $1.85, Haiku 4.5 $1.10 / $5.50, Sonnet 4.5 $3.30 / $16.50.</span></span>
+            <span class="cost lg grd" tabindex="0">Guardrail $0.0072<span class="tip" role="tooltip"><b>Bedrock Guardrail</b><span class="f">$0.0006 × 12 model calls = $0.0072</span>2 ApplyGuardrail calls per model call (input and output), content and topic policies, 1 text unit each at $0.15 per 1K text units.</span></span>
+            <span class="cost lg var" tabindex="0">Variable infra $0.0322<span class="tip" role="tooltip"><b>Variable infra per contact</b>Cognito M2M tokens $0.0203 (a new token on each of 9 invocations × $0.00225) · AgentCore Runtime $0.0089 · Aurora DSQL $0.0014 · Memory, Gateway, Cedar, Lambda and logs about $0.0016.</span></span>
+            <span class="cost lg fix" tabindex="0">Fixed infra $0.0038<span class="tip" role="tooltip"><b>Fixed infra, spread over the volume</b><span class="f">$25.54 a month ÷ 6,661 contacts = $0.0038</span>API Gateway cache $14.60 · DSQL VPC endpoint $7.30 · DSQL storage $1.58 · Secrets Manager $1.20 · DSQL background reads $0.81 · ECR and Amplify $0.05. The one-off data pipeline is excluded.</span></span>
+          </div>
+        </div>
+
+        <div class="card save" data-step="3">
+          <div class="k">Saved per contact, at 6,661 contacts a month</div>
+          <table class="savings">
+            <thead><tr><th></th><th>vs LATAM $1.23</th><th>vs global $7.20</th><th>a month, LATAM / global</th></tr></thead>
+            <tbody>
+              <tr>
+                <th>DeepSeek v3.2</th>
+                <td><span class="cost tip-left" tabindex="0"><span data-count="1.13" data-format="usd2">$1.13</span> <small>92%</small><span class="tip" role="tooltip"><b>Saved vs a person, LATAM</b><span class="f">$1.23 − $0.099 = $1.13 (92%)</span>The human cost per contact minus LedgerLens on DeepSeek v3.2.</span></span></td>
+                <td><span class="cost tip-left" tabindex="0"><span data-count="7.10" data-format="usd2">$7.10</span> <small>99%</small><span class="tip" role="tooltip"><b>Saved vs a person, global</b><span class="f">$7.20 − $0.099 = $7.10 (99%)</span>ContactBabel's 2026 cost per inbound call minus LedgerLens on DeepSeek v3.2.</span></span></td>
+                <td><span class="cost tip-left" tabindex="0">$7,536 / $47,302<span class="tip" role="tooltip"><b>Saved a month, DeepSeek v3.2</b><span class="f">$8,193 − $657 = $7,536</span><span class="f">$47,959 − $657 = $47,302</span>People: 6,661 contacts × $1.23 = $8,193, or × $7.20 = $47,959. LedgerLens: 6,661 × $0.0986 (the unrounded total) = $657. 6,661 is the average of transactional contacts a month in the dataset.</span></span></td>
+              </tr>
+              <tr>
+                <th>Haiku 4.5</th>
+                <td><span class="cost tip-left" tabindex="0"><span data-count="1.07" data-format="usd2">$1.07</span> <small>87%</small><span class="tip" role="tooltip"><b>Saved vs a person, LATAM</b><span class="f">$1.23 − $0.157 = $1.07 (87%)</span>The human cost per contact minus LedgerLens on Claude Haiku 4.5.</span></span></td>
+                <td><span class="cost tip-left" tabindex="0"><span data-count="7.04" data-format="usd2">$7.04</span> <small>98%</small><span class="tip" role="tooltip"><b>Saved vs a person, global</b><span class="f">$7.20 − $0.157 = $7.04 (98%)</span>ContactBabel's 2026 cost per inbound call minus LedgerLens on Claude Haiku 4.5.</span></span></td>
+                <td><span class="cost tip-left" tabindex="0">$7,150 / $46,916<span class="tip" role="tooltip"><b>Saved a month, Haiku 4.5</b><span class="f">$8,193 − $1,043 = $7,150</span><span class="f">$47,959 − $1,043 = $46,916</span>People: 6,661 contacts × $1.23 = $8,193, or × $7.20 = $47,959. LedgerLens: 6,661 × $0.1566 (the unrounded total) = $1,043. 6,661 is the average of transactional contacts a month in the dataset.</span></span></td>
+              </tr>
+              <tr>
+                <th>Sonnet 4.5</th>
+                <td><span class="cost tip-left" tabindex="0"><span data-count="0.85" data-format="usd2">$0.85</span> <small>69%</small><span class="tip" role="tooltip"><b>Saved vs a person, LATAM</b><span class="f">$1.23 − $0.383 = $0.85 (69%)</span>The human cost per contact minus LedgerLens on Claude Sonnet 4.5.</span></span></td>
+                <td><span class="cost tip-left" tabindex="0"><span data-count="6.82" data-format="usd2">$6.82</span> <small>95%</small><span class="tip" role="tooltip"><b>Saved vs a person, global</b><span class="f">$7.20 − $0.383 = $6.82 (95%)</span>ContactBabel's 2026 cost per inbound call minus LedgerLens on Claude Sonnet 4.5.</span></span></td>
+                <td><span class="cost tip-left" tabindex="0">$5,640 / $45,406<span class="tip" role="tooltip"><b>Saved a month, Sonnet 4.5</b><span class="f">$8,193 − $2,553 = $5,640</span><span class="f">$47,959 − $2,553 = $45,406</span>People: 6,661 contacts × $1.23 = $8,193, or × $7.20 = $47,959. LedgerLens: 6,661 × $0.3833 (the unrounded total) = $2,553. 6,661 is the average of transactional contacts a month in the dataset.</span></span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="caveat">Assumes the contact is fully automated. A contact handed to a person still costs a human contact.</p>
+          <details class="sources">
+            <summary>Sources</summary>
+            <ul>
+              <li><a href="https://www.fusioncx.com/blog/locations/colombia-vs-us-call-center-costs/" target="_blank" rel="noopener">FusionCX, Colombia vs. US Call Center Costs (2026)</a></li>
+              <li><a href="https://www.contactbabel.com/the-us-contact-center-decision-makers-guide/" target="_blank" rel="noopener">ContactBabel, The US Contact Center Decision-Makers' Guide (2026)</a></li>
+              <li><a href="https://www.destinationcrm.com/Articles/CRM-Insights/Insight/Gartner-Survey-Finds-Self-Service-Insufficient-135436.aspx" target="_blank" rel="noopener">Gartner poll via DestinationCRM (2019)</a></li>
+              <li><a href="https://aws.amazon.com/bedrock/pricing/" target="_blank" rel="noopener">Amazon Bedrock and Guardrails pricing</a></li>
+              <li><a href="https://aws.amazon.com/bedrock/agentcore/pricing/" target="_blank" rel="noopener">Amazon Bedrock AgentCore pricing</a></li>
+              <li><a href="https://aws.amazon.com/cognito/pricing/" target="_blank" rel="noopener">Amazon Cognito pricing</a> · <a href="https://aws.amazon.com/rds/aurora/dsql/pricing/" target="_blank" rel="noopener">Aurora DSQL pricing</a> · <a href="https://aws.amazon.com/privatelink/pricing/" target="_blank" rel="noopener">PrivateLink pricing</a> · <a href="https://aws.amazon.com/api-gateway/pricing/" target="_blank" rel="noopener">API Gateway pricing</a></li>
+            </ul>
+          </details>
+        </div>
+      </div>
+      <div class="big-save" data-step="3">
+        <div class="stat"><span class="cost" tabindex="0"><span data-count="83" data-format="int">83</span>%<span class="tip" role="tooltip"><b>Average saving vs a person, LATAM</b><span class="f">(92.0% + 87.3% + 68.8%) ÷ 3 = 82.7%</span>The saving per contact against the $1.23 LATAM human cost, averaged over DeepSeek v3.2, Haiku 4.5 and Sonnet 4.5. Each is ($1.23 − the model's unrounded total) ÷ $1.23.</span></span><span class="lbl">saved per contact vs LATAM</span></div>
+        <div class="stat"><span class="cost" tabindex="0"><span data-count="97" data-format="int">97</span>%<span class="tip" role="tooltip"><b>Average saving vs a person, global reference</b><span class="f">(98.6% + 97.8% + 94.7%) ÷ 3 = 97.0%</span>The saving per contact against ContactBabel's $7.20 per inbound call, averaged over DeepSeek v3.2, Haiku 4.5 and Sonnet 4.5. Each is ($7.20 − the model's unrounded total) ÷ $7.20.</span></span><span class="lbl">saved per contact vs global reference</span></div>
+      </div>
+      <p class="close" data-step="3"><span class="grad">LedgerLens.</span> Every customer, understood.</p>
+      <div class="tags" data-step="1">
+        <span class="src bench">Benchmarks: FusionCX 2026, ContactBabel 2026</span>
+        <span class="src build">LedgerLens costs: Bedrock CloudWatch metrics and Cost Explorer, us-east-1, Oct 2026</span>
+        <span class="src data">Volume and handle time: provided contact-center dataset</span>
+        <span class="src assume">80% occupancy and the 9-turn session are assumptions</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="hint" id="hint">Press → to begin</div>
+<nav class="hud" aria-label="Slide navigation">
+  <button id="prev" aria-label="Previous"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+  <span class="count" id="count">1 / 6</span>
+  <button id="next" aria-label="Next"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg></button>
+  <button id="fs" aria-label="Full screen"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</nav>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('.slide')];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const hooks = [];
+  let cur = 0, step = 0;
+
+  // The HTML holds each number's final text; countUp animates from 0 to it.
+  function countUp(el) {
+    const target = parseFloat(el.dataset.count), fmt = el.dataset.format || 'int';
+    const show = v => fmt === 'usd2' ? '$' + v.toFixed(2)
+      : fmt === 'usd3' ? '$' + v.toFixed(3)
+      : fmt === 'pct' ? v.toFixed(1) + '%'
+      : fmt === 'dec' ? (v < 0 ? '−' : '') + Math.abs(v).toFixed(1)
+      : Math.round(v).toLocaleString('en-US');
+    if (reduce) { el.textContent = show(target); return; }
+    const t0 = performance.now(), dur = 1600;
+    const tick = t => {
+      const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 4);
+      el.textContent = show(target * e);
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  // slide hooks
+  // Technical solution: a clone of the architecture; each step highlights its part
+  const mini = document.getElementById('archMini');
+  const clone = document.getElementById('archSvg').cloneNode(true);
+  clone.removeAttribute('id');
+  // Own marker id, so the arrowheads paint while slide 4 is hidden
+  clone.querySelector('marker').id = 'ah-mini';
+  clone.querySelectorAll('[marker-end]').forEach(p => p.setAttribute('marker-end', 'url(#ah-mini)'));
+  clone.querySelectorAll('[data-step]').forEach(el => el.removeAttribute('data-step'));
+  mini.appendChild(clone);
+  hooks.push((s, st) => {
+    if (!s.classList.contains('s-how')) return;
+    const shown = [...s.querySelectorAll('[data-focus]')].filter(li => +li.dataset.step <= st);
+    const last = shown.at(-1);
+    const focus = new Set((last?.dataset.focus || '').split(' '));
+    mini.classList.add('focusing');
+    mini.querySelectorAll('[data-node]').forEach(n => n.classList.toggle('focus', focus.has(n.dataset.node)));
+    s.querySelectorAll('.walk li').forEach(li => li.classList.toggle('current', li === last));
+    s.querySelectorAll('.walk-detail > div').forEach((d, i) => d.classList.toggle('current', i === shown.length - 1));
+  });
+  // Solution slide: the lens closes as the slide arrives
+  hooks.push(s => document.getElementById('heroMark').classList.toggle('split', !s.classList.contains('s-solution')));
+
+  function render() {
+    document.activeElement?.closest?.('.cost')?.blur();
+    slides.forEach((s, i) => {
+      s.classList.toggle('active', i === cur);
+      s.classList.toggle('past', i < cur);
+      s.setAttribute('aria-hidden', i !== cur);
+      if (i === cur) s.dataset.at = step;
+    });
+    const s = slides[cur];
+    s.querySelectorAll('[data-step]').forEach(el => el.classList.toggle('on', +el.dataset.step <= step));
+
+    // Numbers count up the first time their step shows; leaving the slide resets them
+    slides.forEach((sl, i) => sl.querySelectorAll('[data-count]').forEach(el => {
+      const holder = el.closest('[data-step]');
+      const shown = i === cur && (!holder || +holder.dataset.step <= step);
+      if (shown && !el.dataset.counted) { el.dataset.counted = '1'; countUp(el); }
+      if (!shown) delete el.dataset.counted;
+    }));
+    hooks.forEach(h => h(s, step));
+
+    const total = slides.reduce((n, sl) => n + 1 + +sl.dataset.steps, 0);
+    const done = slides.slice(0, cur).reduce((n, sl) => n + 1 + +sl.dataset.steps, 0) + step + 1;
+    document.getElementById('progress').style.width = (done / total * 100) + '%';
+    document.getElementById('count').textContent = (cur + 1) + ' / ' + slides.length;
+    document.getElementById('brand').classList.toggle('show', !s.classList.contains('s-solution'));
+    document.getElementById('hint').style.opacity = cur === 0 && step === 0 ? 1 : 0;
+  }
+
+  function next() {
+    if (step < +slides[cur].dataset.steps) step++;
+    else if (cur < slides.length - 1) { cur++; step = 0; }
+    render();
+  }
+  function prev() {
+    if (step > 0) step--;
+    else if (cur > 0) { cur--; step = +slides[cur].dataset.steps; }
+    render();
+  }
+  function go(i) { cur = Math.max(0, Math.min(slides.length - 1, i)); step = 0; render(); }
+
+  // Short screens: shrink a slide's content so its last step still fits (desktop only)
+  function fit() {
+    slides.forEach(s => {
+      const inner = s.querySelector('.inner');
+      inner.style.zoom = '';
+      if (innerWidth <= 900) return;
+      const cs = getComputedStyle(s);
+      const room = s.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      const z = Math.min(1, room / inner.offsetHeight);
+      if (z < 1) inner.style.zoom = z.toFixed(3);
+    });
+  }
+  fit();
+  addEventListener('resize', fit);
+  document.fonts?.ready.then(fit);
+
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); next(); }
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(slides.length - 1);
+    else if (/^[1-6]$/.test(e.key)) go(+e.key - 1);
+    else if (e.key === 'f') toggleFs();
+  });
+  document.getElementById('next').onclick = next;
+  document.getElementById('prev').onclick = prev;
+  function toggleFs() { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); }
+  document.getElementById('fs').onclick = toggleFs;
+
+  // A click on the slide advances, except on tooltips, sources and links; swipe on touch
+  document.getElementById('deck').addEventListener('click', e => { if (!e.target.closest('a,button,.cost,details,summary')) next(); });
+  let tx = null;
+  addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
+  addEventListener('touchend', e => {
+    if (tx === null) return;
+    const dx = e.changedTouches[0].clientX - tx; tx = null;
+    if (Math.abs(dx) > 50) dx < 0 ? next() : prev();
+  });
+  let wheelLock = 0;
+  addEventListener('wheel', e => {
+    if (innerWidth <= 900 || Date.now() < wheelLock || Math.abs(e.deltaY) < 20) return;
+    wheelLock = Date.now() + 800; e.deltaY > 0 ? next() : prev();
+  }, { passive: true });
+
+  // Deep link: #3 opens slide 3, #3.2 opens it at step 2
+  const m = location.hash.match(/^#(\d)(?:\.(\d))?$/);
+  if (m) {
+    cur = Math.max(0, Math.min(slides.length - 1, +m[1] - 1));
+    step = Math.min(+(m[2] || 0), +slides[cur].dataset.steps);
+  }
+  render();
+})();
+</script>
+</body>
+</html>
