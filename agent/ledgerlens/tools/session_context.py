@@ -21,7 +21,7 @@ import asyncio
 import json
 import logging
 
-from tools.system_prompt import build_system_prompt
+from tools.system_prompt import BASE_SYSTEM_PROMPT, build_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,9 @@ async def _fetch_session_context(agent, customer_id: str) -> dict | None:
     return {"customer": customer, "likely_reasons": likely_reasons}
 
 
-async def apply_session_context(agent, customer_id: str) -> None:
+async def apply_session_context(
+    agent, customer_id: str, base: str = BASE_SYSTEM_PROMPT
+) -> None:
     """Load the session context once per session and render it into the system prompt.
 
     Args:
@@ -93,6 +95,7 @@ async def apply_session_context(agent, customer_id: str) -> None:
             agent.state holds whatever an earlier turn saved.
         customer_id (str): The customer_id from the Gateway machine token, or ""
             when the user has no linked customer (then nothing happens).
+        base (str): The policy text the prompt starts with (see build_system_prompt).
     """
     if not customer_id:
         return
@@ -101,4 +104,4 @@ async def apply_session_context(agent, customer_id: str) -> None:
         session_context = await _fetch_session_context(agent, customer_id)
         if session_context is not None:
             agent.state.set(SESSION_CONTEXT_KEY, session_context)
-    agent.system_prompt = build_system_prompt(customer_id, session_context)
+    agent.system_prompt = build_system_prompt(customer_id, session_context, base)

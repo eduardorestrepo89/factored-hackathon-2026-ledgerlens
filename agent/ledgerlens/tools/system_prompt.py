@@ -194,7 +194,11 @@ def prompt_template() -> str:
     )
 
 
-def build_system_prompt(customer_id: str, session_context: dict | None = None) -> str:
+def build_system_prompt(
+    customer_id: str,
+    session_context: dict | None = None,
+    base: str = BASE_SYSTEM_PROMPT,
+) -> str:
     """Return the system prompt for a customer, or for a user with no linked customer.
 
     Args:
@@ -204,16 +208,19 @@ def build_system_prompt(customer_id: str, session_context: dict | None = None) -
             ({"customer": ..., "likely_reasons": ...}), or None when it isn't
             loaded. Its fields come from the database, so it goes last, as compact
             JSON inside <session_context> tags labeled as data.
+        base (str): The policy text the prompt starts with: BASE_SYSTEM_PROMPT,
+            unless an evaluation login overrides it (tools/eval_override.py). The
+            session blocks below are added either way.
 
     Returns:
-        str: BASE_SYSTEM_PROMPT followed by the customer session instructions and,
+        str: The base text followed by the customer session instructions and,
             when there is one, the session context block.
     """
     if customer_id:
         session_block = LINKED_SESSION_BLOCK.format(customer_id=customer_id)
     else:
         session_block = UNLINKED_SESSION_BLOCK
-    prompt = f"{BASE_SYSTEM_PROMPT}\n\n{session_block}"
+    prompt = f"{base}\n\n{session_block}"
     if session_context:
         # Database text could hold "</session_context>"; JSON's \u escapes keep it
         # data, so only the code below opens and closes the block.

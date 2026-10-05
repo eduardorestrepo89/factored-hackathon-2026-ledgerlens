@@ -328,3 +328,20 @@ def test_prompt_hands_off_and_says_goodbye(system_prompt):
     assert "this same chat" in prompt
     assert "Promise no time" in prompt
     assert "Never say you have transferred them" not in prompt
+
+
+def test_a_custom_base_replaces_only_the_policy_text(system_prompt):
+    context = {"customer": {"first_name": "Ana"}, "likely_reasons": {"reasons": []}}
+
+    prompt = system_prompt.build_system_prompt(CUSTOMER_ID, context, base="EVAL POLICY")
+
+    assert prompt.startswith("EVAL POLICY\n\n")
+    assert system_prompt.BASE_SYSTEM_PROMPT not in prompt
+    assert CUSTOMER_ID in prompt
+    assert "<session_context>" in prompt
+
+
+def test_the_default_base_is_the_released_prompt(system_prompt):
+    prompt = system_prompt.build_system_prompt(CUSTOMER_ID)
+
+    assert prompt.startswith(system_prompt.BASE_SYSTEM_PROMPT + "\n\n")
