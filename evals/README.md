@@ -69,15 +69,32 @@ $PY -m evals.report evals/results/baseline-v10 --out evals/results/report
 ## CloudWatch dashboard
 
 ```bash
-evals/.venv/Scripts/python -m evals.cw_dashboard evals/results/baseline-v10 evals/results/v11          # print
-evals/.venv/Scripts/python -m evals.cw_dashboard evals/results/baseline-v10 evals/results/v11 --apply  # publish
+evals/.venv/Scripts/python -m evals.cw_dashboard evals/results/baseline-v10 evals/results/haiku-v10          # print
+evals/.venv/Scripts/python -m evals.cw_dashboard evals/results/baseline-v10 evals/results/haiku-v10 --apply  # publish
 ```
 
-Publishes the same numbers as `report.md` as custom metrics (namespace `LedgerLens/Eval`,
-dimensions `Model`, `Prompt` and `Run` = the run folder names) and rewrites the dashboard
-`LedgerLens-Evaluation`: local pass^1/pass^k, AgentCore scores, unsafe cases and harness errors,
-latency, cost, and the per-case grid. Each publish is its own `Run` series, so a smoke test never
-blends into a baseline.
+Publishes the numbers behind `report.md` plus the metric families in `evals/metrics.py` (research:
+`datathon/reports/LedgerLens dashboard metrics.md`) as custom metrics in `LedgerLens/Eval`, and rewrites
+the `LedgerLens-Evaluation` dashboard:
+
+- **Dimensions:** `Model`, `Prompt` (name + content hash, the id the spans carry as `prompt.version`),
+  `Run` (the run folder), and at most one extra dimension per family (`Check`, `Evaluation`,
+  `DefectType`, `ErrorType`, `Cause`, `Evaluator`, `UnsafeType`, `Kind`). Data is stamped at publish
+  time. About 150 data points per model.
+- **Rows:** business tiles (safe automated resolution, unsafe cases with the 3/n bound, cost per case
+  passing every run); where it fails (pass rate by evaluation, failure rate per check); confirmation
+  quality; tool quality; reliability (pass@k, Wilson band, flaky and always-failing cases, AgentCore
+  coverage); efficiency (p50/p95 latency from raw values, tokens, cost); safety (unsafe hits with their
+  opportunities); live AWS metrics; live log rows; history.
+- **Live AWS metrics:** Cedar `AuthorizeAction` denies on the current gateway, Bedrock tokens and latency
+  per model, guardrail interventions, Gateway invocations, tool Lambda errors.
+- **Live log rows (Logs Insights):** they read only the `runtime-logs` streams, since every line is also
+  in `otel-rt-logs`. They show sessions per model × prompt, consent clicks, agent failures and
+  overwrites, handled tool errors, and hand-offs by priority.
+- **History:** a copy of pass^1/pass^k without the `Run` dimension, one point per publish, so a model's
+  line runs across prompt versions.
+- **Timing:** new metric names take a few minutes to become visible to `SEARCH`, so the per-check and
+  per-evaluation charts fill in shortly after the first publish.
 
 ## Known AWS limitation: confirmation sessions can't be scored by AgentCore Evaluations
 
