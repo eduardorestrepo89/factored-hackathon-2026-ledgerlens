@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { GlobalContextProvider } from "@/app/context/GlobalContext"
+import { SCAN_MS } from "@/components/chat/ConfirmCard"
 
 const { invoke, created } = vi.hoisted(() => ({ invoke: vi.fn(), created: vi.fn() }))
 
@@ -106,7 +107,7 @@ describe("confirmation card (agent ConfirmationHook)", () => {
     expect(within(card).getByRole("status")).toHaveTextContent("Verificando tu identidad")
     expect(invoke).toHaveBeenCalledTimes(1)
 
-    expect(await screen.findByText("Bloqueando la tarjeta", {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(await screen.findByText("Bloqueando la tarjeta", {}, { timeout: SCAN_MS + 1500 })).toBeInTheDocument()
     expect(invoke).toHaveBeenLastCalledWith("Sí", expect.any(String), "token", expect.any(Function), {
       confirmations: [{ interruptId: "int-3", approved: true }],
     })
@@ -114,7 +115,7 @@ describe("confirmation card (agent ConfirmationHook)", () => {
     expect(within(card).getByText("Identidad verificada")).toBeInTheDocument()
     // The check answers on the card: no "Sí" bubble in the thread
     expect(screen.queryByText("Sí")).toBeNull()
-  })
+  }, SCAN_MS + 5000)
 
   it("sends approved false when the customer cancels the biometric check", async () => {
     paused("gateway_block-target___block_credit_card", "tu7", "int-3", { card_last4: "4497", reason: "lost" })
@@ -131,9 +132,9 @@ describe("confirmation card (agent ConfirmationHook)", () => {
     expect(within(card).getByText("No se pudo verificar")).toBeInTheDocument()
     expect(screen.queryByText("No")).toBeNull()
     // The cancelled check never approves later
-    await new Promise(r => setTimeout(r, 1700))
+    await new Promise(r => setTimeout(r, SCAN_MS + 200))
     expect(invoke).toHaveBeenCalledTimes(2)
-  })
+  }, SCAN_MS + 5000)
 
   it("sends approved false on No", async () => {
     paused(CLAIM, "tu2", "int-1", { transaction_ids: ["TRX-1"], claim_type: "fraud" })

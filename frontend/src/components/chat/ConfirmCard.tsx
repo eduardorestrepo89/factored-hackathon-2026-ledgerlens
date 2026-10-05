@@ -10,7 +10,7 @@ export const ConfirmContext = createContext<
   ((c: Confirmation, approved: boolean, label: string, check?: BiometricCheck) => void) | null
 >(null)
 
-const SCAN_MS = 1500
+export const SCAN_MS = 3000
 
 const ANSWERED = {
   yes: { key: "confirmYes", Icon: Check },
