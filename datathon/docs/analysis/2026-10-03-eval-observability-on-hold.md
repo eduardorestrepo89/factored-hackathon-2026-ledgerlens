@@ -1,6 +1,6 @@
-# Agent evaluation and observability: review and limitations (on hold)
+# Agent evaluation and observability: review and limitations
 
-**Status:** on hold since 2026-10-03, by team decision. Nothing has been built for this sub-project. This document records:
+**Status:** resumed on 2026-10-04, after being on hold since 2026-10-03 by team decision. No evaluation harness has been built yet. The agent now exists: blockers L1–L4 are cleared, L5, L6 and L8 are partly cleared, and L7, L9 and L10 are still open (section 3, rechecked 2026-10-04). This document records:
 - what was reviewed;
 - what still holds;
 - what blocks the work;
@@ -8,7 +8,7 @@
 
 **Context:** this was sub-project 2, after the curate stage (spec `docs/superpowers/specs/2026-10-03-curate-stage-design.md`). Its goal was to evaluate the LedgerLens agent on many labelled cases and explain its behaviour with AWS-native tooling: AgentCore Evaluations, AgentCore Observability and the Gateway's Cedar policy decisions.
 
-**Why it is on hold:** the agent under test does not exist yet in a testable form (section 3). An evaluation harness built now would test the template agent, not LedgerLens.
+**Why it was on hold:** on 2026-10-03 the agent under test did not exist in a testable form. An evaluation harness built then would have tested the template agent, not LedgerLens. The v1 wiring (spec `docs/superpowers/specs/2026-10-03-v1-agent-wiring-design.md`), the write tools and the hand-off have since landed in `stage`.
 
 ## 1. What was reviewed
 
@@ -19,7 +19,8 @@
 | [`verification_2026-10-03.md`](../../research_notes/Agent%20evaluation%20signal%20on%20AWS/verification_2026-10-03.md) | Check of 13 AWS claims against AWS docs, the boto3 service models and the shipped SDK wheels (`bedrock-agentcore` 1.24.0, `strands-agents-evals` 1.4.0) |
 | `docs/AGENTCORE_EVALUATIONS_GUIDE.md`, `docs/OBSERVABILITY.md`, `docs/AGENTCORE_TELEMETRY.md`, `docs/BEDROCK_MODEL_INVOCATION_LOGGING.md` | FAST template guides |
 | `docs/LEDGERLENS_PRODUCT_DESIGN.md` §7, §10, §13 | Tool catalog, Cedar sketch and evaluation targets |
-| The `stage` branch at `3372213` and the AWS account (us-east-1, profile `ledgerlens`) | What is actually built and deployed |
+| The `stage` branch at `3372213` and the AWS account (us-east-1, profile `ledgerlens`) | What was built and deployed on 2026-10-03 |
+| The `stage` branch at `1b4b4ed` and the AWS account (stack list and X-Ray destination only) | The 2026-10-04 recheck in section 3 |
 
 ## 2. Review of the research
 
@@ -93,7 +94,7 @@ The report was written before curation, so its population figures are the pre-cu
 
 ### 2.4 Too much for the deadline
 
-The report plans for two people over two days. Submission is due 2026-10-05, and the agent is not built. These parts do not fit and would be cut first when resuming:
+The report plans for two people over two days. Submission is due 2026-10-05, one day after the work resumed. These parts do not fit and are cut first:
 - a covering array of about 130 scenarios rendered into about 1,500 cases;
 - a non-Claude model to write test phrasing;
 - 100–150 human labels per judged criterion;
@@ -112,36 +113,41 @@ The report plans for two people over two days. Submission is due 2026-10-05, and
 
 ## 3. Limitations: what blocks evaluation today
 
-Checked on 2026-10-03 against `stage` at `3372213` and the AWS account.
+First checked on 2026-10-03 against `stage` at `3372213` and the AWS account. Rechecked on 2026-10-04 against `stage` at `1b4b4ed`. The 2026-10-04 AWS check covered only the stack list and the X-Ray trace destination. The live Gateway targets, Cedar policies, Runtime environment and Cognito users were not read, so "cleared" below means cleared in the code that `stage` deploys.
 
-| # | Limitation | Evidence | What unblocks it |
-|---|---|---|---|
-| L1 | **The agent is not deployed.** Only the data stack exists. | `aws cloudformation list-stacks` shows only `ledgerlens-bank-assistant-data` and `CDKToolkit`. | Deploy the backend stack (`python scripts/deploy-with-codebuild.py`; local Docker cannot build the ARM64 images). |
-| L2 | **The system prompt is still the FAST template.** It describes a "helpful assistant with access to tools via the Gateway and Code Interpreter", with no banking persona or policy. | `patterns/strands-single-agent/tools/system_prompt.py:10` | A LedgerLens prompt (design doc §9). |
-| L3 | **The LedgerLens tools are not on the Gateway.** `list_credit_cards`, `list_card_transactions` and `get_session_context` exist only as standalone Lambdas in the data stack. The Gateway has a single target, `sample-tool-target` (`text_analysis_tool`). So the `customer_id` hook never fires. | `infra-cdk/lib/data-construct.ts:217-219`; `infra-cdk/lib/backend-construct.ts:898-899`; `patterns/strands-single-agent/tools/customer_id_hook.py` | Add the three Lambdas as Gateway targets. |
-| L4 | **No per-customer Cedar rule.** The deployed policy permits only the sample tool, by department. The rule `context.input.customer_id == principal.getTag("customer_id")` exists only as a sketch. | `gateway/policies/policy.cedar:41-51`; design doc §10 | Write and deploy the per-customer permit for each LedgerLens tool. Without it there is no Cedar DENY to show. |
-| L5 | **No write tools.** `block_credit_card`, `open_claim` and `human_agent_hand_off` are designed only. The secure exit (confirm → block → read back the last 4 digits) and dispute intake cannot be tested, and persona P07's expected outcome cannot be reached. | design doc §7 | Build them, writing to a sandbox table or recording intent, or keep the evaluation to read-only exits. |
-| L6 | **No observable exit.** Read-only exits (explain, abstain, hand off as text) leave no record. A grader would have to infer the exit from free text. | report §"Flat records…" | A terminal `disposition` field or a hand-off tool. |
-| L7 | **Observability is off.** CloudWatch Transaction Search is not enabled: the trace segment destination is `XRay`, not `CloudWatchLogs`. There are no telemetry rules or deliveries, and Gateway tracing is not enabled. The Runtime sets no `AGENT_OBSERVABILITY_ENABLED` or other `OTEL_*` variable beyond log correlation, although the image runs `opentelemetry-instrument` with `aws-opentelemetry-distro==0.16.0`. AgentCore Evaluations reads spans from CloudWatch, so it has nothing to score. | `aws xray get-trace-segment-destination` → `XRay`, `ACTIVE`; `patterns/strands-single-agent/Dockerfile`; `infra-cdk/lib/backend-construct.ts` Runtime env vars | Enable Transaction Search (one account setting). Deliver Runtime and Gateway traces. Check the unified-spans rule in §2.2, which may need ADOT 0.18.0 or later. |
-| L8 | **No test logins mapped to customers.** The pre-token Lambda maps Cognito `sub` → `customer_id` from `USER_CUSTOMER_IDS_MAP`, which holds placeholders only. An automated runner cannot call the agent as a persona. | `infra-cdk/lib/cognito-construct.ts:146` | One Cognito user per persona (and per `EVL-` clone used), with its `sub` in the map. |
-| L9 | **The design's evaluation targets rest on signal the data lacks.** Design doc §13 measures fraud detection against `is_fraud` and reason accuracy against `reason_category`. The diagnostics found fraud unlearnable without the leaking `fraud_score` (AUC about 0.48), and reasons uniform. | design doc §13; [`2026-10-02-agent-data-diagnostic.md`](2026-10-02-agent-data-diagnostic.md) | Replace §13 with the record-and-policy metrics in §4 below. |
-| L10 | **No evaluation clones exist.** The `EVL-` prefix is reserved, but no pipeline stage writes mutated clones to DSQL, and the tool Lambdas read `public` only. | curate spec E11 | A clone or mutation step, local DuckDB first, then a load into DSQL. |
+| # | Status (2026-10-04) | Limitation (as of 2026-10-03) | What changed | What still unblocks it |
+|---|---|---|---|---|
+| L1 | **Cleared** | **The agent is not deployed.** Only the data stack existed. | `aws cloudformation list-stacks` shows `ledgerlens-bank-assistant` (last updated 2026-10-04 23:11 UTC) next to `ledgerlens-bank-assistant-data` and `CDKToolkit`. Not checked: whether that deploy carries prompt v10 (commit `bc0787a`, 23:01 UTC). | Read `prompt.version` from the first traced session (needs L7). |
+| L2 | **Cleared** | **The system prompt is still the FAST template.** | LedgerLens prompt `v10` (`agent/ledgerlens/tools/system_prompt.py:20`). Every agent span carries it as `prompt.version` (`agent/ledgerlens/ledgerlens_agent.py:148-152`). | — |
+| L3 | **Cleared in code** | **The LedgerLens tools are not on the Gateway.** The only target was `sample-tool-target`. | Nine tool Lambdas are Gateway targets named `<slug>-target`; fraud detection is `fraud-detection-target` (`infra-cdk/lib/backend-construct.ts:881-891`). Trajectory names are therefore `gateway_<target>___<tool>` as the model sees them, and `<target>___<tool>` in Cedar. | — |
+| L4 | **Cleared in code** | **No per-customer Cedar rule.** | `gateway/policies/policy.cedar`: (1) permit the nine tools only with a non-blank `customer_id` tag; (2) forbid any call whose `customer_id` input differs from the token's; (3) forbid `block_credit_card` and `open_claim` without `customer_confirmed == true`. So a cross-customer call and an unconfirmed write both produce a Cedar DENY. | — |
+| L5 | **Partly cleared** | **No write tools.** | `block_credit_card`, `open_claim` and `human_agent_hand_off` are built, so the secure exit and P07's expected outcome can now be reached. But the two DSQL writers change the shared data, as `ll_write` (UPDATE on `products`, INSERT on `complaints`), with no sandbox. Their writes are idempotent: once a trial blocks a persona's card, the next trial finds it already Blocked, a different case with a different correct answer ("card already Blocked: inform, don't block again"). pass^3 on write cases is therefore wrong without a reset, and the demo personas change state too. | Run write cases only on `EVL-` clones (L10), or restore the touched `products` and `complaints` rows after each trial. |
+| L6 | **Partly cleared** | **No observable exit.** | Blocking, the claim and the hand-off are now tool calls behind a Strands interrupt (`agent/ledgerlens/tools/confirmation_hook.py`). The runtime streams a `confirmation` event, and only a Yes click sent back as `resume_prompt` runs the tool. A typed "yes" never does. Read-only exits (explain, abstain) still leave no record, and there is no `disposition` field. | Make the runner answer `confirmation` events with Yes or No per case. Grade read-only exits as "no write or hand-off call" plus a response check, or add a `disposition` field. |
+| L7 | **Open** | **Observability is off.** | No change found. The X-Ray trace segment destination is still `XRay` (`ACTIVE`), not `CloudWatchLogs`. The image still pins `aws-opentelemetry-distro==0.16.0` (`agent/ledgerlens/Dockerfile:18`). `infra-cdk/lib` sets no `OTEL_*`, `AGENT_OBSERVABILITY_ENABLED` or `UNIFIED_TRACES_DESTINATION_ENABLED` variable. Telemetry deliveries and Gateway tracing were not rechecked. | Enable Transaction Search (one account setting). Deliver Runtime and Gateway traces. Check the unified-spans rule in §2.2, which may need ADOT 0.18.0 or later. |
+| L8 | **Partly cleared** | **No test logins mapped to customers.** | One demo login, `demo@ledgerlens.example`, maps to P03 (`CLI-70U0WJ1NH1MN`, `infra-cdk/lib/cognito-construct.ts:146`). Other personas are reached by editing `USER_CUSTOMER_IDS_MAP` on the pre-token Lambda (README, "Switch persona"). A runner can step through personas one at a time, starting a new session after each switch. It cannot run personas in parallel, and every switch changes the login the team and the judges use. | One Cognito user per persona (and per `EVL-` clone used), with its `sub` in the map. |
+| L9 | **Open** | **The design's evaluation targets rest on signal the data lacks.** | No change. Design doc §13 still scores reason accuracy against `reason_category` and fraud detection against `is_fraud` (`docs/LEDGERLENS_PRODUCT_DESIGN.md:1063-1064`). Its other rows are record-and-policy checks and can stay: fraud protocol, no data change without confirmation, grounding, privacy leaks, latency. | Replace the two rows with the record-and-policy metrics in §4.2. |
+| L10 | **Open** | **No evaluation clones exist.** | No change. The only `EVL-` code is the curate gate that rejects that prefix in delivered data (`data_load/curate_rules.py:52-71`). | A clone or mutation step, local DuckDB first, then a load into DSQL. This is now also what isolates the write tools (L5). |
+| L11 | **New** | — | A persona evaluation was run and fixed in prompt v10 (`bc0787a`, PR #15: findings on P01, P03 and P07). Its cases, transcripts and scores are not in the repo (`docs/agent-handoff/` is gitignored), so a new run has no baseline to compare with. | Get the run's notes from the teammate, or treat the first harness run as the baseline. |
+
+Also new since 2026-10-03: a Bedrock guardrail sits in front of the agent (commit `4087944`). Injection cases (`inject_text`) therefore test the guardrail and the agent together, unless the guardrail is turned off for an ablation.
 
 ## 4. When resuming
 
 ### 4.1 Prerequisites, in order
 
-1. **Agent:** LedgerLens prompt (L2); tools on the Gateway (L3); the per-customer Cedar rule (L4); persona logins (L8); deploy (L1).
-2. **Observability (L7):**
+1. **Agent:** done on 2026-10-04 for the prompt (L2), the Gateway tools (L3), the Cedar rules (L4) and the deploy (L1). Still open: one login per persona (L8).
+2. **Observability (L7):** still open.
    - enable Transaction Search;
    - deliver Runtime and Gateway traces;
-   - confirm that one traced session shows `execute_tool` spans and a Policy span carrying a Cedar decision.
+   - confirm that one traced session shows `execute_tool` spans, `prompt.version`, and a Policy span carrying a Cedar decision.
 3. **Scope decision on writes (L5, L6).** Three scopes were offered on 2026-10-03:
    - **minimal agent plus evaluation** of read-only exits;
    - **evaluation harness only**, while a teammate builds the agent;
    - **full**, adding sandboxed write tools.
 
-   The team put the work on hold instead of choosing.
+   The team put the work on hold instead of choosing. Since then the agent and the write tools have been built, so the second option is gone. What remains is a choice between:
+   - **read-only exits only**, on the personas and the defect cohort, with no data changes;
+   - **write cases too**, which need `EVL-` clones or a row reset first (L5, L10).
 
 ### 4.2 The smallest evaluation worth building
 
