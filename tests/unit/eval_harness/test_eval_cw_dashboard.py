@@ -115,42 +115,124 @@ def widgets_titled(b, start):
     return [w for w in b["widgets"] if w["properties"].get("title", "").startswith(start)]
 
 
-def test_the_dashboard_has_the_rows_from_the_research():
+def series(widget):
+    """The explicit LedgerLens/Eval series of a metric widget: (metric, dimensions, options)."""
+    out = []
+    for row in widget["properties"]["metrics"]:
+        if row[0] == cw_dashboard.NAMESPACE:
+            out.append((row[1], dict(zip(row[2:-1:2], row[3:-1:2])), row[-1]))
+    return out
+
+
+def test_the_dashboard_reads_as_numbered_sections_under_one_header():
     b = body()
-    titles = [w["properties"].get("title", "") for w in b["widgets"]]
-    text = json.dumps(b, ensure_ascii=False)
+    texts = [w["properties"]["markdown"] for w in b["widgets"] if w["type"] == "text"]
+    headings = [t for t in texts if t.startswith("### ")]
 
-    for start in ("Safe automated resolution", "Pass rate by evaluation", "Check failure rate",
-                  "Proposal precision", "Tool-call validity", "pass@k", "Request latency", "Unsafe hits",
-                  "Cedar AuthorizeAction denies", "Bedrock tokens per model", "Guardrail interventions",
-                  "Consent clicks", "History"):
-        assert any(t.startswith(start) for t in titles), start
-    assert "SpanEventParsingException" in text and len(text.encode("utf-8")) < 1_000_000
+    assert "SpanEventParsingException" in texts[0] and b["widgets"][0]["y"] == 0
+    assert [h[4] for h in headings] == list("12345678")
+    assert all(w["properties"].get("title") for w in b["widgets"] if w["type"] != "text")
+    assert len(json.dumps(b, ensure_ascii=False).encode("utf-8")) < 1_000_000
 
 
-def test_dimensioned_families_are_charted_with_search_over_the_published_runs():
-    [w] = widgets_titled(body(), "Check failure rate")
-    [expr] = [m[0]["expression"] for m in w["properties"]["metrics"]]
+def test_widgets_tile_the_24_column_grid_without_overlap():
+    taken = set()
+    for w in body()["widgets"]:
+        assert 0 <= w["x"] and w["x"] + w["width"] <= 24
+        cells = {(x, y) for x in range(w["x"], w["x"] + w["width"]) for y in range(w["y"], w["y"] + w["height"])}
+        assert not cells & taken, w["properties"].get("title")
+        taken |= cells
 
-    assert 'MetricName="CheckFailureRate"' in expr and "{LedgerLens/Eval,Check,Model,Prompt,Run}" in expr
-    assert 'Run="baseline-v10"' in expr and 'Run="v11"' in expr
+
+def test_series_carry_short_labels_and_the_model_colour_with_older_prompts_lighter():
+    [w] = widgets_titled(body(), "pass^1: % of runs that pass")
+    [(_, v10_dims, v10), (_, _, v11)] = series(w)
+
+    assert [v10["label"], v11["label"]] == ["DeepSeek V3.2 · v10", "DeepSeek V3.2 · v11"]
+    assert v11["color"] == "#2a78d6" and v10["color"] != v11["color"]
+    assert v10_dims == {"Model": "deepseek.v3.2", "Prompt": "v10-0085ea98", "Run": "baseline-v10"}
+    for widget in body()["widgets"]:
+        for row in widget["properties"].get("metrics", []):
+            assert "deepseek.v3.2" not in row[-1].get("label", ""), widget["properties"]["title"]
+
+
+def test_percent_charts_have_a_fixed_0_to_100_axis_and_the_80_percent_target():
+    b = body()
+    for start in ("Safe resolution", "pass^1: % of runs", "pass^3 by prompt version", "pass^1 by prompt version"):
+        [w] = widgets_titled(b, start)
+        props = w["properties"]
+        assert props["yAxis"]["left"]["min"] == 0 and props["yAxis"]["left"]["max"] == 100, start
+        assert props["annotations"]["horizontal"][0]["value"] == 80, start
+
+
+def test_eval_widgets_show_the_latest_publish_and_only_the_history_has_a_time_axis():
+    for w in body()["widgets"]:
+        props = w["properties"]
+        if w["type"] == "metric" and series(w) and not props["title"].startswith("Live"):
+            assert not props.get("setPeriodToTimeRange"), props["title"]
+            assert props["view"] != "timeSeries" or "by prompt version" in props["title"], props["title"]
+
+
+def test_history_holds_the_run_less_trend_copy_flat_between_publishes():
+    [w] = widgets_titled(body(), "pass^3 by prompt version")
+    hidden = series(w)
+    exprs = [row[0]["expression"] for row in w["properties"]["metrics"] if "expression" in row[0]]
+
+    assert all("Run" not in dims and opts["visible"] is False for _, dims, opts in hidden)
+    assert exprs == ["FILL(m0, REPEAT)", "FILL(m1, REPEAT)"]
+
+
+def test_the_drill_down_variable_swaps_one_unquoted_filter_in_sections_3_and_4_only():
+    b = body()
+    [var] = b["variables"]
+    holders = [w["properties"].get("title", "") for w in b["widgets"] if var["pattern"] in json.dumps(w)]
+
+    assert var["type"] == "pattern" and var["defaultValue"] == var["pattern"]
+    assert [v["label"] for v in var["values"]] == ["DeepSeek V3.2 · v10", "DeepSeek V3.2 · v11"]
+    assert var["pattern"] == "Run=v11 Prompt=v11-1234abcd Model=deepseek.v3.2"  # newest prompt, no quotes
+    assert holders == ["Conversation and tool quality (%)",
+                       "Failing checks: % of sessions whose case runs the check (top 10)",
+                       "Defective tool calls, tool errors, unexpected proposals (count)",
+                       "Scripted unsafe detectors: hits vs chances, typed consent (count)"]
+
+
+def test_the_drill_down_defaults_to_the_production_model():
+    haiku = {**SUMMARY, "model": cw_dashboard.PRODUCTION_MODEL}
+    b = cw_dashboard.dashboard_body([SUMMARY, haiku], {CFG: FAMILY}, "| Case |", LABELS, PROMPT_IDS, None)
+
+    assert b["variables"][0]["defaultValue"].endswith("Model=" + cw_dashboard.PRODUCTION_MODEL)
+
+
+def test_failing_checks_are_sorted_from_a_search_over_the_drill_down_config():
+    [w] = widgets_titled(body(), "Failing checks")
+    search, top = (row[0]["expression"] for row in w["properties"]["metrics"])
+
+    assert "{LedgerLens/Eval,Check,Model,Prompt,Run}" in search and 'MetricName="CheckFailureRate"' in search
+    assert top == "SORT(e0, MAX, DESC, 10)" and w["properties"]["view"] == "table"
 
 
 def test_live_rows_use_the_current_gateway_and_the_runtime_log_stream_only():
     b = body()
-    [cedar] = widgets_titled(b, "Cedar AuthorizeAction denies")
-    [consent] = widgets_titled(b, "Consent clicks")
+    [guards] = widgets_titled(b, "Live guards")
+    [decisions] = widgets_titled(b, "Customer decisions")
+    [traffic] = widgets_titled(b, "Sessions and turns")
 
-    assert "ledgerlens-bank-assistant-gateway-0emkqlikrv" in json.dumps(cedar)
-    assert consent["type"] == "log"
-    assert consent["properties"]["query"].startswith("SOURCE '/aws/bedrock-agentcore/runtimes/agent-ABC-DEFAULT'")
-    assert "runtime-logs" in consent["properties"]["query"]  # each line is also in otel-rt-logs
+    assert "ledgerlens-bank-assistant-gateway-0emkqlikrv" in json.dumps(guards)
+    assert guards["properties"]["sparkline"] and guards["properties"]["setPeriodToTimeRange"]
+    assert decisions["type"] == "log"
+    assert decisions["properties"]["query"].startswith("SOURCE '/aws/bedrock-agentcore/runtimes/agent-ABC-DEFAULT'")
+    assert "runtime-logs" in decisions["properties"]["query"]  # each line is also in otel-rt-logs
+    assert 'replace(model, "deepseek.v3.2", "DeepSeek V3.2")' in traffic["properties"]["query"]
+    assert sum(w["type"] == "log" for w in b["widgets"]) == 3
 
 
 def test_without_live_targets_the_live_rows_are_left_out():
     b = cw_dashboard.dashboard_body([SUMMARY], {CFG: FAMILY}, "| Case |", LABELS, PROMPT_IDS, None)
+    titles = [w["properties"].get("title", "") for w in b["widgets"]]
 
-    assert not widgets_titled(b, "Consent clicks") and widgets_titled(b, "Safe automated resolution")
+    assert widgets_titled(b, "Safe resolution") and not any(t.startswith("Live") for t in titles)
+    assert not any(w["type"] == "log" for w in b["widgets"])
+    assert not any("### 7" in w["properties"].get("markdown", "") for w in b["widgets"])
 
 
 def test_publish_sends_metric_data_in_chunks_and_puts_the_dashboard():
