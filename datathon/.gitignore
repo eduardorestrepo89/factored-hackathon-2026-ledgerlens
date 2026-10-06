@@ -1,0 +1,9 @@
+# Raw dataset (5.3 GB, organizer data) and derived DB — never commit
+data/
+analysis/bank.duckdb*
+
+# Organizer PDFs: the data dictionary contains AWS access keys
+*.pdf
+
+.venv/
+__pycache__/

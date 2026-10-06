@@ -1,0 +1,7 @@
+# Runtime dependencies for the explain_transaction Lambda.
+#
+# Bundled by a CDK PythonFunction (Docker, ARM64 Linux) in infra-cdk/lib/data-construct.ts:
+# psycopg[binary] ships native wheels, so plain Code.fromAsset won't work.
+# boto3/botocore are not listed: the Lambda Python 3.13 runtime ships them, with
+# the Aurora DSQL client (boto3 >= 1.35.74). Bundling them only bloats the asset.
+psycopg[binary]>=3.2,<4

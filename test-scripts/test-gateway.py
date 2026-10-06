@@ -4,12 +4,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Test AgentCore Gateway directly without frontend.
+Test AgentCore Gateway directly, without the agent or the frontend.
+
+Acts as a Cognito user: the machine token carries that user's sub in
+aws_client_metadata, as the agent's does, so the pre-token Lambda adds the
+user's customer_id claim and Cedar applies the per-customer rules.
 
 Usage:
-    uv run scripts/test-gateway.py
+    python test-scripts/test-gateway.py --user-sub <unmapped>  # unlinked login
+    python test-scripts/test-gateway.py                        # no user claims
+    python test-scripts/test-gateway.py --user-sub <sub>       # list the tools
+    python test-scripts/test-gateway.py --user-sub <sub> --customer-id <id>
 """
 
+import argparse
 import json
 import os
 import sys
@@ -69,11 +77,27 @@ def get_secret(secret_name: str) -> str:
         )
 
 
-def fetch_access_token(client_id: str, client_secret: str, token_url: str) -> str:
-    """Fetch access token using client credentials flow."""
+def fetch_access_token(
+    client_id: str, client_secret: str, token_url: str, user_sub: str | None
+) -> str:
+    """Fetch a machine token with the client credentials flow.
+
+    With user_sub, the request carries aws_client_metadata the way the agent sends
+    it (agent/utils/auth.py), so the pre-token Lambda adds that user's
+    customer_id claim. Without it, the claim is blank and Cedar allows no
+    LedgerLens tool.
+    """
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    if user_sub:
+        data["aws_client_metadata"] = json.dumps({"verified_user_id": user_sub})
+
     response = requests.post(
         token_url,
-        data=f"grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}",
+        data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=30,
     )
@@ -134,102 +158,77 @@ def call_tool(
     return response.json()
 
 
+def parse_args() -> argparse.Namespace:
+    """Read --user-sub and --customer-id."""
+    parser = argparse.ArgumentParser(
+        description="Call the AgentCore Gateway as a Cognito user, without the agent."
+    )
+    parser.add_argument(
+        "--user-sub",
+        help="Cognito sub to act as; its customer_id comes from the pre-token "
+        "Lambda's USER_CUSTOMER_IDS_MAP. A sub that isn't in the map tests an "
+        "unlinked login (blank customer_id); omitting it gives a token with no "
+        "user claims at all.",
+    )
+    parser.add_argument(
+        "--customer-id",
+        help="customer_id to pass to list_credit_cards. Omit it to only list the tools.",
+    )
+    return parser.parse_args()
+
+
 def main():
     """Main entry point."""
+    args = parse_args()
     print_section("AgentCore Gateway Direct Test")
 
-    # Get stack configuration
     stack_cfg = get_stack_config()
     print(f"Stack: {stack_cfg['stack_name']}\n")
 
-    # Fetch SSM parameters
     print("Fetching configuration...")
-    get_ssm_params(
-        stack_cfg["stack_name"], "cognito-user-pool-id", "cognito-user-pool-client-id"
-    )
-
-    # Check if gateway parameters exist
     gateway_params = get_ssm_params(
         stack_cfg["stack_name"], "gateway_url", "machine_client_id", "cognito_provider"
     )
-
-    # Get client secret from Secrets Manager
     client_secret = get_secret(f"/{stack_cfg['stack_name']}/machine_client_secret")
-
     print_msg("Configuration fetched")
 
-    # Extract gateway configuration
     gateway_url = gateway_params["gateway_url"]
-    client_id = gateway_params["machine_client_id"]
-    cognito_domain = gateway_params["cognito_provider"]
-    token_url = f"https://{cognito_domain}/oauth2/token"
-
+    token_url = f"https://{gateway_params['cognito_provider']}/oauth2/token"
     print(f"Gateway URL: {gateway_url}")
-    print(f"Token URL: {token_url}")
 
-    # Get access token
     print_section("Authentication")
-    print("Fetching access token...")
-
-    access_token = fetch_access_token(client_id, client_secret, token_url)
-    print_msg("Access token obtained")
-
-    # Test gateway
-    print_section("Gateway Test")
-    print("Calling tools/list...")
-
-    tools = list_tools(gateway_url, access_token)
-    print_msg("Gateway call successful")
-    print("\nResponse:")
-    print(json.dumps(tools, indent=2))
-
-    # Call the text analysis tool using its name from tools/list
-    print_section("Tool Call Test")
-
-    tool_list = tools.get("result", {}).get("tools", [])
-    if not tool_list:
-        print_msg("No tools found in gateway", "error")
-        sys.exit(1)
-
-    # Find the text analysis tool by base name (after the ___ target prefix)
-    target_tool = "text_analysis_tool"
-    tool_name = None
-    for t in tool_list:
-        if t["name"].endswith(f"___{target_tool}"):
-            tool_name = t["name"]
-            break
-
-    if not tool_name:
-        print_msg(
-            f"Tool '{target_tool}' not found. Available: {[t['name'] for t in tool_list]}",
-            "error",
-        )
-        sys.exit(1)
-
-    print(f"Calling tool: {tool_name}...")
-
-    tool_result = call_tool(
-        gateway_url,
-        access_token,
-        tool_name,
-        {
-            "text": "Hello world! This is a sample text for analysis. Hello again!",
-            "N": 3,
-        },
+    who = f"user {args.user_sub}" if args.user_sub else "no user (no user claims)"
+    print(f"Fetching a machine token for {who}...")
+    access_token = fetch_access_token(
+        gateway_params["machine_client_id"], client_secret, token_url, args.user_sub
     )
+    print_msg("Access token obtained", "success")
 
-    # Validate response
-    if "error" in tool_result:
-        print_msg(f"Tool returned error: {tool_result['error']}", "error")
+    print_section("tools/list")
+    tools = list_tools(gateway_url, access_token)
+    names = [t["name"] for t in tools.get("result", {}).get("tools", [])]
+    print_msg(f"{len(names)} tools listed", "success")
+    for name in names:
+        print(f"  {name}")
+
+    if not args.customer_id:
+        return
+
+    print_section("tools/call list_credit_cards")
+    tool_name = next((n for n in names if n.endswith("___list_credit_cards")), None)
+    if tool_name is None:
+        print_msg("list_credit_cards isn't listed for this token", "error")
         sys.exit(1)
 
-    if "result" not in tool_result or "content" not in tool_result["result"]:
-        print_msg(f"Unexpected response format: {json.dumps(tool_result)}", "error")
+    print(f"Calling {tool_name} with customer_id={args.customer_id}...")
+    result = call_tool(
+        gateway_url, access_token, tool_name, {"customer_id": args.customer_id}
+    )
+    print(json.dumps(result, indent=2))
+    if "error" in result or result.get("result", {}).get("isError"):
+        print_msg("The call was refused or failed", "error")
         sys.exit(1)
-
-    print_msg("Tool call successful")
-    print("\nResponse:")
-    print(json.dumps(tool_result, indent=2))
+    print_msg("Tool call successful", "success")
 
 
 if __name__ == "__main__":

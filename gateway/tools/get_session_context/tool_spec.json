@@ -1,0 +1,16 @@
+[
+  {
+    "name": "get_session_context",
+    "description": "Returns a snapshot of the customer: profile, credit cards, card transactions from the last 72 hours with risk flags (declined, foreign, above_usual_amount, new_merchant), app/web signals from the last 24 hours (FAILED_ACTION, REVIEWING_TRANSACTIONS, VIEWING_CREDIT_CARD, SEEKING_HELP) and open cases. Already called automatically at session start; call again only if the customer asks you to refresh or more than 30 minutes have passed. Lists hold at most 25 items (5 open cases). An empty list means there is nothing; a null section couldn't be loaded and is named in 'unavailable'. 'truncated' names lists that had more items. Amounts are strings with 2 decimals in the given currency.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "The authenticated customer's ID from SESSION CONTEXT."
+        }
+      },
+      "required": ["customer_id"]
+    }
+  }
+]

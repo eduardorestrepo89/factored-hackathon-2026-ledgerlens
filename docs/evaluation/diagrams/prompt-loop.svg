@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="loop-root" viewBox="0 0 960 520" width="100%" role="img" aria-labelledby="loop-title loop-desc">
+<title id="loop-title">The model and prompt series, v10 to v12</title>
+<desc id="loop-desc">Eight steps. 1: baseline on prompt v10, DeepSeek V3.2 and gpt-oss-120b, 60 sessions; both pass all 3 runs on 4 of 10 cases. 2: Claude Haiku 4.5 joins on v10, 30 sessions, 8 of 10 cases; production moves to Haiku. 3: v11, a lighter prompt, 9,667 to 8,222 characters; Haiku again 8 of 10. 4: four probe prompts, v11a to v11d, 2 to 6 sessions each, aimed at the failing cases E2b and E4a, 20 sessions for 0.40 dollars; the fourth became v12. 5: v12; Haiku reaches 97 percent pass^1 and 9 of 10 pass^3, E2b and E4a go from 0 of 3 to 3 of 3; DeepSeek and gpt-oss ran v11 and v12 in 120 sessions. The series stops at v12, for cost. 6: code review. 7: v12 released to production on Haiku. 8: a post-release check of the greeting finds an open issue: the greeting mentions app activity.</desc>
+<style>
+.loop-root .loop-track{fill:none;stroke:var(--line);stroke-width:2}
+.loop-root .loop-conn{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-dasharray:5 4}
+.loop-root .loop-hd{fill:var(--muted);stroke:var(--muted);stroke-width:0.5}
+.loop-root .loop-node{fill:var(--surface);stroke:var(--ink);stroke-width:1.5}
+.loop-root .loop-chip{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.loop-root .loop-chip-hk{fill:var(--surface);stroke:var(--haiku);stroke-width:1.5}
+.loop-root .loop-chip-hk2{fill:var(--soft);stroke:var(--haiku);stroke-width:2.5}
+.loop-root .loop-chip-ds{fill:var(--surface);stroke:var(--deepseek);stroke-width:1.5}
+.loop-root .loop-chip-go{fill:var(--surface);stroke:var(--gptoss);stroke-width:1.5}
+.loop-root .loop-chip-acc{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+.loop-root .loop-chip-pass{fill:var(--surface);stroke:var(--pass);stroke-width:1.5}
+.loop-root .loop-chip-warn{fill:var(--surface);stroke:var(--warn);stroke-width:1.5}
+.loop-root .loop-sw-hk{fill:var(--haiku);stroke:var(--haiku);stroke-width:1}
+.loop-root .loop-sw-ds{fill:var(--deepseek);stroke:var(--deepseek);stroke-width:1}
+.loop-root .loop-sw-go{fill:var(--gptoss);stroke:var(--gptoss);stroke-width:1}
+.loop-root .loop-mini{fill:var(--surface);stroke:var(--muted);stroke-width:1.25}
+.loop-root .loop-mini-on{fill:var(--surface);stroke:var(--haiku);stroke-width:2}
+.loop-root .loop-thin{fill:none;stroke:var(--muted);stroke-width:1.25}
+.loop-root .loop-stop{fill:var(--bg);stroke:var(--warn);stroke-width:1.5}
+.loop-root .loop-stop-sq{fill:var(--warn);stroke:var(--warn);stroke-width:1}
+.loop-root text{font-family:var(--body);font-size:13px;fill:var(--ink);stroke:none}
+.loop-root .loop-h{font-size:15px;font-weight:600}
+.loop-root .loop-m{fill:var(--muted)}
+.loop-root .loop-s{font-size:12.5px}
+.loop-root .loop-c{font-family:var(--mono);font-size:12.5px}
+.loop-root .loop-b{font-weight:600}
+.loop-root .loop-lab{font-size:12px;letter-spacing:.08em;fill:var(--muted);font-weight:600}
+.loop-root .loop-num{font-size:12.5px;font-weight:600;text-anchor:middle}
+.loop-root .loop-mid{text-anchor:middle}
+.loop-root .loop-ta{fill:var(--accent);font-weight:600}
+.loop-root .loop-tw{fill:var(--warn);font-weight:600}
+.loop-root .loop-tp{fill:var(--pass);font-weight:600}
+</style>
+<defs>
+<marker id="loop-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="loop-hd" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+
+<text class="loop-lab" x="24" y="26">PROMPT AND MODEL SERIES · EVAL RUNS ON THE DEPLOYED AGENT</text>
+
+<!-- row 1 track and nodes -->
+<line class="loop-track" x1="36" y1="56" x2="764" y2="56"/>
+<path class="loop-conn" d="M775,56 H926 Q942,56 942,72 V278 Q942,294 926,294 H40 Q24,294 24,310 V334 Q24,350 40,350 H55" marker-end="url(#loop-ah)"/>
+<circle class="loop-node" cx="36" cy="56" r="11"/><text class="loop-num" x="36" y="60.5">1</text>
+<circle class="loop-node" cx="218" cy="56" r="11"/><text class="loop-num" x="218" y="60.5">2</text>
+<circle class="loop-node" cx="400" cy="56" r="11"/><text class="loop-num" x="400" y="60.5">3</text>
+<circle class="loop-node" cx="582" cy="56" r="11"/><text class="loop-num" x="582" y="60.5">4</text>
+<circle class="loop-node" cx="764" cy="56" r="11"/><text class="loop-num" x="764" y="60.5">5</text>
+
+<!-- 1 baseline -->
+<text class="loop-h" x="24" y="94">Baseline on v10</text>
+<text class="loop-m loop-s" x="24" y="114">DeepSeek V3.2 and</text>
+<text class="loop-m loop-s" x="24" y="132">gpt-oss-120b, 60 sessions</text>
+<rect class="loop-chip-ds" x="24" y="146" width="168" height="24" rx="12"/>
+<circle class="loop-sw-ds" cx="38" cy="158" r="5"/>
+<text x="50" y="162.5">DeepSeek 60% · <tspan class="loop-b">4/10</tspan></text>
+<rect class="loop-chip-go" x="24" y="176" width="168" height="24" rx="12"/>
+<circle class="loop-sw-go" cx="38" cy="188" r="5"/>
+<text x="50" y="192.5">gpt-oss 47% · <tspan class="loop-b">4/10</tspan></text>
+
+<!-- 2 Haiku joins -->
+<text class="loop-h" x="206" y="94">Haiku 4.5 joins</text>
+<text class="loop-m loop-s" x="206" y="114">Claude Haiku 4.5 on v10,</text>
+<text class="loop-m loop-s" x="206" y="132">30 sessions</text>
+<rect class="loop-chip-hk" x="206" y="146" width="168" height="24" rx="12"/>
+<circle class="loop-sw-hk" cx="220" cy="158" r="5"/>
+<text x="232" y="162.5">Haiku 80% · <tspan class="loop-b">8/10</tspan></text>
+<rect class="loop-chip-acc" x="206" y="176" width="168" height="24" rx="12"/>
+<text class="loop-ta loop-mid" x="290" y="192.5">production → Haiku</text>
+
+<!-- 3 v11 -->
+<text class="loop-h" x="388" y="94">v11, lighter prompt</text>
+<text class="loop-m loop-s" x="388" y="114">9,667 → 8,222 chars,</text>
+<text class="loop-m loop-s" x="388" y="132">30 sessions on Haiku</text>
+<rect class="loop-chip-hk" x="388" y="146" width="168" height="24" rx="12"/>
+<circle class="loop-sw-hk" cx="402" cy="158" r="5"/>
+<text x="414" y="162.5">Haiku 80% · <tspan class="loop-b">8/10</tspan></text>
+<text class="loop-m loop-s" x="388" y="192.5">same score as on v10</text>
+
+<!-- 4 probes -->
+<text class="loop-h" x="570" y="94">Four probes</text>
+<text class="loop-m loop-s" x="570" y="114">v11a–v11d, 2–6 sessions</text>
+<text class="loop-m loop-s" x="570" y="132">each, aimed at E2b, E4a</text>
+<rect class="loop-chip" x="570" y="146" width="150" height="24" rx="12"/>
+<text class="loop-mid" x="645" y="162.5">20 sessions · $0.40</text>
+<line class="loop-thin" x1="580" y1="188" x2="664" y2="188"/>
+<circle class="loop-mini" cx="580" cy="188" r="9"/><text class="loop-s loop-mid" x="580" y="192">a</text>
+<circle class="loop-mini" cx="608" cy="188" r="9"/><text class="loop-s loop-mid" x="608" y="192">b</text>
+<circle class="loop-mini" cx="636" cy="188" r="9"/><text class="loop-s loop-mid" x="636" y="192">c</text>
+<circle class="loop-mini-on" cx="664" cy="188" r="9"/><text class="loop-s loop-mid" x="664" y="192">d</text>
+<text class="loop-m loop-s" x="682" y="192">d = v12</text>
+
+<!-- 5 v12 -->
+<text class="loop-h" x="752" y="94">v12</text>
+<text class="loop-m loop-s" x="752" y="114">E2b and E4a:</text>
+<text class="loop-m loop-s" x="752" y="132">0/3 → 3/3 on Haiku</text>
+<rect class="loop-chip-hk2" x="752" y="146" width="168" height="24" rx="12"/>
+<circle class="loop-sw-hk" cx="766" cy="158" r="5"/>
+<text class="loop-b" x="778" y="162.5">Haiku 97% · 9/10</text>
+<rect class="loop-chip-ds" x="752" y="176" width="168" height="24" rx="12"/>
+<circle class="loop-sw-ds" cx="766" cy="188" r="5"/>
+<text x="778" y="192.5">DeepSeek 67% · <tspan class="loop-b">4/10</tspan></text>
+<rect class="loop-chip-go" x="752" y="206" width="168" height="24" rx="12"/>
+<circle class="loop-sw-go" cx="766" cy="218" r="5"/>
+<text x="778" y="222.5">gpt-oss 67% · <tspan class="loop-b">5/10</tspan></text>
+<text class="loop-m loop-s" x="752" y="250">DeepSeek and gpt-oss on</text>
+<text class="loop-m loop-s" x="752" y="266">v11 + v12: 120 sessions</text>
+
+<!-- the stop -->
+<rect class="loop-stop" x="360" y="281" width="240" height="26" rx="13"/>
+<rect class="loop-stop-sq" x="376" y="290" width="8" height="8"/>
+<text class="loop-tw" x="392" y="298.5">Series stops at v12, for cost</text>
+
+<!-- row 2 -->
+<text class="loop-lab" x="48" y="332">AFTER THE SERIES</text>
+<line class="loop-track" x1="68" y1="350" x2="660" y2="350"/>
+<circle class="loop-node" cx="68" cy="350" r="11"/><text class="loop-num" x="68" y="354.5">6</text>
+<circle class="loop-node" cx="364" cy="350" r="11"/><text class="loop-num" x="364" y="354.5">7</text>
+<circle class="loop-node" cx="660" cy="350" r="11"/><text class="loop-num" x="660" y="354.5">8</text>
+
+<text class="loop-h" x="56" y="388">Code review</text>
+<text class="loop-m loop-s" x="56" y="408">of the v12 change,</text>
+<text class="loop-m loop-s" x="56" y="426">before any deploy</text>
+<rect class="loop-chip" x="56" y="440" width="132" height="24" rx="12"/>
+<text class="loop-mid" x="122" y="456.5">cleared to ship</text>
+
+<text class="loop-h" x="352" y="388">Release</text>
+<text class="loop-m loop-s" x="352" y="408">v12 is the production prompt</text>
+<text class="loop-m loop-s" x="352" y="426">on Claude Haiku 4.5</text>
+<rect class="loop-chip-pass" x="352" y="440" width="182" height="24" rx="12"/>
+<text class="loop-c loop-mid" x="443" y="456.5">PROMPT_VERSION = v12</text>
+
+<text class="loop-h" x="648" y="388">Post-release check</text>
+<text class="loop-m loop-s" x="648" y="408">the greeting, in the</text>
+<text class="loop-m loop-s" x="648" y="426">released agent</text>
+<rect class="loop-chip-warn" x="648" y="440" width="262" height="24" rx="12"/>
+<text class="loop-tw loop-mid" x="779" y="456.5">open: greeting mentions app activity</text>
+
+<!-- legend -->
+<text class="loop-m loop-s" x="24" y="500">Model chips: pass^1 · pass^3 (of 10 cases, those passing all 3 runs)</text>
+<circle class="loop-sw-hk" cx="456" cy="496" r="5"/><text class="loop-s" x="466" y="500">Claude Haiku 4.5</text>
+<circle class="loop-sw-ds" cx="592" cy="496" r="5"/><text class="loop-s" x="602" y="500">DeepSeek V3.2</text>
+<circle class="loop-sw-go" cx="708" cy="496" r="5"/><text class="loop-s" x="718" y="500">gpt-oss-120b</text>
+</svg>

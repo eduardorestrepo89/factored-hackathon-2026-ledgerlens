@@ -9,14 +9,19 @@ three-step process:
   3. Attach the Policy Engine to the Gateway and wait for READY status
 
 CloudFormation Events:
-- Create: Creates policy engine, cedar policy, and attaches to gateway
-- Update: Deletes all existing managed policies, creates a new one with the
+- Create: Creates policy engine, cedar policies, and attaches to gateway
+- Update: Deletes all existing managed policies, creates new ones from the
   updated document, and verifies the policy engine is still attached to the
   gateway. Uses a shared helper (_delete_managed_policies) that handles stale
   policy IDs from the PhysicalResourceId by listing and deleting all policies
   matching the managed policy naming convention.
 - Delete: Detaches policy engine from gateway, deletes all managed policies,
   and deletes the policy engine
+
+Policy Document:
+- CreatePolicy takes one Cedar statement per policy, so the document is split
+  into statements (split_cedar_statements) and each one becomes its own
+  policy. The PhysicalResourceId keeps the first policy's ID.
 
 Waiter Strategy:
 - Policy creation uses the policy_active waiter. Policy deletion uses the
@@ -41,6 +46,144 @@ client = boto3.client("bedrock-agentcore-control")
 # Polling configuration for gateway
 GATEWAY_POLL_INTERVAL_SECONDS = 5
 GATEWAY_TIMEOUT_SECONDS = 300
+
+# The AgentCore API enforces a 48-character limit on policy names. A name is
+# {engine_name[:31]}_cp{index}_{timestamp}: 31 + 3 + 3 + 1 + 10 = 48 for up to
+# 999 statements.
+POLICY_NAME_ENGINE_CHARS = 31
+
+
+def split_cedar_statements(policy_document: str) -> list[str]:
+    """
+    Split a Cedar policy document into its statements.
+
+    Splits on the semicolons that end statements, skipping semicolons inside
+    string literals and // comments. Comments are dropped and trailing spaces
+    are trimmed from each line.
+
+    Args:
+        policy_document: The Cedar policy document.
+
+    Returns:
+        The statements in document order, each ending with a semicolon.
+
+    Raises:
+        ValueError: If text is left after the last semicolon, or the document
+            has no statements.
+    """
+    statements = []
+    current = []
+    in_string = False
+    escaped = False
+    in_comment = False
+    i = 0
+    while i < len(policy_document):
+        char = policy_document[i]
+        if in_comment:
+            if char == "\n":
+                in_comment = False
+                current.append(char)
+        elif in_string:
+            current.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif policy_document.startswith("//", i):
+            in_comment = True
+        else:
+            current.append(char)
+            if char == '"':
+                in_string = True
+            elif char == ";":
+                statements.append(_clean_statement("".join(current)))
+                current = []
+        i += 1
+
+    if "".join(current).strip():
+        raise ValueError(
+            "Cedar policy document has text after the last statement "
+            "(missing a closing semicolon?)"
+        )
+    if not statements:
+        raise ValueError("Cedar policy document has no Cedar statements")
+    return statements
+
+
+def _clean_statement(statement: str) -> str:
+    """Trim blank lines around a statement and trailing spaces on each line."""
+    lines = [line.rstrip() for line in statement.strip().splitlines()]
+    return "\n".join(lines)
+
+
+def policy_name(engine_name: str, index: int) -> str:
+    """
+    Build a managed policy name that fits the 48-character API limit.
+
+    Args:
+        engine_name: The Policy Engine name.
+        index: The statement's 1-based position in the document.
+
+    Returns:
+        {engine_name[:31]}_cp{index}_{timestamp}
+    """
+    return f"{_policy_name_prefix(engine_name)}{index}_{int(time.time())}"
+
+
+def _policy_name_prefix(engine_name: str) -> str:
+    """Return the name prefix shared by every policy this resource manages."""
+    return f"{engine_name[:POLICY_NAME_ENGINE_CHARS]}_cp"
+
+
+def _is_managed_policy_name(engine_name: str, name: str) -> bool:
+    """
+    Return True for policies this resource created.
+
+    Matches the current prefix and the earlier {engine_name}_cp_{timestamp}
+    names, so updates still clean up policies from older deploys.
+    """
+    return name.startswith(_policy_name_prefix(engine_name)) or name.startswith(
+        f"{engine_name}_cp"
+    )
+
+
+def _create_policies(
+    policy_engine_id: str, engine_name: str, statements: list[str], description: str
+) -> list[str]:
+    """
+    Create one Cedar policy per statement and wait for each to become ACTIVE.
+
+    Args:
+        policy_engine_id: The Policy Engine identifier.
+        engine_name: The Policy Engine name, used for the policy names.
+        statements: The Cedar statements, from split_cedar_statements.
+        description: The description given to every policy.
+
+    Returns:
+        The created policy IDs, in statement order.
+    """
+    policy_ids = []
+    for index, statement in enumerate(statements, start=1):
+        name = policy_name(engine_name, index)
+        logger.info(f"Creating Cedar Policy {index}/{len(statements)}: {name}")
+        policy_response = client.create_policy(
+            policyEngineId=policy_engine_id,
+            name=name,
+            description=description,
+            definition={"cedar": {"statement": statement}},
+        )
+        policy_id = policy_response["policyId"]
+        logger.info(f"Cedar Policy created: {policy_id}")
+
+        # Wait for Cedar Policy to become ACTIVE using official waiter
+        logger.info(f"Waiting for Cedar Policy {policy_id} to become ACTIVE...")
+        waiter = client.get_waiter("policy_active")
+        waiter.wait(policyEngineId=policy_engine_id, policyId=policy_id)
+        logger.info(f"Cedar Policy {policy_id} is now ACTIVE")
+        policy_ids.append(policy_id)
+    return policy_ids
 
 
 def handler(event: dict, context: dict) -> dict:
@@ -77,21 +220,23 @@ def handler(event: dict, context: dict) -> dict:
 
 def handle_create(props: dict) -> dict:
     """
-    Create Policy Engine, Cedar Policy, and attach to Gateway.
+    Create Policy Engine, Cedar Policies, and attach to Gateway.
 
     Steps:
       1. Create Policy Engine -> wait for ACTIVE (official waiter)
-      2. Create Cedar Policy -> wait for ACTIVE (official waiter)
+      2. Create one Cedar Policy per statement -> wait for ACTIVE (official waiter)
       3. Attach Policy Engine to Gateway -> wait for READY (custom polling)
 
     Args:
         props: ResourceProperties from CloudFormation event.
 
     Returns:
-        Response with PhysicalResourceId containing engine and policy IDs.
+        Response with PhysicalResourceId containing the engine ID and the first
+        policy ID.
     """
     gateway_id = props["GatewayIdentifier"]
-    policy_document = props["PolicyDocument"]
+    # Split first so a bad document fails before anything is created.
+    statements = split_cedar_statements(props["PolicyDocument"])
     description = props.get("Description", "Cedar policy for AgentCore Gateway")
     engine_name = props["PolicyEngineName"]
 
@@ -115,25 +260,10 @@ def handle_create(props: dict) -> dict:
     engine_details = client.get_policy_engine(policyEngineId=policy_engine_id)
     policy_engine_arn = engine_details["policyEngineArn"]
 
-    # Step 2: Create Cedar Policy
-    # Policy name format: {engine_name}_cp_{timestamp}
-    # The AgentCore API enforces a 48-character limit on policy names.
-    policy_name = f"{engine_name}_cp_{int(time.time())}"
-    logger.info(f"Creating Cedar Policy: {policy_name}")
-    policy_response = client.create_policy(
-        policyEngineId=policy_engine_id,
-        name=policy_name,
-        description=description,
-        definition={"cedar": {"statement": policy_document}},
-    )
-    policy_id = policy_response["policyId"]
-    logger.info(f"Cedar Policy created: {policy_id}")
-
-    # Wait for Cedar Policy to become ACTIVE using official waiter
-    logger.info(f"Waiting for Cedar Policy {policy_id} to become ACTIVE...")
-    waiter = client.get_waiter("policy_active")
-    waiter.wait(policyEngineId=policy_engine_id, policyId=policy_id)
-    logger.info(f"Cedar Policy {policy_id} is now ACTIVE")
+    # Step 2: Create one Cedar Policy per statement
+    policy_id = _create_policies(
+        policy_engine_id, engine_name, statements, description
+    )[0]
 
     # Step 3: Attach Policy Engine to Gateway
     _attach_policy_engine_to_gateway(gateway_id, policy_engine_arn)
@@ -153,8 +283,8 @@ def handle_create(props: dict) -> dict:
 
 def handle_update(event: dict, props: dict) -> dict:
     """
-    Update Cedar Policy by deleting all existing managed policies and creating
-    a new one with the updated policy document.
+    Update Cedar Policies by deleting all existing managed policies and
+    creating one per statement of the updated policy document.
 
     Also verifies the Policy Engine is still attached to the Gateway and
     re-attaches if needed. This handles cases where a previous failed
@@ -176,7 +306,8 @@ def handle_update(event: dict, props: dict) -> dict:
     policy_engine_id, old_policy_id = physical_id.split("|")
 
     gateway_id = props["GatewayIdentifier"]
-    policy_document = props["PolicyDocument"]
+    # Split first so a bad document fails before the current policies are deleted.
+    statements = split_cedar_statements(props["PolicyDocument"])
     description = props.get("Description", "Cedar policy for AgentCore Gateway")
 
     # Delete all policies managed by this Custom Resource.
@@ -188,26 +319,11 @@ def handle_update(event: dict, props: dict) -> dict:
     # prior updates.
     _delete_managed_policies(policy_engine_id, old_policy_id, props)
 
-    # Create new policy
-    # Policy name format: {engine_name}_cp_{timestamp}
-    # The AgentCore API enforces a 48-character limit on policy names.
+    # Create one new policy per statement
     engine_name = props["PolicyEngineName"]
-    policy_name = f"{engine_name}_cp_{int(time.time())}"
-    logger.info(f"Creating new Cedar Policy: {policy_name}")
-    policy_response = client.create_policy(
-        policyEngineId=policy_engine_id,
-        name=policy_name,
-        description=description,
-        definition={"cedar": {"statement": policy_document}},
-    )
-    new_policy_id = policy_response["policyId"]
-    logger.info(f"New Cedar Policy created: {new_policy_id}")
-
-    # Wait for new policy to become ACTIVE using official waiter
-    logger.info(f"Waiting for Cedar Policy {new_policy_id} to become ACTIVE...")
-    waiter = client.get_waiter("policy_active")
-    waiter.wait(policyEngineId=policy_engine_id, policyId=new_policy_id)
-    logger.info(f"Cedar Policy {new_policy_id} is now ACTIVE")
+    new_policy_id = _create_policies(
+        policy_engine_id, engine_name, statements, description
+    )[0]
 
     # Verify the Policy Engine is still attached to the Gateway.
     # A previous failed deployment rollback or manual change may have detached it.
@@ -341,7 +457,7 @@ def _delete_managed_policies(
         for p in policies.get("policies", []):
             p_id = p["policyId"]
             p_name = p.get("name", "")
-            if p_name.startswith(f"{engine_name}_cp"):
+            if _is_managed_policy_name(engine_name, p_name):
                 logger.info(f"Deleting remaining policy: {p_id} ({p_name})")
                 try:
                     client.delete_policy(

@@ -1,221 +1,291 @@
 # Cedar Policy Guide
 
-This document covers how to write, manage, and extend Cedar policies for AgentCore Gateway. For the identity propagation architecture and component setup, see [Identity Propagation & Cedar Policy Guide](IDENTITY_POLICY.md).
+This guide covers the Cedar policy that controls the LedgerLens Gateway tools: what it says, how it is deployed, and how to change it safely. The second half is a general reference for writing Cedar policies for AgentCore Gateway.
 
-## Understanding Claims (Custom vs. Standard)
+For how the signed-in user's identity becomes the `customer_id` claim the policy reads, see [Identity Propagation & Cedar Policy](IDENTITY_POLICY.md).
 
-Cedar policies reference JWT claims via `principal.getTag("claim_name")`. These claims come in two categories:
+## The LedgerLens policy
 
-### Custom Claims (Application-Defined)
+`gateway/policies/policy.cedar` holds three statements. Together they say: a login can use the tools only for its own linked customer, and the two write tools need the customer's explicit confirmation.
 
-Custom claims are injected by the V3 Pre-Token Lambda via `claimsToAddOrOverride`. They are not part of the standard JWT/OIDC claim set — they are defined based on the application's access control needs.
+### Statement 1: permit a linked customer
 
-**Claims in this demo:**
+```cedar
+permit(
+  principal is AgentCore::OAuthUser,
+  action in [
+    AgentCore::Action::"list-credit-cards-target___list_credit_cards",
+    AgentCore::Action::"list-card-transactions-target___list_card_transactions",
+    AgentCore::Action::"get-session-context-target___get_session_context",
+    AgentCore::Action::"fraud-detection-target___transaction_fraud_detection",
+    AgentCore::Action::"explain-transaction-target___explain_transaction",
+    AgentCore::Action::"classify-call-type-target___classify_call_type",
+    AgentCore::Action::"block-credit-card-target___block_credit_card",
+    AgentCore::Action::"open-claim-target___open_claim",
+    AgentCore::Action::"human-agent-hand-off-target___human_agent_hand_off"
+  ],
+  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
+)
+when { principal.hasTag("customer_id") && principal.getTag("customer_id") != "" };
+```
 
-| Claim | Purpose | Example Value |
-|-------|---------|---------------|
-| `user_id` | Authenticated user's identity | `"<cognito-sub-uuid>"` |
-| `department` | User's organizational unit | `"finance"` |
-| `role` | User's permission level | `"admin"` |
+The pre-token Lambda sets `customer_id` to `""` for a login that isn't linked to a customer, and adds no claims at all to a token requested without a user. Neither matches, so Cedar's default deny applies and that login gets no tools.
 
-**Additional custom claim examples:**
+### Statement 2: forbid another customer's data
 
-| Claim | Use Case | Cedar Usage |
-|-------|----------|-------------|
+```cedar
+forbid(
+  principal is AgentCore::OAuthUser,
+  action in [ /* the same 9 actions */ ],
+  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
+)
+when {
+  principal.hasTag("customer_id") &&
+  context.input.customer_id != principal.getTag("customer_id")
+};
+```
+
+- **Why:** the model writes the tool arguments, and a prompt injection could ask it for another customer's data. This statement makes that impossible at the Gateway, whatever the agent sends.
+- **Why the actions are listed:** AgentCore rejects a `forbid` over all actions (a bare `action`) as "Overly Restrictive", because it would also cover tools that don't exist yet.
+- **No `has` guard on `customer_id`:** every listed tool requires `customer_id` in its `tool_spec.json`.
+
+### Statement 3: forbid unconfirmed writes
+
+```cedar
+forbid(
+  principal is AgentCore::OAuthUser,
+  action in [
+    AgentCore::Action::"block-credit-card-target___block_credit_card",
+    AgentCore::Action::"open-claim-target___open_claim"
+  ],
+  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
+)
+when {
+  !(context.input has customer_confirmed) ||
+  context.input.customer_confirmed != true
+};
+```
+
+- **Why:** blocking a card and opening a claim change the customer's account, so they need the customer's explicit Yes. The agent's `ConfirmationHook` sets `customer_confirmed` to `true` only after the customer taps Yes in the chat.
+- **Why the `has` guard matters:** without it, a call that omits `customer_confirmed` makes the condition fail to evaluate. Cedar skips a `forbid` whose condition errors, so the call would be **allowed**. `!(context.input has customer_confirmed) ||` makes a missing argument a denial.
+
+### How they combine
+
+Cedar is deny-by-default, and a matching `forbid` always wins over a `permit`.
+
+| Token `customer_id` | Call | Result |
+|---|---|---|
+| absent or `""` | any tool | Denied (no permit matches); hidden from `tools/list` |
+| `CLI-A` | `list_credit_cards(customer_id="CLI-A")` | Allowed |
+| `CLI-A` | `list_credit_cards(customer_id="CLI-B")` | Denied by statement 2 |
+| `CLI-A` | `block_credit_card(customer_id="CLI-A", customer_confirmed=false, ...)` | Denied by statement 3 |
+| `CLI-A` | `block_credit_card(customer_id="CLI-A", customer_confirmed=true, ...)` | Allowed |
+
+The agent already applies the first three rows itself: `CustomerIdHook` overwrites `customer_id` with the token's value and cancels the call when it is blank. Cedar is the backstop for when the agent code is wrong or bypassed.
+
+## How the policy is deployed
+
+### From file to policies
+
+1. `createAgentCoreGateway()` in `infra-cdk/lib/backend-construct.ts` reads `policy.cedar` at synth time. It drops every line that starts with `//` and replaces `{{GATEWAY_ARN}}` with the Gateway's ARN.
+2. The result goes to the `GatewayPolicy` custom resource as `PolicyDocument`.
+3. The custom resource Lambda (`infra-cdk/lambdas/cedar-policy/index.py`) splits the document into statements with `split_cedar_statements()`. It splits on the semicolons that end statements, skips semicolons inside strings and `//` comments, and fails if text is left after the last semicolon. `CreatePolicy` takes one statement per policy, so each statement becomes its own policy.
+
+### Lifecycle
+
+| CloudFormation event | What the Lambda does |
+|---|---|
+| Create | Creates the engine `ledgerlens_bank_assistant_policy_engine`, one policy per statement, then attaches the engine to the Gateway in `ENFORCE` mode |
+| Update (the file changed) | Deletes every policy it manages, creates one per statement again, and re-attaches the engine if a failed rollback detached it. The engine itself is kept. |
+| Delete | Detaches the engine from the Gateway, deletes the policies, deletes the engine |
+
+Notes:
+- **Same `PhysicalResourceId` on update.** An update returns the ID that Create returned, so CloudFormation doesn't treat it as a replacement. A replacement would run Delete on the old resource and detach Cedar from the Gateway.
+- **Brief deny-all during an update.** Between deleting the old policies and activating the new ones, the engine has no `permit`, so every tool call is denied. Don't deploy a policy change during a demo.
+- **Policy names.** The API limits names to 48 characters. Names are `<engine name, first 31 characters>_cp<n>_<unix time>`: `ledgerlens_bank_assistant_polic_cp1_<ts>`, `_cp2_`, `_cp3_`. On update, the Lambda also deletes policies named with the older `<engine>_cp_<ts>` format.
+- **Order.** The custom resource depends on every Gateway target, because `CreatePolicy` fails for an action whose target doesn't exist yet.
+- **Why a custom resource.** The project manages the engine and policies with a custom resource Lambda. `aws-cdk-lib` 2.260 (the version in `infra-cdk/package.json`) also has `CfnPolicyEngine` and `CfnPolicy` L1 constructs, which the project doesn't use.
+
+To apply a change, edit `policy.cedar` and deploy the main stack:
+
+```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant
+```
+
+### What catches mistakes
+
+**Before deploy:** `cd infra-cdk && npm test`. Synthesizing the main stack takes about 2 minutes.
+- `infra-cdk/test/policy-cedar.test.ts` checks that every `forbid` lists its actions, and that statement 3 covers both write tools with the `has` guard.
+- `infra-cdk/test/backend-gateway.test.ts` checks that the policy's actions are exactly the deployed targets with their `tool_spec.json` names, and that the policy waits for every target.
+
+**At deploy:** `CreatePolicy` validates each statement against the Gateway's tools. A rejected statement fails the deploy and CloudFormation rolls back; nothing is silently denied. Causes seen or documented:
+- an action whose target doesn't exist;
+- a `forbid` over all actions ("Overly Restrictive");
+- a reference to a field the tool schema doesn't have.
+
+The error is in `/aws/lambda/ledgerlens-bank-assistant-cedar-policy`.
+
+**What the deploy doesn't catch:** a tool in `toolTargets` but missing from statement 1 deploys fine, and Cedar then denies it for everyone. Only the `backend-gateway` test catches that, so run it.
+
+## Action name format
+
+Cedar action names are `<TargetName>___<tool_name>` (three underscores):
+- `TargetName` is the `gatewayTargetName` from `toolTargets` in `backend-construct.ts`: `<slug>-target`, or the override (`fraud-detection-target`).
+- `tool_name` is the `name` in the tool's `tool_spec.json`.
+- Combined: `list-credit-cards-target___list_credit_cards`.
+
+Names are case-sensitive.
+
+## Claims available to Cedar
+
+Cedar reads JWT claims with `principal.getTag("claim_name")`. The Gateway's custom JWT authorizer maps the token's claims to principal tags, so a new claim needs no Gateway change.
+
+### Custom claims (added by the pre-token Lambda)
+
+The V3 pre-token Lambda (`infra-cdk/lambdas/pretoken-v3/index.py`) adds these through `claimsToAddOrOverride`, but only when the token request carried a `verified_user_id`:
+
+| Claim | Value | Used by the policy |
+|---|---|---|
+| `customer_id` | The customer linked to the login in `USER_CUSTOMER_IDS_MAP`, or `""` | Yes: statements 1 and 2 |
+| `user_id` | The user's Cognito `sub` | No |
+| `department` | Always `"guest"` | No |
+| `role` | Always `"viewer"` | No |
+
+`department` and `role` come from the template the project started from. Their map (`USER_ROLE_MAP`) holds only placeholder keys, so every user gets the default. See [IDENTITY_POLICY.md](IDENTITY_POLICY.md#v3-pre-token-lambda).
+
+To add a claim, put it in the Lambda's `claimsToAddOrOverride` dict and read it with `principal.getTag("claim_name")`. Other claim ideas:
+
+| Claim | Use case | Cedar usage |
+|---|---|---|
 | `tenant_id` | Multi-tenant isolation | `principal.getTag("tenant_id") == "example-corp"` |
 | `clearance_level` | Tiered data access | `principal.getTag("clearance_level") == "top-level"` |
 | `region` | Geo-restricted access | `principal.getTag("region") == "us-east-1"` |
 | `runtime_env` | Runtime-level isolation | `principal.getTag("runtime_env") == "production"` |
 
-To add a custom claim: inject it in the Pre-Token Lambda's `claimsToAddOrOverride` dict, then reference it in Cedar via `principal.getTag("claim_name")`. No Gateway configuration change is needed — the CUSTOM_JWT authorizer maps all JWT claims to Cedar tags automatically.
+### Standard claims (set by Cognito)
 
-### Standard Claims (Cognito-Managed)
+Cognito adds these to every token. The pre-token Lambda can't override them.
 
-Standard claims are automatically included in every token by Cognito. They cannot be overridden by the Pre-Token Lambda.
+| Claim | Description |
+|---|---|
+| `sub` | Subject; the app client ID for a machine token |
+| `iss` | Token issuer (the user pool URL) |
+| `client_id` | The app client ID |
+| `token_use` | Always `"access"` |
+| `scope` | OAuth scopes granted |
+| `exp` / `iat` / `jti` | Token timing and ID |
 
-| Claim | Description | Modifiable? |
-|-------|-------------|-------------|
-| `sub` | Subject identifier (app client ID for M2M) | No |
-| `iss` | Token issuer (Cognito user pool URL) | No |
-| `client_id` | The app client ID | No |
-| `token_use` | Always `"access"` | No |
-| `scope` | OAuth scopes granted | No |
-| `exp` / `iat` / `jti` | Token timing and ID | No |
+They are also tags, but they suit infrastructure checks better than business rules.
 
-Standard claims are also accessible via `principal.getTag()` in Cedar but are typically used for infrastructure-level checks rather than business logic.
+### What isn't available as a claim
 
-### What's NOT Available as a Claim
+| Data | Why | Alternative |
+|---|---|---|
+| Request headers, IP | Not exposed to Cedar | None |
+| Runtime ARN | Not in the Cedar schema | A `runtime_env` claim (see [Runtime-level access control](IDENTITY_POLICY.md#runtime-level-access-control)) |
+| Tool input | Not a claim | `context.input.<field>` |
 
-| Data | Why Not Available | Alternative |
-|------|-------------------|-------------|
-| Request headers / IP | Not exposed to Cedar | N/A (not supported) |
-| Runtime ARN | Not in Cedar schema | Inject `runtime_env` via Pre-Token Lambda (see [Runtime-Level Access Control](IDENTITY_POLICY.md#runtime-level-access-control)) |
-| Tool input parameters | Not a claim | Use `context.input.<field>` in Cedar |
+## Deny-by-default
 
-## Policy File Location
+If no `permit` matches a request, Cedar denies it. You don't need a `forbid` to keep someone out: leave them out of the `permit`. That is how an unlinked login is blocked: statement 1 requires a non-empty `customer_id`, and nothing else permits.
 
-`gateway/policies/policy.cedar` — edit this file and run `cdk deploy` to apply changes. The Custom Resource Lambda detects the change and updates the policy in-place without recreating the Policy Engine.
+Use `forbid` to cut exceptions out of a broad `permit`, as statements 2 and 3 do.
 
-## Action Name Format
+## Tool discovery vs execution
 
-Cedar action names follow the format: `<TargetName>___<tool_name>` (triple underscore).
+The policy engine checks requests at two points.
 
-- **TargetName** comes from the `CfnGatewayTarget` name in `backend-stack.ts` (e.g., `sample-tool-target`)
-- **tool_name** comes from `tool_spec.json` (e.g., `text_analysis_tool`)
-- Combined: `sample-tool-target___text_analysis_tool`
+### 1. Discovery (`tools/list`): tool filtering
 
-These are case-sensitive. A mismatch silently denies all requests even when the policy logic looks correct.
-
-## Deny-by-Default
-
-Cedar is deny-by-default: if no `permit` statement matches a request, it is automatically denied. An explicit `forbid` statement is not needed to block access — simply omit the department from the permit's conditions.
-
-For example, to deny guests, remove `"guest"` from the department list. No `forbid` statement is required.
-
-## Tool Discovery vs Execution
-
-The AgentCore Policy Engine enforces authorization at **two points** in the tool lifecycle:
-
-### 1. Discovery (`tools/list`) — Tool Filtering
-
-When the Runtime calls `tools/list` on the Gateway, the Policy Engine evaluates **every tool** against the caller's identity using `PartiallyAuthorizeActions`. Tools that the caller is not permitted to use are **removed from the response**. The agent never sees them.
+When the agent calls `tools/list`, the engine evaluates every tool against the caller's claims with `PartiallyAuthorizeActions`. Tools the caller can't use are removed from the response, so the agent never sees them.
 
 ```
-Agent → Runtime → Gateway tools/list → Policy Engine (PartiallyAuthorizeActions)
-                                         ↓
-                                    Evaluates each tool against principal's claims
-                                         ↓
-                                    Returns ONLY permitted tools
-                                         ↓
-                              Agent receives filtered tool list
+Agent → Gateway tools/list → Policy engine (PartiallyAuthorizeActions)
+                                 ↓
+                         each tool vs the principal's claims
+                                 ↓
+                         only permitted tools are returned
 ```
 
-**Effect:** If a user with `department=guest` calls `tools/list` while Version 2 (guest denied) is active, the `text_analysis_tool` will NOT appear in the response. The agent has no knowledge the tool exists and will not attempt to call it.
+### 2. Execution (`tools/call`): full context
 
-### 2. Execution (`tools/call`) — Full Context Enforcement
-
-When the agent calls a specific tool, the Policy Engine evaluates the request with **full context** — including the tool's input parameters (`context.input`). This is a stricter evaluation than discovery because it has access to the actual request payload.
+When the agent calls a tool, the engine evaluates it with `AuthorizeAction`, including the tool's arguments in `context.input`. This is stricter, because it sees the actual request.
 
 ```
-Agent → Runtime → Gateway tools/call → Policy Engine (AuthorizeAction)
-                                         ↓
-                                    Evaluates principal claims + context.input
-                                         ↓
-                                    Allow → execute tool
-                                    Deny  → return authorization error
+Agent → Gateway tools/call → Policy engine (AuthorizeAction)
+                                 ↓
+                         principal's claims + context.input
+                                 ↓
+                         allow → the Lambda runs
+                         deny  → authorization error to the agent
 ```
 
-**Why both?** A tool might pass discovery filtering (the user is generally allowed to use it) but fail at execution time due to input-specific conditions. For example:
+### What this means for LedgerLens
 
-```cedar
-// User can discover the refund tool (passes tools/list filtering)
-// But execution is denied if amount > 1000 (fails tools/call check)
-permit(
-  principal is AgentCore::OAuthUser,
-  action == AgentCore::Action::"billing-target___process_refund",
-  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
-)
-when {
-  principal.hasTag("department") &&
-  principal.getTag("department") == "finance" &&
-  context.input.amount < 1000
-};
-```
+- Statement 1 depends only on the principal, so it acts at discovery: an unlinked login's `tools/list` comes back empty.
+- Statements 2 and 3 read `context.input`, which exists only on `tools/call`. A linked login sees all 9 tools, and the customer and confirmation checks run when a tool is called.
 
-In this example, a finance user would see `process_refund` in `tools/list` (they're in the finance department), but if they try to process a refund of $5000, the `tools/call` would be denied because `context.input.amount < 1000` fails.
-
-### Verifying Discovery Filtering in CloudWatch
-
-To confirm that denied tools are being filtered from `tools/list`:
-
-1. Enable tracing on both the Runtime and Gateway (see [Verifying Policy Decisions via Tracing](IDENTITY_POLICY.md#verifying-policy-decisions-via-tracing))
-2. Trigger a query from the frontend
-3. In CloudWatch → `aws/spans` log group, filter for `PartiallyAuthorizeActions`
-4. The span contains:
-   - `aws.agentcore.policy.allowed_tools`: tools returned to the agent
-   - `aws.agentcore.policy.denied_tools`: tools filtered out
-   - `aws.agentcore.gateway.policy.mode`: should show `ENFORCE`
-
-> **Verifying at the Runtime level:** Add a log line in the agent code to confirm which tools the agent received after Cedar policy filtering. Examples for the two primary agent patterns:
->
-> **Strands pattern** (`patterns/strands-single-agent/basic_agent.py`) — add after `Agent()` creation:
-> ```python
-> agent = Agent(
->     name="strands_agent",
->     tools=[gateway_client, code_tools.execute_python_securely],
->     ...
-> )
-> specs = agent.tool_registry.get_all_tool_specs()
-> logger.info(f"[GATEWAY] Raw tool specs: {specs}")
-> return agent
-> ```
-> **Where to find:** CloudWatch → Log groups → `/aws/bedrock-agentcore/runtimes/{runtime_name}` → log stream `otel-rt-logs`. Search for `[GATEWAY] Raw tool specs`.
->
-> **LangGraph pattern** (`patterns/langgraph-single-agent/langgraph_agent.py`) — add after `mcp_client.get_tools()`:
-> ```python
-> mcp_client = await create_gateway_mcp_client(user_id)
-> tools = await mcp_client.get_tools()
-> logger.info(f"[GATEWAY] Tools loaded: {[t.name for t in tools]}")
-> ```
-> **Where to find:** CloudWatch → Log groups → `/aws/bedrock-agentcore/runtimes/{runtime_name}` → log stream `otel-rt-logs`. Search for `[GATEWAY] Tools loaded`.
+For example, `block_credit_card` is listed for every linked customer, but a call without `customer_confirmed: true` is denied.
 
 ### Summary
 
-| Stage | API | Evaluation | What Happens on Deny |
-|-------|-----|-----------|---------------------|
-| Discovery (`tools/list`) | `PartiallyAuthorizeActions` | Principal claims only (no input context) | Tool is hidden — agent never sees it |
-| Execution (`tools/call`) | `AuthorizeAction` | Principal claims + `context.input` | Request rejected — agent gets authorization error |
+| Stage | API | Evaluates | On deny |
+|---|---|---|---|
+| Discovery (`tools/list`) | `PartiallyAuthorizeActions` | Principal claims only | Tool hidden from the agent |
+| Execution (`tools/call`) | `AuthorizeAction` | Principal claims + `context.input` | Call rejected with an authorization error |
 
-## Adding New Tools
+### Checking what a login can see
 
-When adding a new Gateway target and tool:
+- `python test-scripts/test-gateway.py --user-sub <sub>` prints the `tools/list` result for that login (see [GATEWAY.md](GATEWAY.md#testing-the-gateway-directly)).
+- To see the engine's decisions, turn on tracing (see [Verifying policy decisions via tracing](IDENTITY_POLICY.md#verifying-policy-decisions-via-tracing)). Then filter the `aws/spans` log group for `PartiallyAuthorizeActions`. The span has:
+  - `aws.agentcore.policy.allowed_tools`: tools returned to the agent
+  - `aws.agentcore.policy.denied_tools`: tools filtered out
+  - `aws.agentcore.gateway.policy.mode`: should be `ENFORCE`
 
-1. Create the new Lambda tool and `CfnGatewayTarget` in `backend-stack.ts`
-2. Add a new `permit` statement to `policy.cedar` with the correct action name
-3. Run `cdk deploy`
+## Cedar schema constraints
 
-Each `create_policy` call creates one policy containing one Cedar statement. The Custom Resource currently creates a single policy per deploy. To add multiple policies (e.g., separate permit and forbid statements), update the Custom Resource Lambda to call `create_policy()` once per statement.
+AgentCore validates policies against a schema it builds from the Gateway's tool schemas. A policy that references something outside it fails at `CreatePolicy`, and the deploy rolls back.
 
-## Cedar Schema Constraints
+**Supported:**
 
-AgentCore Gateway validates Cedar policies against an auto-generated schema derived from the Gateway's MCP tool manifest. Policies that reference unsupported fields will fail during creation, causing CloudFormation rollback.
-
-**Supported in Cedar policies:**
-
-| Element | What Can Be Referenced | Example |
-|---------|----------------------|--------|
+| Element | What it can reference | Example |
+|---|---|---|
 | `principal` | Must be `AgentCore::OAuthUser` | `principal is AgentCore::OAuthUser` |
-| `principal.hasTag()` / `principal.getTag()` | Any JWT claim mapped by the CUSTOM_JWT authorizer | `principal.getTag("department")` |
-| `action` | Tool actions in `<TargetName>___<tool_name>` format | `AgentCore::Action::"sample-tool-target___text_analysis_tool"` |
+| `principal.hasTag()` / `getTag()` | Any JWT claim | `principal.getTag("customer_id")` |
+| `action` | Tool actions, `<TargetName>___<tool_name>` | `AgentCore::Action::"open-claim-target___open_claim"` |
 | `resource` | The Gateway ARN | `AgentCore::Gateway::"arn:aws:..."` |
-| `context.input` | Tool input parameters as defined in the MCP manifest | `context.input.query` |
+| `context.input` | The tool's arguments, as defined in its schema | `context.input.customer_id` |
+| `context.system.now` | The request time, for [time-based rules](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-time-based.html) | `context.system.now` |
 
-**NOT supported in Cedar policies:**
+**Not supported:**
 
 | Element | Why |
-|---------|-----|
-| `context.runtime.arn` | Not in the schema — only `context.input` is available |
-| Custom entity types | Cannot define entities outside the `AgentCore` namespace |
-| Custom attributes on `OAuthUser` | Use `hasTag()`/`getTag()` instead of direct property access |
-| Request metadata (headers, IP, etc.) | Not exposed to Cedar |
+|---|---|
+| `context.runtime.arn` | Not in the schema |
+| Custom entity types | Entities can't be defined outside the `AgentCore` namespace |
+| Custom attributes on `OAuthUser` | Use `hasTag()`/`getTag()` instead |
+| Request metadata (headers, IP) | Not exposed to Cedar |
 
-If access control decisions depend on information not available in `context.input`, inject it as a JWT claim via the Pre-Token Lambda and access it via `principal.getTag()`. See [Runtime-Level Access Control](IDENTITY_POLICY.md#runtime-level-access-control) for an example of this pattern.
+If a decision needs data that isn't in `context.input`, add it as a claim in the pre-token Lambda and read it with `principal.getTag()`. [Runtime-level access control](IDENTITY_POLICY.md#runtime-level-access-control) shows this pattern.
 
-## Cedar Policy Capabilities
+## Cedar policy capabilities
 
-Cedar is a purpose-built policy language designed for authorization. This section documents what can be expressed in Cedar policies for AgentCore Gateway, with practical examples for each capability.
+This section shows what else Cedar can express for AgentCore Gateway.
 
-> **Already demonstrated in this project:**
-> - Identity-based access (`principal.getTag("department") == "finance"`) — see [Cedar Policy File](IDENTITY_POLICY.md#cedar-policy-file) Version 1 & 2
-> - Multi-value OR conditions (`department == "finance" || department == "engineering"`) — see Version 1 policy
->
-> The capabilities below show **additional patterns** that can be implemented using the same infrastructure.
+> **Already used in `policy.cedar`:**
+> - Claim-based access: `principal.getTag("customer_id") != ""` (statement 1)
+> - Multi-tool policies: `action in [...]` (all three statements)
+> - Input validation against a claim: `context.input.customer_id != principal.getTag("customer_id")` (statement 2)
+> - Explicit deny with `forbid` (statements 2 and 3)
+> - A presence guard with `has` (statement 3)
 
-### Capability 1: Input Validation (`context.input`)
+The examples below use made-up targets and claims to show more patterns. They work with the same engine.
 
-**Scenario:** Finance users can process refunds, but only up to $1000. Refunds above $1000 require a different approval workflow.
+### Capability 1: input validation (`context.input`)
 
-**How it works:** `context.input` gives Cedar access to the tool's input parameters (as defined in the MCP tool manifest). Conditions can be written against these values. The tool still appears in `tools/list` for finance users (discovery only checks principal claims), but the $1000 limit is enforced at `tools/call` time when the actual input is available.
+**Scenario:** finance users can process refunds up to $1000.
+
+`context.input` holds the tool's arguments. The tool still appears in `tools/list` for finance users, because discovery checks only claims. The limit is enforced at `tools/call`.
 
 ```cedar
 permit(
@@ -230,20 +300,13 @@ when {
 };
 ```
 
-**Result:**
-- Finance user, amount=500 → permitted
-- Finance user, amount=5000 → denied (exceeds limit)
-- Engineering user, amount=100 → denied (wrong department)
+- Finance user, amount 500: permitted
+- Finance user, amount 5000: denied
+- Engineering user, amount 100: denied
 
-**Important:** This is where [Tool Discovery vs Execution](#tool-discovery-vs-execution) matters most. The tool passes discovery filtering (finance user is generally permitted), but execution is denied when the input violates the condition.
+### Capability 2: multi-tool policies (`action in [...]`)
 
----
-
-### Capability 2: Multi-Tool Policies (`action in [...]`)
-
-**Scenario:** Developers can use all read-only tools (list, get, search) but cannot use write tools (create, update, delete).
-
-**How it works:** Use `action in [...]` to apply one policy to multiple tools at once, instead of writing separate `permit` statements for each tool.
+**Scenario:** developers can use the read tools but not the write tools.
 
 ```cedar
 permit(
@@ -261,60 +324,34 @@ when {
 };
 ```
 
-**Result:**
-- Developer calls `list_records` → permitted
-- Developer calls `search_records` → permitted
-- Developer calls `delete_record` → denied (not in the action list)
+`delete_record` isn't in the list, so it is denied. Separate `permit` statements per tool work too; `action in` just groups tools that share conditions.
 
-> **Note:** Separate `permit` statements can also be written for each tool. The `action in [...]` syntax is a convenience for grouping related tools under the same conditions.
+### Capability 3: explicit deny (`forbid`)
 
----
+**Scenario:** block one compromised login from writes, whatever else permits it.
 
-### Capability 3: Explicit Deny (`forbid`)
-
-**Scenario:** All departments are allowed to use a tool, EXCEPT a specific user (e.g., a compromised account) needs to be explicitly blocked regardless of their department.
-
-**How it works:** `forbid` statements override `permit` statements. Cedar's conflict resolution is "forbid wins" — if both a `permit` and `forbid` match, the request is denied.
+`forbid` overrides `permit`: if both match, the request is denied.
 
 ```cedar
-// Allow all departments
-permit(
-  principal is AgentCore::OAuthUser,
-  action == AgentCore::Action::"sample-tool-target___text_analysis_tool",
-  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
-)
-when {
-  principal.hasTag("department")
-};
-
-// But explicitly block a specific user (by their Cognito sub UUID)
 forbid(
   principal is AgentCore::OAuthUser,
-  action == AgentCore::Action::"sample-tool-target___text_analysis_tool",
+  action in [
+    AgentCore::Action::"block-credit-card-target___block_credit_card",
+    AgentCore::Action::"open-claim-target___open_claim"
+  ],
   resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
 )
 when {
   principal.hasTag("user_id") &&
-  principal.getTag("user_id") == "<compromised-user-sub-uuid>"
+  principal.getTag("user_id") == "<compromised-user-sub>"
 };
 ```
 
-**Result:**
-- Any user with a department → permitted
-- The user matching `<compromised-user-sub-uuid>` → denied (forbid wins over permit)
+Deny-by-default often makes this unnecessary. Use `forbid` to override a broad `permit` for specific cases: a compromised user, a tool disabled during an incident, an emergency stop. Remember to list the actions: a `forbid` over all actions is rejected.
 
-> **Note:** Cedar's deny-by-default means simply omitting a user/department from the `permit`
-> is often sufficient to deny access. Use `forbid` when overriding a broad `permit`
-> for specific cases — such as blocking a compromised user, disabling a tool during an incident,
-> or implementing an emergency shutdown.
+### Capability 4: wildcard string matching (`like`)
 
----
-
-### Capability 4: Wildcard String Matching (`like`)
-
-**Scenario:** Only users with an internal email domain can access internal tools. This requires injecting an `email` claim via the Pre-Token Lambda (not included in the default demo, but straightforward to add).
-
-**How it works:** Use `like` with `*` wildcard for pattern matching on string claim values.
+**Scenario:** only users with an internal email can use internal tools. This needs an `email` claim, which the pre-token Lambda doesn't add today.
 
 ```cedar
 permit(
@@ -328,20 +365,16 @@ when {
 };
 ```
 
-**Result:**
-- User with `email` claim `alice@example.com` → permitted
-- User with `email` claim `bob@example.com` → permitted
-- User with `email` claim `contractor@external.com` → denied (doesn't match pattern)
+- `alice@example.com`: permitted
+- `contractor@external.com`: denied
 
-> **Note:** This example uses a custom `email` claim (injected by the Pre-Token Lambda via `claimsToAddOrOverride`). The default `user_id` claim is a UUID and would not match email patterns. The `like` operator only supports `*` as a wildcard, which matches zero or more characters of any kind (letters, numbers, symbols, dots, etc.). It does not support regex, single-character wildcards, character classes, or other pattern syntax.
+`like` supports only `*`, which matches zero or more characters of any kind. It has no regex, single-character wildcard or character classes.
 
----
+### Capability 5: environment-based access control
 
-### Capability 5: Environment-Based Access Control
+**Scenario:** production tools only from the production runtime, even for a user with the right claims.
 
-**Scenario:** Production tools should only be accessible from the production runtime. Staging runtimes should not be able to call production tools even if the user has the right department/role.
-
-**How it works:** The Pre-Token Lambda maps the Cognito `clientId` to a `runtime_env` claim (see [Runtime-Level Access Control](IDENTITY_POLICY.md#runtime-level-access-control)). Cedar checks both user identity AND runtime environment.
+The pre-token Lambda maps the Cognito `clientId` to a `runtime_env` claim (see [Runtime-level access control](IDENTITY_POLICY.md#runtime-level-access-control)). Cedar checks both the runtime and the user.
 
 ```cedar
 permit(
@@ -352,46 +385,38 @@ permit(
 when {
   principal.hasTag("runtime_env") &&
   principal.getTag("runtime_env") == "production" &&
-  principal.hasTag("department") &&
-  principal.getTag("department") == "finance"
+  principal.hasTag("customer_id") &&
+  principal.getTag("customer_id") != ""
 };
 ```
 
-**Result:**
-- Finance user from production runtime → permitted
-- Finance user from staging runtime → denied (wrong environment)
-- Engineering user from production runtime → denied (wrong department)
-
----
-
-### Quick Reference: Cedar Operators
+### Quick reference: operators
 
 | Operator | Meaning | Example |
-|----------|---------|--------|
+|---|---|---|
 | `==` | Equals | `principal.getTag("role") == "admin"` |
-| `!=` | Not equals | `principal.getTag("department") != "restricted"` |
-| `&&` | AND (both must be true) | `condition_a && condition_b` |
-| `\|\|` | OR (either can be true) | `value == "a" \|\| value == "b"` |
+| `!=` | Not equals | `principal.getTag("customer_id") != ""` |
+| `&&` | AND | `condition_a && condition_b` |
+| `\|\|` | OR | `value == "a" \|\| value == "b"` |
+| `!` | NOT | `!(context.input has customer_confirmed)` |
 | `<`, `>`, `<=`, `>=` | Numeric comparison | `context.input.amount < 1000` |
 | `in [...]` | Action is one of a set | `action in [Action::"a", Action::"b"]` |
 | `like` | Wildcard string match | `principal.getTag("email") like "*@example.com"` |
-| `hasTag()` | Claim exists in token | `principal.hasTag("department")` |
-| `getTag()` | Get claim value | `principal.getTag("department")` |
-| `has` | Field/attribute exists | `context.input has shippingAddress` |
+| `hasTag()` | Claim exists in the token | `principal.hasTag("customer_id")` |
+| `getTag()` | Claim value | `principal.getTag("customer_id")` |
+| `has` | Field exists | `context.input has customer_confirmed` |
 | `.contains()` | Set membership | `["US", "CA", "MX"].contains(context.input.country)` |
 
-### What Cedar CANNOT Do
+### What Cedar can't do
 
 | Limitation | Workaround |
-|-----------|------------|
-| Regular expressions | Use `like` with `*` wildcard for simple patterns |
-| Arithmetic operations (e.g., `a + b > c`) | Pre-compute in the Pre-Token Lambda and inject as a claim |
-| External data lookups (e.g., query a database) | Resolve in the Pre-Token Lambda and inject as a claim |
-| Time-based rules (e.g., "only during business hours") | Inject a `time_window` claim from the Pre-Token Lambda |
-| Array/list membership (e.g., "user in allowed_list") | Use `.contains()` for hardcoded lists: `["a", "b"].contains(context.input.x)`. For dynamic lists (loaded from a database), resolve in the Pre-Token Lambda and inject as a boolean claim |
-| Request headers, IP address, or network context | Not exposed to Cedar — not available |
+|---|---|
+| Regular expressions | `like` with `*` for simple patterns |
+| Division and floating-point math | Compute it in the pre-token Lambda or the tool |
+| External data lookups (e.g. a database query) | Resolve it in the pre-token Lambda and add a claim, as `customer_id` is |
+| Dynamic lists ("user in a list stored somewhere") | Hard-coded lists work with `.contains()`. For dynamic ones, resolve in the pre-token Lambda and add a boolean claim |
+| Request headers, IP address, network context | Not available |
 
-> **Architecture Pattern:** When Cedar cannot evaluate something directly (time,
-> external data, complex logic), resolve it in the Pre-Token Lambda and inject the
-> result as a custom claim. Cedar then checks the pre-resolved value. This keeps
-> policies simple, deterministic, and auditable.
+Time-based rules are possible: AgentCore supplies `context.system.now` on every request (see the [AWS guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-time-based.html)).
+
+> **Pattern:** when Cedar can't evaluate something directly, resolve it in the pre-token Lambda and add the result as a claim. Cedar then checks the precomputed value. LedgerLens does exactly this: the Lambda looks up the user's customer, and Cedar only compares strings. Policies stay simple, deterministic and auditable.

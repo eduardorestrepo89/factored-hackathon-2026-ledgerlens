@@ -19,10 +19,10 @@ from unittest import mock
 import pytest
 
 # --- Make the strands pattern's package importable as a top-level "tools" pkg ---
-# The module under test lives at patterns/strands-single-agent/tools/mcp_registry.py
+# The module under test lives at agent/ledgerlens/tools/mcp_registry.py
 # and imports siblings as ``from tools...`` at runtime (matching the container's
 # working directory). Add that pattern directory to sys.path so ``tools`` resolves.
-_PATTERN_DIR = Path(__file__).resolve().parents[2] / "patterns" / "strands-single-agent"
+_PATTERN_DIR = Path(__file__).resolve().parents[2] / "agent" / "ledgerlens"
 
 
 def _install_dependency_stubs() -> None:

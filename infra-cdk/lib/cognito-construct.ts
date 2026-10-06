@@ -87,6 +87,14 @@ export class CognitoConstruct extends Construct {
       preventUserExistenceErrors: true,
     })
 
+    // Evaluation logins (evals/eval_users.py). Members may switch the agent's model and
+    // base prompt per session; see agent/ledgerlens/tools/eval_override.py.
+    new cognito.CfnUserPoolGroup(this, "EvaluatorsGroup", {
+      userPoolId: userPool.userPoolId,
+      groupName: "evaluators",
+      description: "LedgerLens evaluation logins: may override the model and base prompt",
+    })
+
     // Create domain without managedLoginVersion initially to avoid race condition
     // with CfnManagedLoginBranding. The domain is updated to v2 after branding is created
     // via L1 escape hatch below. This resolves "Internal error from downstream service"
@@ -123,7 +131,7 @@ export class CognitoConstruct extends Construct {
     // These are application-defined claims, not standard JWT/OIDC claims.
     // The claims are read from clientMetadata.verified_user_id (the Cognito sub / UUID),
     // which is passed via the aws_client_metadata parameter in the direct Cognito
-    // /oauth2/token call (see patterns/utils/auth.py — get_gateway_access_token).
+    // /oauth2/token call (see agent/utils/auth.py — get_gateway_access_token).
     //
     // Group assignment uses a UUID-based mapping (USER_ROLE_MAP). On first deploy,
     // all users are assigned "guest/viewer". After deploy, look up user subs and
@@ -139,6 +147,12 @@ export class CognitoConstruct extends Construct {
       code: lambda.Code.fromAsset(path.join(__dirname, "..", "lambdas", "pretoken-v3")), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       timeout: cdk.Duration.seconds(30),
       description: "V3 Pre-Token Lambda for M2M user identity propagation",
+      environment: {
+        // Cognito sub -> LedgerLens customer_id, as a JSON string. The v1 demo login
+        // (demo@ledgerlens.example) defaults to persona P03; switch personas in the
+        // Lambda console (README, "LedgerLens Agent (v1)"). A redeploy resets it here.
+        USER_CUSTOMER_IDS_MAP: '{"145814c8-00d1-7087-c542-c0c26d39ec0d": "CLI-50OIF5EIYSWK", "34f8a418-d0f1-7026-db7f-133537a23bf5": "CLI-EX6BOAOEFZHQ", "44b8f4a8-60d1-70bc-daa4-b5edd9e3270b": "CLI-70U0WJ1NH1MN", "44c8c448-4081-70a4-959c-33f98f0984ca": "CLI-1GL7QBDG3QG0", "642884b8-20b1-7009-3ea3-2f6e4d578862": "CLI-N4FPJIEGD917", "7438f488-c051-70bc-d384-e65834c78632": "CLI-50OIF5EIYSWK", "74b8d4d8-60e1-7043-8f54-f40537594bb1": "CLI-N4FPJIEGD917", "74e85498-b021-707a-f829-838c5e88ae94": "CLI-GG3Z1440277M", "847824e8-00b1-7065-d3eb-760128d8aaf3": "CLI-HTX9ITCO0IMR", "9468c438-d0f1-7085-21e4-04f8b2ea6c9f": "CLI-UBR2NCZWTD4K", "b4889408-d021-7097-24a1-ca9802119ed8": "CLI-UBR2NCZWTD4K", "c448e418-1021-703a-ba36-c604d128ef4d": "CLI-70U0WJ1NH1MN", "d4e854b8-5041-7077-0e9e-e63cc228954a": "CLI-PV0OIEA8DAAE", "e45804c8-9081-70a4-a625-84b2e1f1964c": "CLI-Z3V3SBS18YWQ", "f45814d8-0041-70e4-6bf2-8e560ab401ad": "CLI-EX6BOAOEFZHQ"}',
+      },
       logGroup: new logs.LogGroup(this, "PreTokenLambdaLogGroup", {
         logGroupName: `/aws/lambda/${config.stack_name_base}-pretoken-v3`,
         retention: logs.RetentionDays.ONE_WEEK,

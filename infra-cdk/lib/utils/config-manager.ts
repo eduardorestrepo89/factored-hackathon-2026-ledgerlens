@@ -7,6 +7,26 @@ const MAX_STACK_NAME_BASE_LENGTH = 35
 export type DeploymentType = "docker" | "zip"
 
 /**
+ * What `cdk deploy` builds.
+ * - full: the data stack and the main stack (frontend, Cognito, agent, Gateway and tool Lambdas).
+ * - data: only the data stack (Aurora DSQL and its load pipeline).
+ */
+export type DeployScope = "full" | "data"
+const DEPLOY_SCOPES: readonly string[] = ["full", "data"]
+
+/**
+ * The scope to deploy: a `cdk deploy -c deploy_scope=<scope>` override wins over config.yaml.
+ * Context values arrive as raw strings, so the override is validated here.
+ */
+export function resolveDeployScope(configured: DeployScope, override?: unknown): DeployScope {
+  if (override === undefined) return configured
+  if (typeof override !== "string" || !DEPLOY_SCOPES.includes(override)) {
+    throw new Error(`Invalid -c deploy_scope '${override}'. Must be 'full' or 'data'.`)
+  }
+  return override as DeployScope
+}
+
+/**
  * Network mode for the AgentCore Runtime.
  * - PUBLIC: Runtime is accessible over the public internet (default).
  * - VPC: Runtime is deployed into a user-provided VPC for private network isolation.
@@ -28,11 +48,13 @@ export interface VpcConfig {
 
 export interface AppConfig {
   stack_name_base: string
+  /** Full deploy or only the data stack. Defaults to "full". */
+  deploy_scope: DeployScope
   admin_user_email?: string | null
   backend: {
     pattern: string
     deployment_type: DeploymentType
-    /** Name for the agent runtime. Valid characters: a-z, A-Z, 0-9, _. Defaults to "FASTAgent". */
+    /** Name for the agent runtime. Valid characters: a-z, A-Z, 0-9, _. Defaults to "LedgerLensAgent". */
     agent_name: string
     /** Network mode for the AgentCore Runtime. Defaults to "PUBLIC". */
     network_mode: NetworkMode
@@ -56,11 +78,40 @@ export interface AppConfig {
      */
     ltm_relevance_score: number
     /**
+     * Short-term memory: how many recent messages the agent sends to the model per
+     * turn. Counts messages, not turns. Integer from 2 to 200. Defaults to 30.
+     */
+    stm_window_size: number
+    /**
+     * Summarize the oldest messages once the window is exceeded, instead of dropping
+     * them. Each summary costs one extra model call. Defaults to false.
+     */
+    use_stm_summarization: boolean
+    /** Bedrock model or inference profile the agent runs on. Defaults to "deepseek.v3.2". */
+    model_id: string
+    /**
+     * Models an evaluation login (Cognito group "evaluators") may switch the agent to per
+     * session; see agent/ledgerlens/tools/eval_override.py. Defaults to [model_id].
+     */
+    eval_model_ids: string[]
+    /** Share of messages summarized each time, from 0.1 to 0.8. Defaults to 0.3. */
+    stm_summary_ratio: number
+    /**
+     * Newest messages never summarized. Must be less than stm_window_size when
+     * summarization is on. Defaults to 10.
+     */
+    stm_preserve_recent_messages: number
+    /** Model that writes the summaries. Empty (default) means the agent's own model. */
+    stm_summarization_model_id: string
+    /** System prompt for the summarizer. Empty (default) means the built-in banking prompt. */
+    stm_summarization_prompt: string
+    /**
      * Discover and auto-connect MCP servers from an AWS Agent Registry.
      * Lightweight: no DynamoDB, no UI, no per-user preferences. Defaults to disabled.
      */
     mcp_registry: McpRegistryConfig
   }
+  data: DataConfig
 }
 
 /**
@@ -76,6 +127,12 @@ export interface McpRegistryConfig {
   enabled: boolean
   /** ARN or id of the AWS Agent Registry to discover records from. Required when enabled. */
   registry_id: string
+}
+
+/** Data settings (docs/superpowers/specs/2026-10-02-data-pipeline-design.md, section 5.3). */
+export interface DataConfig {
+  /** Bank "today" for the tools: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, no time zone. */
+  as_of: string
 }
 
 export class ConfigManager {
@@ -129,6 +186,11 @@ export class ConfigManager {
         )
       }
 
+      const deployScope = parsedConfig.deploy_scope ?? "full"
+      if (!DEPLOY_SCOPES.includes(deployScope)) {
+        throw new Error(`Invalid deploy_scope '${deployScope}' in ${configPath}. Must be 'full' or 'data'.`)
+      }
+
       // Validate network_mode if provided
       const networkMode = parsedConfig.backend?.network_mode || "PUBLIC"
       if (networkMode !== "PUBLIC" && networkMode !== "VPC") {
@@ -167,23 +229,92 @@ export class ConfigManager {
         )
       }
 
+      // Validate the bank's "today" for the tools
+      const asOf = String(parsedConfig.data?.as_of ?? "2026-06-17T23:59:59")
+      if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$/.test(asOf)) {
+        throw new Error(
+          `data.as_of '${asOf}' in ${configPath} must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS.`
+        )
+      }
+
+      const modelId = parsedConfig.backend?.model_id ?? "deepseek.v3.2"
+      if (typeof modelId !== "string" || !modelId.trim()) {
+        throw new Error(`backend.model_id in ${configPath} must be a non-empty string.`)
+      }
+      // Models the evaluators group may pick per session (agent/ledgerlens/tools/eval_override.py)
+      const evalModelIds = parsedConfig.backend?.eval_model_ids ?? [modelId]
+      if (
+        !Array.isArray(evalModelIds) ||
+        evalModelIds.length === 0 ||
+        evalModelIds.some((id: unknown) => typeof id !== "string" || !id.trim())
+      ) {
+        throw new Error(
+          `backend.eval_model_ids in ${configPath} must be a non-empty list of model ids.`
+        )
+      }
+
+      // Validate short-term memory (the agent's conversation window and summarization)
+      const stmWindowSize = parsedConfig.backend?.stm_window_size ?? 30
+      const useStmSummarization = parsedConfig.backend?.use_stm_summarization === true
+      const stmSummaryRatio = parsedConfig.backend?.stm_summary_ratio ?? 0.3
+      const stmPreserveRecent = parsedConfig.backend?.stm_preserve_recent_messages ?? 10
+      const stmModelId = parsedConfig.backend?.stm_summarization_model_id ?? ""
+      const stmPrompt = parsedConfig.backend?.stm_summarization_prompt ?? ""
+      if (!Number.isInteger(stmWindowSize) || stmWindowSize < 2 || stmWindowSize > 200) {
+        throw new Error(
+          `backend.stm_window_size in ${configPath} must be an integer from 2 to 200.`
+        )
+      }
+      if (typeof stmSummaryRatio !== "number" || stmSummaryRatio < 0.1 || stmSummaryRatio > 0.8) {
+        throw new Error(`backend.stm_summary_ratio in ${configPath} must be from 0.1 to 0.8.`)
+      }
+      if (!Number.isInteger(stmPreserveRecent) || stmPreserveRecent < 0) {
+        throw new Error(
+          `backend.stm_preserve_recent_messages in ${configPath} must be an integer of 0 or more.`
+        )
+      }
+      // Otherwise the summarizer raises "insufficient messages" on every turn
+      if (useStmSummarization && stmPreserveRecent >= stmWindowSize) {
+        throw new Error(
+          `backend.stm_preserve_recent_messages in ${configPath} must be less than ` +
+            `stm_window_size when use_stm_summarization is true.`
+        )
+      }
+      // Checked before .trim(): a YAML number or list would crash there or reach the runtime
+      if (typeof stmModelId !== "string") {
+        throw new Error(`backend.stm_summarization_model_id in ${configPath} must be a string.`)
+      }
+      if (typeof stmPrompt !== "string") {
+        throw new Error(`backend.stm_summarization_prompt in ${configPath} must be a string.`)
+      }
+
       return {
         stack_name_base: stackNameBase,
+        deploy_scope: deployScope,
         admin_user_email: parsedConfig.admin_user_email || null,
         backend: {
-          pattern: parsedConfig.backend?.pattern || "strands-single-agent",
+          pattern: parsedConfig.backend?.pattern || "ledgerlens",
           deployment_type: deploymentType,
-          agent_name: parsedConfig.backend?.agent_name || "FASTAgent",
+          agent_name: parsedConfig.backend?.agent_name || "LedgerLensAgent",
           network_mode: networkMode,
           vpc: vpcConfig,
           use_long_term_memory: parsedConfig.backend?.use_long_term_memory === true,
           ltm_top_k: parsedConfig.backend?.ltm_top_k ?? 10,
           ltm_relevance_score: parsedConfig.backend?.ltm_relevance_score ?? 0.3,
+          model_id: modelId.trim(),
+          eval_model_ids: evalModelIds.map((id: string) => id.trim()),
+          stm_window_size: stmWindowSize,
+          use_stm_summarization: useStmSummarization,
+          stm_summary_ratio: stmSummaryRatio,
+          stm_preserve_recent_messages: stmPreserveRecent,
+          stm_summarization_model_id: stmModelId.trim(),
+          stm_summarization_prompt: stmPrompt.trim(),
           mcp_registry: {
             enabled: mcpRegistryEnabled,
             registry_id: mcpRegistryId,
           },
         },
+        data: { as_of: asOf },
       }
     } catch (error) {
       throw new Error(`Failed to parse configuration file ${configPath}: ${error}`)

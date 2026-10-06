@@ -30,4 +30,21 @@ frontend/public/aws-exports.json
 .venv
 scripts/zip-artifact/
 public/
+# The frontend's static files (favicons, the public final presentation); aws-exports.json stays ignored above
+!frontend/public/
+# Videos stay out of git (the pitch is ~95 MB)
+docs/**/*.mp4
 .mkdocs/public/
+.codegraph/
+.superdesign/
+.superpowers/
+datathon/
+# Superdesign scratch HTML
+.superdesign/tmp/
+
+# Local handoff material (decks, metrics, prompts); never committed
+docs/agent-handoff/
+
+# Evaluation harness: run outputs and its venv (the final report lives in docs/evaluation/)
+evals/results/
+evals/.venv/

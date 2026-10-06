@@ -1,328 +1,163 @@
-# Streaming Guide for Agents
+# Streaming
 
-## Overview
+The agent streams its reply to the browser as Server-Sent Events (SSE). This page is the reference for that stream: the request body, the events on the wire, how the frontend parses them, and the Yes/No confirmation round trip.
 
-Your agent sends streaming events in SSE format. This guide explains how to integrate streaming with frontend.
+## Path of a reply
 
-## Integration Steps
+1. `ChatInterface.tsx` calls `AgentCoreClient.invoke()` (`frontend/src/lib/agentcore-client/client.ts`). That sends `POST https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<url-encoded runtime ARN>/invocations?qualifier=DEFAULT` with the user's Cognito access token.
+2. AgentCore Runtime runs `invocations()` in `agent/ledgerlens/ledgerlens_agent.py`. `BedrockAgentCoreApp` (bedrock-agentcore 1.4.7) writes each dict the generator yields as one `data: <json>\n\n` line, with media type `text/event-stream`.
+3. `readSSEStream()` (`utils/sse.ts`) splits the response into lines and hands each line to the parser.
+4. The parser comes from `createStrandsParser()` (`parsers/strands.ts`). `client.ts` creates a new one for each stream, because the parser remembers which tool calls it has already announced. It turns lines into typed `StreamEvent`s (`types.ts`).
+5. `ChatInterface.tsx` builds message segments (text, tool calls, Yes/No cards) from those events, and `ChatMessage.tsx` renders them.
 
-1. **Your agent sends streaming events** (SSE format)
-2. **The `agentcore-client` library** reads the SSE stream and routes it to the appropriate parser:
-   - For **Strands agents (default)**: `frontend/src/lib/agentcore-client/parsers/strands.ts` — parses Strands schema events
-   - For **LangGraph agents**: `frontend/src/lib/agentcore-client/parsers/langgraph.ts`
-   - For **Bedrock Converse (generic)**: `frontend/src/lib/agentcore-client/parsers/converse.ts` — parses raw Bedrock Converse stream events
-   - For **other agent frameworks**: Create a new parser and register it in `frontend/src/lib/agentcore-client/client.ts`
-3. **Parsers emit typed `StreamEvent`s** (text, tool_use_start, tool_use_delta, tool_result, message, result, lifecycle)
-4. **`ChatInterface.tsx`** handles events and builds message segments (interleaved text + tool calls)
-5. **`ChatMessage.tsx`** renders segments inline with markdown formatting and tool call components
+## Request
 
----
+Headers:
 
-## Current Implementation
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer <Cognito access token>` |
+| `Content-Type` | `application/json` |
+| `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` | The conversation's session id (`crypto.randomUUID()`) |
+| `X-Amzn-Trace-Id` | `1-<hex epoch seconds>-<uuid>` |
 
-### Backend: Strands Agent
+Body:
 
-**File:** `patterns/strands-single-agent/basic_agent.py`
+```json
+{
+  "prompt": "I don't recognise a charge",
+  "runtimeSessionId": "5f0c…",
+  "confirmations": [{ "interruptId": "…", "approved": true }]
+}
+```
 
-The backend yields all raw Strands streaming events, serialized to JSON-safe dicts:
+- `prompt` and `runtimeSessionId` are required. Without either, the agent sends an error event and stops.
+- `confirmations` is optional. The frontend adds it when the customer taps Yes or No on a confirmation card. See [Confirmation round trip](#confirmation-round-trip).
+- `eval` is optional and only for evaluation logins. See the [agent README](../agent/ledgerlens/README.md#evaluation-override).
+
+The body never carries the user's identity. The agent reads it from the validated JWT.
+
+## Backend loop
+
+The streaming part of `invocations()`:
 
 ```python
-async for event in agent.stream_async(user_query):
-    yield json.loads(json.dumps(dict(event), default=str))
+prompt = user_query
+if agent._interrupt_state.activated:
+    prompt = resume_prompt(list(agent._interrupt_state.interrupts), payload)
+
+markup = LeakedMarkupFilter()
+async for event in agent.stream_async(prompt):
+    for confirmation in confirmation_events(event):
+        yield confirmation
+    for clean in markup.clean(json.loads(json.dumps(dict(event), default=str))):
+        yield clean
 ```
 
-**Note:** Strands events can contain non-JSON-serializable Python objects (agent instances, UUIDs, `ModelStopReason` tuples, etc.). The `json.dumps(default=str)` call converts these to strings, ensuring all events are safe to send over SSE.
+- **The prompt isn't always the user's text.** When the agent is waiting on a Yes/No answer, `prompt` becomes the list of interrupt responses from `resume_prompt()`.
+- **Confirmations go first.** `confirmation_events()` looks at the raw event before serialization. When the agent stopped on a confirmation, the `{"confirmation": ...}` events go out before the `result` event that carries them.
+- **Non-JSON values become strings.** Strands merges its invocation state into text and tool-use events: `agent`, `event_loop_cycle_id`, `request_state`, `event_loop_cycle_trace` and `event_loop_cycle_span`. `json.dumps(default=str)` turns each of these into a string, as it does for the `AgentResult` in the final event. Treat those keys as noise.
+- **The markup filter can change events.** Every event passes through `LeakedMarkupFilter.clean()`, which can drop an event, hold back part of its text, or split it in two. See [Leaked markup filter](#leaked-markup-filter).
 
-### Frontend: Event Parser
+## Events on the wire
 
-**File:** `frontend/src/lib/agentcore-client/parsers/strands.ts`
+Each line is `data: ` followed by one JSON object. The parser checks the keys in the order of this table and acts on the first match:
 
-The default parser for `strands-single-agent` handles Strands schema events:
+| Wire shape | When | Parser output |
+|------------|------|---------------|
+| `{"confirmation": {"id", "tool", "toolUseId", "details"}}` | The agent paused a tool for the customer's Yes/No | `confirmation` |
+| `{"data": "<text>", "delta": {...}, ...}` | A chunk of reply text | `text` |
+| `{"current_tool_use": {"toolUseId", "name", "input"}, "delta": {"toolUse": {"input": "<chunk>"}}, ...}` | The model is writing a tool call. `current_tool_use.input` holds the input so far. | `tool_use_start` the first time a `toolUseId` appears, then `tool_use_delta` for every event whose `delta.toolUse.input` is non-empty |
+| `{"message": {"role": "assistant" or "user", "content": [...]}}` | A complete message: the assistant's text and `toolUse` blocks, or the user message with `toolResult` blocks | `message` for every role, plus one `tool_result` per `toolResult` block in a user message |
+| `{"result": "<final text>"}` | The turn ended | `result` |
+| `{"init_event_loop": true, ...}`, `{"start": true}`, `{"start_event_loop": true}` | Strands lifecycle | `lifecycle` with `init`, `start` or `start_loop` |
+| `{"status": "error", "error": "<message>"}` | The agent failed (see [Errors](#errors)) | Nothing |
+| Anything else: `event` (raw Bedrock stream chunks), `reasoningText`, `tool_interrupt_event`, `tool_cancel_event`, `tool_stream_event` | Other Strands events | Nothing |
 
-```typescript
-export const parseStrandsChunk: ChunkParser = (line, callback) => {
-  if (!line.startsWith("data: ")) return;
-  const json = JSON.parse(line.substring(6).trim());
+Details the parser handles:
 
-  // Text token: {"data": "Hello"}
-  if (typeof json.data === "string") {
-    callback({ type: "text", content: json.data });
-  }
+- **Tool start.** The parser starts a tool the first time it sees its `toolUseId`, whatever that delta holds. Claude on Bedrock sends an empty first delta. DeepSeek on Bedrock sends the whole input in one delta, so the parser can emit `tool_use_start` and `tool_use_delta` from the same line.
+- **Tool result text.** `tool_result` joins the `text` items of the `toolResult` content. If there are none, it sends the content as JSON.
+- **The `result` value is a string.** `AgentResult.__str__` returns the final message's text blocks, each followed by a newline. For an interrupted turn, it returns the Python repr of the interrupt list instead. A string `result` gives `stopReason: "end_turn"`, and an object `result` gives `result.stop_reason`, so an interrupted turn also reports `end_turn`. An empty final text (`{"result": ""}`) is falsy, and the parser emits nothing for it.
+- **Tool names.** The model sees Gateway tools as `gateway_<target>___<tool>`, so `name` in `current_tool_use` looks like `gateway_list-credit-cards-target___list_credit_cards`.
+- **Parse errors.** A line that isn't valid JSON is logged with `console.debug("Failed to parse strands event:", data)`.
 
-  // Tool use: {"current_tool_use": {...}, "delta": {"toolUse": {"input": "..."}}}
-  if (json.current_tool_use) {
-    // First delta (empty input) → tool_use_start
-    // Subsequent deltas → tool_use_delta
-  }
+`ChatInterface.tsx` acts on `confirmation`, `text`, `tool_use_start`, `tool_use_delta`, `tool_result` and `message` (assistant only). It ignores `result` and `lifecycle`.
 
-  // Tool result: {"message": {"role": "user", "content": [{"toolResult": {...}}]}}
-  if (json.message?.role === "user") {
-    // Extract toolResult blocks → callback({ type: "tool_result", ... })
-  }
+### Example
 
-  // Completion: {"result": {"stop_reason": "end_turn"}}
-  if (json.result) {
-    callback({ type: "result", stopReason: "end_turn" });
-  }
+A turn with one tool call. The raw `event` lines are left out, and each line is trimmed to the keys the parser reads:
 
-  // Lifecycle: {"init_event_loop": true}
-  if (json.init_event_loop || json.start_event_loop) { ... }
-};
-```
-
-See the full implementation in the source file for edge cases.
-
-### Event Structure
-
-Strands provides these event types:
-
-- `data`: Text chunks (accumulate as they arrive)
-- `current_tool_use`: Tool name, ID, and input parameters (with `delta` for streaming)
-- `message`: Final structured message with full content (assistant with `toolUse`, user with `toolResult`)
-- `result`: AgentResult with stop reason and metrics
-- `init_event_loop`, `start_event_loop`, `complete`: Lifecycle markers
-- `tool_stream_event`: Events streamed from tool execution
-- `event`: Raw Bedrock Converse events (used by the alternative converse parser below)
-
-```javascript
-// Text streaming
-data: {"data": "Hello"}
-data: {"data": " there"}
-
-// Tool use start — first delta has empty input
-data: {"current_tool_use": {"toolUseId": "tool_abc123", "name": "text_analysis"}, "delta": {"toolUse": {"input": ""}}}
-
-// Tool input streaming
-data: {"current_tool_use": {"toolUseId": "tool_abc123", "name": "text_analysis"}, "delta": {"toolUse": {"input": "{\"text\": \"hello\"}"}}}
-
-// Complete assistant message
-data: {"message": {"role": "assistant", "content": [{"toolUse": {"toolUseId": "tool_abc123", "name": "text_analysis", "input": {"text": "hello"}}}]}}
-
-// Tool result (user message with toolResult blocks)
-data: {"message": {"role": "user", "content": [{"toolResult": {"toolUseId": "tool_abc123", "content": [{"text": "Analysis complete: 1 word"}]}}]}}
-
-// Final result
-data: {"result": {"stop_reason": "end_turn"}}
-
-// Lifecycle events
+```text
 data: {"init_event_loop": true}
+data: {"start": true}
 data: {"start_event_loop": true}
+data: {"current_tool_use": {"toolUseId": "tooluse_1", "name": "gateway_list-credit-cards-target___list_credit_cards", "input": ""}, "delta": {"toolUse": {"input": ""}}}
+data: {"current_tool_use": {"toolUseId": "tooluse_1", "name": "gateway_list-credit-cards-target___list_credit_cards", "input": "{\"customer_id\": \"CLI-1\"}"}, "delta": {"toolUse": {"input": "{\"customer_id\": \"CLI-1\"}"}}}
+data: {"message": {"role": "assistant", "content": [{"toolUse": {"toolUseId": "tooluse_1", "name": "gateway_list-credit-cards-target___list_credit_cards", "input": {"customer_id": "CLI-1"}}}]}}
+data: {"message": {"role": "user", "content": [{"toolResult": {"toolUseId": "tooluse_1", "status": "success", "content": [{"text": "{\"cards\": [...]}"}]}}]}}
+data: {"start": true}
+data: {"start": true}
+data: {"start_event_loop": true}
+data: {"data": "You have two cards: "}
+data: {"data": "…1234 and …5678."}
+data: {"message": {"role": "assistant", "content": [{"text": "You have two cards: …1234 and …5678."}]}}
+data: {"result": "You have two cards: …1234 and …5678.\n"}
 ```
 
-**Reference:** [Strands Streaming Documentation](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/streaming/overview/)
+## Confirmation round trip
 
----
+`block_credit_card`, `open_claim` and `human_agent_hand_off` run only after the customer taps Yes (`agent/ledgerlens/tools/confirmation_hook.py`).
 
-## Alternative: Using Raw Converse Events
+1. The model calls one of these tools. The stream shows the tool call and the assistant `message` as usual.
+2. Before the tool runs, `ConfirmationHook` raises a Strands interrupt named `confirm_<tool>`. The agent stops with stop reason `interrupt`. The session manager saves the interrupt and the waiting tool call with the session.
+3. The runtime sends one event per pending confirmation, then the result:
 
-Instead of parsing Strands schema events, you can parse the raw Bedrock Converse events nested under the `event` key. This gives you lower-level access to the Converse stream API structures.
+   ```text
+   data: {"confirmation": {"id": "<interrupt id>", "tool": "block_credit_card", "toolUseId": "tooluse_2", "details": {"card_last4": "1234", "reason": "suspected_fraud"}}}
+   data: {"result": "[{'id': '<interrupt id>', 'name': 'confirm_block_credit_card', 'reason': {...}, 'response': None}]"}
+   ```
 
-**Note:** Tool results are not emitted as Converse stream events — they are an input to the next `converse_stream` call. Strands handles this internally and emits tool results as `message` events. The converse parser does not handle tool results; instead, `ChatInterface.tsx` marks tools as complete when the next text segment starts streaming.
+   `details` is the tool input without `customer_id` and `customer_confirmed`.
+4. The frontend replaces that tool's segment with a Yes/No card.
+5. A tap sends a new request. Its `prompt` is the button label, and it carries `"confirmations": [{"interruptId": "<id>", "approved": true}]` (`ChatInterface.tsx`).
+6. The agent sees that it is waiting (`agent._interrupt_state.activated`) and builds the responses with `resume_prompt()`:
+   - With `confirmations`, an interrupt is approved only if the click for its id says `approved: true`. A pending interrupt with no matching click counts as No.
+   - Without `confirmations` (the customer typed instead of tapping), every pending interrupt is a No that carries the typed text.
+7. Strands resumes the saved tool call without calling the model first:
+   - **Yes:** the tool runs. On `block_credit_card` and `open_claim`, `customer_confirmed` is set to `true` first.
+   - **No:** the call is cancelled with "Not done: the customer chose No. Don't call this tool again unless they ask for it."
+   - **Typed reply:** the call is cancelled with a message that quotes the text (up to 300 characters, with `"` replaced by `'`) and tells the model to answer it.
 
-### Frontend Parser
+The resumed call is not announced again, so the stream has no `current_tool_use` events for it. The first event about it is the user `message` with its `toolResult`. That is why `ChatInterface.tsx` creates the tool segment itself when the customer taps Yes: the result needs a segment to land in.
 
-**File:** `frontend/src/lib/agentcore-client/parsers/converse.ts`
+## Errors
 
-To use this parser instead of the default strands parser, update `client.ts`:
+`invocations()` yields `{"status": "error", "error": "<message>"}` in three cases:
 
-```typescript
-import { parseConverseChunk } from "./parsers/converse";
+- `prompt` or `runtimeSessionId` is missing.
+- An evaluator's override is invalid: `"eval override rejected: ..."`.
+- Any exception while the agent is built or run: `str(e)`. This includes a failed Cognito token call, a missing environment variable, a registry MCP server that can't be reached, and a failed summary on context overflow.
 
-const PARSERS: Record<AgentPattern, ChunkParser> = {
-  "strands-single-agent": parseConverseChunk,  // Switch to Converse parser
-  ...
-};
-```
+The frontend parser has no branch for these events (`parsers/strands.ts`), so nothing in the chat reacts to them. A non-2xx HTTP response is different: `client.ts` throws on it, and `ChatInterface.tsx` shows the error.
 
-The parser handles raw Bedrock Converse events:
+## Guardrail and streaming
 
-```typescript
-export const parseConverseChunk: ChunkParser = (line, callback) => {
-  if (!line.startsWith("data: ")) return;
-  const json = JSON.parse(line.substring(6).trim());
+The model runs with `guardrail_stream_processing_mode: "sync"` (`agent/ledgerlens/tools/guardrail.py`). Bedrock holds each reply chunk until the guardrail has checked it, so a blocked reply never shows halfway. When the guardrail blocks the customer's message, Bedrock replies with the guardrail's blocked message, and it streams as ordinary `data` events.
 
-  const event = json.event;
-  if (event) {
-    // Text streaming
-    if (event.contentBlockDelta?.delta?.text) {
-      callback({ type: "text", content: event.contentBlockDelta.delta.text });
-    }
+## Leaked markup filter
 
-    // Tool use start
-    if (event.contentBlockStart?.start?.toolUse) {
-      const toolUse = event.contentBlockStart.start.toolUse;
-      callback({ type: "tool_use_start", toolUseId: toolUse.toolUseId, name: toolUse.name });
-    }
+On Bedrock, DeepSeek V3.2 sometimes starts its text after a tool call with its raw tool-call marker, `<｜DSML｜function_calls`. The bars are the full-width `｜` (U+FF5C). `LeakedMarkupFilter` (`agent/ledgerlens/tools/leaked_markup.py`) keeps the marker out of the chat:
 
-    // Tool use input streaming
-    if (event.contentBlockDelta?.delta?.toolUse?.input) {
-      callback({ type: "tool_use_delta", toolUseId: currentToolUseId, input: ... });
-    }
+- In a `data` event, it removes the marker (and a space right after it) from the text. If the text then ends with the start of the marker, that tail is held back, because the rest of the marker may come in the next chunk.
+- A `data` event left with no text is dropped.
+- On a `message` or `result` event, any held text is sent first as a bare `{"data": "<held text>"}` event. Then the event itself goes out, with the marker removed from the text blocks of `message` events.
+- All other events pass through unchanged.
 
-    // Message stop
-    if (event.messageStop?.stopReason) {
-      callback({ type: "result", stopReason: event.messageStop.stopReason });
-    }
-  }
-};
-```
-
-See the full implementation in the source file for edge cases.
-
-### Event Structure
-
-Converse events are nested under the `event` key:
-
-```javascript
-// Message lifecycle
-data: {"event": {"messageStart": {"role": "assistant"}}}
-
-// Text streaming
-data: {"event": {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "Hello"}}}}
-data: {"event": {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": " there"}}}}
-
-// Tool use start
-data: {"event": {"contentBlockStart": {"contentBlockIndex": 1, "start": {"toolUse": {"toolUseId": "tool_abc123", "name": "text_analysis"}}}}}
-
-// Tool use input streaming
-data: {"event": {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"toolUse": {"input": "{\"text\": \"hello\"}"}}}}}
-
-// Content block and message completion
-data: {"event": {"contentBlockStop": {"contentBlockIndex": 0}}}
-data: {"event": {"messageStop": {"stopReason": "end_turn"}}}
-
-// Metadata
-data: {"event": {"metadata": {"usage": {"inputTokens": 88, "outputTokens": 30}}}}
-```
-
-**Reference:** [Bedrock Converse Stream API](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/bedrock-runtime/client/converse_stream.html)
-
----
-
-## LangGraph/LangChain Implementation
-
-**Note:** LangGraph uses tuple-based streaming `(message_chunk, metadata)` and returns LangChain message objects with content as an array.
-
-### Backend
-
-**File:** `patterns/langgraph-single-agent/langgraph_agent.py`
-
-```python
-# Stream with messages mode - yields raw LangChain message chunks
-async for event in graph.astream(
-    {"messages": [("user", user_query)]},
-    config=config,
-    stream_mode="messages"
-):
-    message_chunk, metadata = event
-    yield message_chunk.model_dump()  # Serialize to JSON-safe dict
-```
-
-### Event Structure
-
-LangGraph emits LangChain message objects that serialize to JSON with content as an **array of content blocks**:
-
-```javascript
-// Text streaming (AIMessageChunk)
-data: {"content": [{"type": "text", "text": "Hello", "index": 0}], "type": "AIMessageChunk", ...}
-data: {"content": [{"type": "text", "text": " there", "index": 0}], "type": "AIMessageChunk", ...}
-
-// Tool use start — content block has id and name
-data: {"content": [{"type": "tool_use", "id": "tool_abc123", "name": "text_analysis", "input": {}, "index": 1}], "type": "AIMessageChunk", ...}
-
-// Tool input streaming — partial_json carries incremental input
-data: {"content": [{"type": "tool_use", "partial_json": "{\"text\":", "index": 1}], "type": "AIMessageChunk", ...}
-data: {"content": [{"type": "tool_use", "partial_json": " \"hello\"}", "index": 1}], "type": "AIMessageChunk", ...}
-
-// Tool response (ToolMessage — separate message type)
-data: {"content": "Tool result text", "type": "tool", "name": "text_analysis", "tool_call_id": "tool_abc123", ...}
-
-// Stop reason
-data: {"content": [], "type": "AIMessageChunk", "response_metadata": {"stop_reason": "end_turn"}, ...}
-
-// Final chunk with usage metadata
-data: {"content": [], "type": "AIMessageChunk", "chunk_position": "last", "usage_metadata": {"input_tokens": 88, "output_tokens": 30}}
-```
-
-**Current parser handles:**
-- `AIMessageChunk` with `content[].type === "text"`: Text tokens for display
-- `AIMessageChunk` with `content[].type === "tool_use"` + `id` + `name`: Tool call start
-- `AIMessageChunk` with `content[].type === "tool_use"` + `partial_json`: Streaming tool input
-- `type === "tool"` (ToolMessage): Tool execution result
-- `response_metadata.stop_reason`: Stream completion
-
-**Key difference from Strands:** LangGraph's `content` is always an array of typed blocks (text, tool_use), not a flat string. Tool results come as separate `ToolMessage` objects, not nested in user messages.
-
-### Frontend Parser
-
-**File:** `frontend/src/lib/agentcore-client/parsers/langgraph.ts`
-
-Same pattern — parses SSE lines and emits typed events. LangGraph uses LangChain message types:
-
-```typescript
-export const parseLanggraphChunk: ChunkParser = (line, callback) => {
-  if (!line.startsWith("data: ")) return;
-  const json = JSON.parse(line.substring(6).trim());
-
-  // Tool result: {"type": "tool", "tool_call_id": "...", "content": "result"}
-  if (json.type === "tool") {
-    callback({ type: "tool_result", toolUseId: json.tool_call_id, result: json.content });
-  }
-
-  // AIMessageChunk — content is an array of blocks
-  if (json.type === "AIMessageChunk" && Array.isArray(json.content)) {
-    for (const block of json.content) {
-      if (block.type === "text" && block.text) {
-        callback({ type: "text", content: block.text });
-      }
-      if (block.type === "tool_use" && block.id && block.name) {
-        callback({ type: "tool_use_start", toolUseId: block.id, name: block.name });
-      }
-    }
-
-    // Stop reason from response metadata
-    if (json.response_metadata?.stop_reason) {
-      callback({ type: "result", stopReason: json.response_metadata.stop_reason });
-    }
-  }
-};
-```
-
-See the full implementation for tool input delta streaming and edge cases.
-
-**Key Points:**
-- Filter by `type === 'AIMessageChunk'` to only process assistant responses
-- Ignore `ToolMessage` and other internal message types
-- `content` is an **array of content blocks**, not a string
-- Each block has `type`, `text`, and `index` fields
-- Filter for `type === 'text'` to extract text content
-- Join multiple text blocks if present
-
-**Why Content is an Array:**
-LangChain uses content blocks to support multimodal messages (text, images, tool calls) following the Anthropic/OpenAI message format.
-
-**References:**
-- [LangGraph Streaming](https://docs.langchain.com/oss/python/langgraph/streaming)
-- [LangChain Streaming](https://docs.langchain.com/oss/python/langchain/streaming)
-
----
-
-## Adding a New Agent Pattern
-
-1. Create `patterns/my-pattern/` with your agent code
-2. Create a parser: `frontend/src/lib/agentcore-client/parsers/my-pattern.ts`
-   - Export a `ChunkParser` function that converts SSE lines into `StreamEvent`s via `callback()`
-3. Register it in `frontend/src/lib/agentcore-client/client.ts` (add to the parser map in the constructor)
-4. Set `pattern: my-pattern` in `infra-cdk/config.yaml`
-
----
+So one Strands event can become zero, one or two events on the wire.
 
 ## Debugging
 
-Enable console logging in the parser:
-
-```javascript
-console.log('[Streaming Event]', data);
-```
-
-Open browser console (F12) to see all events from your agent.
+- To see every raw event, add `console.log("[Streaming Event]", data)` at the top of the parser in `parsers/strands.ts`, after `data` is read. Then open the browser console.
+- The evaluation harness in `evals/` grades sessions from this same stream ([evals/README.md](../evals/README.md)).
+- Strands streaming reference: [strandsagents.com, streaming overview](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/streaming/overview/).

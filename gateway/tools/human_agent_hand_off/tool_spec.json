@@ -1,0 +1,34 @@
+[
+  {
+    "name": "human_agent_hand_off",
+    "description": "Sends the conversation to a human agent, who continues in this same chat. Use when the customer asks for a person, when a rule says to offer one (the call is the offer: the app asks the customer Yes or No before it runs), or when you can't resolve the request. The summary must let the agent continue without asking the customer anything again: the card's last 4 digits, the transactions, what was blocked or opened (with ids) and what the customer said. Returns JSON with 'hand_off_id', 'status', 'priority', 'reason', 'customer_id', 'summary' and 'related_ids'. After it succeeds, say goodbye in one or two sentences: a person will continue in this same chat and the customer won't need to repeat anything. Don't promise a time.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "The authenticated customer's id from get_session_context."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["high", "normal"]
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["FRAUD_CONFIRMED", "CUSTOMER_REQUEST", "UNRESOLVED", "OUT_OF_SCOPE"]
+        },
+        "summary": {
+          "type": "string",
+          "description": "Complete summary for the human agent, at most 2000 characters."
+        },
+        "related_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 20,
+          "description": "Ids of the transactions, claims and other records involved."
+        }
+      },
+      "required": ["customer_id", "priority", "reason", "summary"]
+    }
+  }
+]

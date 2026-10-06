@@ -1,19 +1,17 @@
-stack_name_base: FAST-stack
+stack_name_base: ledgerlens-bank-assistant
+
+# What `cdk deploy --all` deploys: full (data stack, then the main stack) or data (only the
+# data stack). Override per run with: cdk deploy --all -c deploy_scope=data
+deploy_scope: full
 
 # Optional: Set to automatically create an admin user and email credentials
 # If not provided, you'll need to manually create users via AWS Console
 admin_user_email: # Example: admin@example.com
 
 backend:
-  agent_name: FASTAgent # Name for the agent runtime (a-z, A-Z, 0-9, _)
-  pattern: strands-single-agent # See patterns/ for available options
-  # Pattern prefix determines the frontend parser:
-  #   agui-*      → AG-UI parser      (e.g. agui-strands-agent)
-  #   strands-*   → Strands parser    (e.g. strands-single-agent)
-  #   langgraph-* → LangGraph parser  (e.g. langgraph-single-agent)
-  #   claude-*    → Claude parser     (e.g. claude-agent-sdk-single-agent)
-  # The folder name must match exactly and start with the desired parser prefix.
-  deployment_type: docker # Available deployment types: docker (default), zip (not supported for claude-agent-sdk)
+  agent_name: ledgerlens_agent # Name for the agent runtime (a-z, A-Z, 0-9, _)
+  pattern: ledgerlens # Agent folder under agent/ to deploy
+  deployment_type: docker # Available deployment types: docker (default), zip
   network_mode: PUBLIC # Available network modes: PUBLIC (default), VPC
 
   # Long-term memory uses a SemanticMemoryStrategy to extract and store facts across sessions.
@@ -23,6 +21,33 @@ backend:
   use_long_term_memory: false
   ltm_top_k: 10             # Number of facts to retrieve per turn (default: 10)
   ltm_relevance_score: 0.3  # Minimum similarity threshold for retrieval (default: 0.3)
+
+  # Bedrock model the agent runs on, passed to the runtime as MODEL_ID. Use a model ID or an
+  # inference profile ID (e.g. "us.anthropic.claude-haiku-4-5-20251001-v1:0"). Third-party
+  # models need their Marketplace agreement accepted first. The agent sends temperature 0.1,
+  # which GPT-6 models reject.
+  # Claude Haiku 4.5 since the 2026-10-05 evaluation (evals/README.md): 8/10 cases passed on
+  # every run vs DeepSeek V3.2's 4/10, and none of DeepSeek's bare tool names or malformed args.
+  model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+  # Models an evaluation login (Cognito group "evaluators") may switch to per session,
+  # used by the harness in evals/. Customers always get model_id.
+  eval_model_ids: ["deepseek.v3.2", "openai.gpt-oss-120b-1:0", "global.anthropic.claude-haiku-4-5-20251001-v1:0"]
+  # Short-term memory: how many recent messages the agent sends to the model per turn.
+  # Counts messages, not turns (one tool-using question is ~4-6 messages).
+  stm_window_size: 30
+  # When true, the oldest messages are summarized once the window is exceeded,
+  # instead of being dropped. Each summary costs one extra model call.
+  use_stm_summarization: false
+  stm_summary_ratio: 0.3            # Share of messages summarized each time (0.1-0.8)
+  stm_preserve_recent_messages: 10  # Newest messages never summarized; must be < stm_window_size
+  # Model that writes the summaries. Empty = the agent's own model (model_id).
+  # A cheaper model cuts the cost of each summary, e.g.
+  # "us.anthropic.claude-haiku-4-5-20251001-v1:0".
+  stm_summarization_model_id: ""
+  # System prompt for the summarizer. Empty = the built-in banking prompt
+  # (STM_SUMMARY_PROMPT in tools/conversation_memory.py), which keeps card digits,
+  # amounts, IDs and actions word for word. Use a YAML block (|) for several lines.
+  stm_summarization_prompt: ""
 
   # MCP server discovery + auto-connect from an AWS Agent Registry.
   # Lightweight: no DynamoDB, no UI, no per-user preferences. When enabled, the
@@ -43,3 +68,9 @@ backend:
   #     - subnet-cccc3333dddd4444e
   #   security_group_ids:  # Optional - a default SG is created if omitted
   #     - sg-0abc1234def56789a
+
+
+# Bank "today" for the tools (docs/superpowers/specs/2026-10-02-data-pipeline-design.md, 5.3).
+# The pipeline loads every row; tools read process_date BETWEEN <from> AND as_of.
+data:
+  as_of: "2026-06-17T23:59:59"

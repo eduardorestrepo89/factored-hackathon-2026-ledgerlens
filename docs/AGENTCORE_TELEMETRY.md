@@ -6,7 +6,7 @@ companion CloudFormation solution:
 
 **Reference solution:** [sample-telemetry-enablement-for-agentcore-cloudformation](https://github.com/aws-samples/sample-telemetry-enablement-for-agentcore-cloudformation)
 
-FAST deploys AgentCore Runtime, Gateway, Memory, and Code Interpreter. This
+FAST deploys AgentCore Runtime, Gateway, and Memory. This
 solution creates telemetry enablement rules that apply to **all current and
 future** AgentCore resources of each enabled type in the region, so it covers
 the FAST resources whether you deploy it before or after your FAST stack.
@@ -26,7 +26,7 @@ Two delivery paths are used, depending on CloudFormation schema support:
 | Runtime | `AWS::ObservabilityAdmin::TelemetryRule` | Application logs, usage logs, traces | Yes |
 | Gateway | `Custom::TelemetryRule` (inline Lambda) | Application logs, traces | Yes |
 | Memory | `Custom::TelemetryRule` (inline Lambda) | Application logs, traces | Yes |
-| CodeInterpreter | `AWS::ObservabilityAdmin::TelemetryRule` | Usage logs, traces | Yes |
+| CodeInterpreter | `AWS::ObservabilityAdmin::TelemetryRule` | Usage logs, traces | Optional |
 | Browser | `AWS::ObservabilityAdmin::TelemetryRule` | Usage logs, traces | Optional |
 | WorkloadIdentity | `Custom::TelemetryRule` (inline Lambda) | Application logs, traces | Optional |
 

@@ -6,7 +6,7 @@ so it can be discovered by other agents and services (A2A, MCP, agent skills, or
 custom descriptor).
 
 It is written as a *steering doc*: it describes the full intended design so the
-feature can be (re-)implemented consistently across both IaC stacks. The reference
+feature can be (re-)implemented consistently in the CDK stack. The reference
 implementation lives on the `feat/agentcore-registry` branch's stash — this doc is
 the source of truth for what to build.
 
@@ -20,11 +20,11 @@ the source of truth for what to build.
 ## 1. Architecture overview
 
 ```
-config.yaml / terraform.tfvars
+infra-cdk/config.yaml
         │  registry_id (+ optional name/version/type/auto_submit)
         ▼
 ┌──────────────────────────────────────────────┐
-│ IaC layer (CDK L2 construct │ Terraform module)│
+│ IaC layer (CDK L2 construct)                    │
 │   - builds descriptor JSON from runtime ARN     │
 │   - provisions registry-record Lambda + IAM     │
 │   - invokes Lambda on create/update/delete       │
@@ -39,23 +39,16 @@ config.yaml / terraform.tfvars
 └──────────────────────────────────────────────┘
 ```
 
-**Key design principle: one Lambda, two IaC frontends.** The Python handler in
+**Key design principle: one Lambda owns the registry logic.** The Python handler in
 `infra-cdk/lambdas/registry-record/index.py` is the single source of registry
-logic. Both CDK and Terraform invoke the *same* file:
-
-- **CDK** wires it as a CloudFormation Custom Resource (lifecycle events delivered
-  natively by CloudFormation).
-- **Terraform** zips the same `index.py` and invokes the Lambda directly via
-  `aws lambda invoke` from a `null_resource`, synthesizing the same
-  `RequestType` / `ResourceProperties` payload that CloudFormation would send.
-
-This keeps the registry API contract in exactly one place. Do not fork the logic.
+logic. CDK wires it as a CloudFormation Custom Resource (lifecycle events delivered
+natively by CloudFormation). Keep the registry API contract in that one place.
 
 ---
 
 ## 2. Configuration surface
 
-The feature is opt-in and identical in shape across both stacks.
+The feature is opt-in.
 
 ### CDK — `infra-cdk/config.yaml`
 
@@ -67,16 +60,6 @@ The feature is opt-in and identical in shape across both stacks.
 #   record_version: "1.0"
 #   descriptor_type: CUSTOM  # A2A | MCP | AGENT_SKILLS | CUSTOM
 #   auto_submit: false
-```
-
-### Terraform — `terraform.tfvars`
-
-```hcl
-# registry_id              = "your-registry-id"
-# registry_record_name     = "MyAgent"         # Defaults to stack_name_base
-# registry_record_version  = "1.0"
-# registry_descriptor_type = "CUSTOM"           # A2A | MCP | AGENT_SKILLS | CUSTOM
-# registry_auto_submit     = false
 ```
 
 ### Field reference
@@ -94,7 +77,7 @@ The feature is opt-in and identical in shape across both stacks.
 ## 3. The shared Lambda handler (contract)
 
 `infra-cdk/lambdas/registry-record/index.py` — `requirements.txt`: `boto3>=1.38.0`,
-runtime `python3.13`, handler `handler` (CDK) / `index.handler` (Terraform).
+runtime `python3.13`, handler `handler`.
 
 It dispatches on CloudFormation-style events:
 
@@ -104,8 +87,7 @@ It dispatches on CloudFormation-style events:
 | `Update` | `update_registry_record(...)` | reuses `PhysicalResourceId` from event |
 | `Delete` | `delete_registry_record(...)` | `PhysicalResourceId`; swallows `ResourceNotFoundException` |
 
-**`ResourceProperties` payload** (the IaC → Lambda contract — both stacks must
-produce exactly this):
+**`ResourceProperties` payload** (the IaC → Lambda contract):
 
 ```json
 {
@@ -140,7 +122,7 @@ deployment.
 
 ## 4. Descriptor content
 
-Both stacks build the descriptor JSON from deployment facts. The canonical content:
+CDK builds the descriptor JSON from deployment facts. The canonical content:
 
 ```json
 {
@@ -152,12 +134,8 @@ Both stacks build the descriptor JSON from deployment facts. The canonical conte
 }
 ```
 
-- **CDK** builds this in `backend-construct.ts` using `this.agentRuntime.agentRuntimeArn`
-  and `JSON.stringify(...)`, then passes it as `descriptorContent`.
-- **Terraform** builds the identical object in `registry.tf` via a `local` using
-  `jsonencode({...})` referencing `aws_bedrockagentcore_agent_runtime.main.agent_runtime_arn`.
-
-Keep these two in sync — same keys, same values.
+It is built in `backend-construct.ts` using `this.agentRuntime.agentRuntimeArn`
+and `JSON.stringify(...)`, then passed as `descriptorContent`.
 
 ---
 
@@ -219,46 +197,7 @@ if (config.registry?.registry_id) {
 
 ---
 
-## 6. Terraform implementation
-
-### Module file — `infra-terraform/modules/backend/registry.tf`
-
-Every resource is guarded by `count = var.registry_id != null ? 1 : 0`. Resources:
-
-1. **`aws_cloudwatch_log_group.registry_record`** — `/aws/lambda/<stack>-registry-record`.
-2. **IAM** — assume-role policy doc for `lambda.amazonaws.com`, a role, a policy doc
-   granting CloudWatch Logs + the five registry actions (scoped to registry ARN +
-   `/*`), and the role-policy attachment.
-3. **`data.archive_file.registry_record`** — zips
-   `../../../infra-cdk/lambdas/registry-record/index.py` (reuses the CDK Lambda
-   source — do not duplicate).
-4. **`aws_lambda_function.registry_record`** — python3.13, handler `index.handler`,
-   60s timeout, `depends_on` the log group + role policy.
-5. **`locals`** — `registry_record_name = coalesce(var.registry_record_name, var.stack_name_base)`
-   and `registry_descriptor_content = jsonencode({...})` (the §4 object).
-6. **`null_resource.invoke_registry_record`** — `triggers` capture all inputs so
-   changes re-invoke. Two `local-exec` provisioners:
-   - **create/update**: builds the `Create` payload, `aws lambda invoke`, greps the
-     response for `FunctionError` and fails the apply if present.
-   - **destroy** (`when = destroy`): builds a `Delete` payload and invokes
-     best-effort (`|| true`).
-
-### Variables & wiring
-
-- **`infra-terraform/variables.tf`** — root vars: `registry_id` (default `null`),
-  `registry_record_name` (`null`), `registry_record_version` (`"1.0"`),
-  `registry_descriptor_type` (`"CUSTOM"`, with a `validation` block constraining to
-  the four types), `registry_auto_submit` (`false`).
-- **`infra-terraform/modules/backend/variables.tf`** — mirror the same five vars
-  (module-level).
-- **`infra-terraform/main.tf`** — pass all five from root into `module "backend"`.
-- **`infra-terraform/modules/backend/outputs.tf`** — `registry_lambda_arn` output,
-  conditional: `var.registry_id != null ? aws_lambda_function.registry_record[0].arn : null`.
-- **`infra-terraform/terraform.tfvars.example`** — commented example block.
-
----
-
-## 7. IAM permissions (both stacks)
+## 6. IAM permissions
 
 The registry-record Lambda role requires these `bedrock-agentcore` actions, scoped
 to the registry ARN and its `/*` children:
@@ -278,30 +217,27 @@ arn:aws:bedrock-agentcore:<region>:<account>:registry/<registry_id>
 arn:aws:bedrock-agentcore:<region>:<account>:registry/<registry_id>/*
 ```
 
-The Terraform role additionally needs `logs:CreateLogStream` + `logs:PutLogEvents`
-on the log group (CDK grants logging via the managed execution role automatically).
-
 ---
 
-## 8. Parity checklist
+## 7. Review checklist
 
-When implementing or reviewing, confirm CDK and Terraform stay aligned:
+When implementing or reviewing, confirm:
 
-- [ ] Both invoke the **same** `index.py` (no forked logic).
-- [ ] Identical `ResourceProperties` payload keys/casing (§3).
-- [ ] Identical descriptor content object keys/values (§4).
-- [ ] Same five IAM actions, same ARN scoping (§7).
-- [ ] Same default values (`record_version` `"1.0"`, `descriptor_type` `CUSTOM`, `auto_submit` `false`).
-- [ ] `descriptor_type` validated against the four allowed values in both stacks.
+- [ ] Registry logic lives only in `index.py` (not duplicated in the construct).
+- [ ] `ResourceProperties` payload keys/casing match §3.
+- [ ] Descriptor content object keys/values match §4.
+- [ ] Five IAM actions with the ARN scoping in §6.
+- [ ] Default values (`record_version` `"1.0"`, `descriptor_type` `CUSTOM`, `auto_submit` `false`).
+- [ ] `descriptor_type` validated against the four allowed values.
 - [ ] Feature fully no-ops when `registry_id` is unset/null.
 - [ ] Delete path is idempotent / best-effort (missing record is not an error).
 
 ---
 
-## 9. Testing & verification
+## 8. Testing & verification
 
 1. **No-registry path** — deploy without `registry_id`; confirm no registry Lambda,
-   role, or log group is created (CDK: not synthesized; TF: zero-count).
+   role, or log group is synthesized.
 2. **Create** — set `registry_id`, deploy, confirm a record appears in the registry
    with the expected descriptor and the runtime ARN.
 3. **Update** — bump `record_version` or change descriptor; redeploy; confirm the
@@ -310,5 +246,3 @@ When implementing or reviewing, confirm CDK and Terraform stay aligned:
    status; confirm a submit failure does not fail the deploy (warning only).
 5. **Destroy** — tear down; confirm the record is deleted and a missing record does
    not error.
-6. **CDK ↔ TF parity** — deploy the same config through both; confirm the resulting
-   registry record is equivalent.

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { useI18n } from "@/lib/i18n"
 
 interface FeedbackDialogProps {
   isOpen: boolean
@@ -19,6 +20,7 @@ interface FeedbackDialogProps {
 }
 
 export function FeedbackDialog({ isOpen, onClose, onSubmit, feedbackType }: FeedbackDialogProps) {
+  const { t } = useI18n()
   const [comment, setComment] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -51,9 +53,9 @@ export function FeedbackDialog({ isOpen, onClose, onSubmit, feedbackType }: Feed
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {feedbackType === "positive" ? "Positive Feedback" : "Negative Feedback"}
+            {feedbackType === "positive" ? t("positiveFeedback") : t("negativeFeedback")}
           </DialogTitle>
-          <DialogDescription>Tell us more about your experience (optional)</DialogDescription>
+          <DialogDescription>{t("feedbackPrompt")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2">
@@ -61,20 +63,20 @@ export function FeedbackDialog({ isOpen, onClose, onSubmit, feedbackType }: Feed
             id="feedback-comment"
             value={comment}
             onChange={e => setComment(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            className="w-full px-3 py-2 border bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent resize-none"
             rows={4}
-            placeholder="Share your thoughts..."
+            placeholder={t("feedbackPlaceholder")}
             maxLength={5000}
           />
-          <div className="text-xs text-gray-500 text-right">{comment.length} / 5000</div>
+          <div className="text-xs text-muted-foreground text-right">{comment.length} / 5000</div>
         </div>
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={handleCancel} disabled={isSubmitting}>
-            Cancel
+            {t("cancel")}
           </Button>
           <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
-            {isSubmitting ? "Sending..." : "Send"}
+            {isSubmitting ? t("sending") : t("send")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -19,7 +19,7 @@ Usage:
     uv run scripts/test-agent.py --local
 
     # Override pattern from config
-    uv run scripts/test-agent.py --pattern strands-single-agent
+    uv run scripts/test-agent.py --pattern ledgerlens
 """
 
 import argparse
@@ -97,7 +97,7 @@ def start_local_agent(
         memory_id (str): Memory ID for the agent
         region (str): AWS region
         stack_name (str): CloudFormation stack name for SSM parameter lookup
-        pattern (str): Agent pattern name (e.g., 'strands-single-agent', 'langgraph-single-agent')
+        pattern (str): Agent folder under agent/ (e.g., 'ledgerlens')
 
     Returns:
         subprocess.Popen: Subprocess object for the running agent
@@ -106,8 +106,7 @@ def start_local_agent(
 
     # Map pattern to agent file
     pattern_files = {
-        "strands-single-agent": "basic_agent.py",
-        "langgraph-single-agent": "langgraph_agent.py",
+        "ledgerlens": "ledgerlens_agent.py",
     }
 
     agent_file = pattern_files.get(pattern)
@@ -116,19 +115,19 @@ def start_local_agent(
         print(f"Available patterns: {', '.join(pattern_files.keys())}")
         sys.exit(1)
 
-    agent_path = Path(__file__).parent.parent / "patterns" / pattern / agent_file
+    agent_path = Path(__file__).parent.parent / "agent" / pattern / agent_file
 
     if not agent_path.exists():
         print_msg(f"Agent file not found: {agent_path}", "error")
         sys.exit(1)
 
-    # Security validation: ensure agent_path is within the patterns directory
-    patterns_dir = Path(__file__).parent.parent / "patterns"
+    # Security validation: ensure agent_path is within the agent directory
+    agent_dir = Path(__file__).parent.parent / "agent"
     try:
-        agent_path.resolve().relative_to(patterns_dir.resolve())
+        agent_path.resolve().relative_to(agent_dir.resolve())
     except ValueError:
         print_msg(
-            f"Security error: Agent path outside patterns directory: {agent_path}",
+            f"Security error: Agent path outside agent directory: {agent_path}",
             "error",
         )
         sys.exit(1)
@@ -403,7 +402,7 @@ Examples:
   uv run scripts/test-agent.py --local
   
   # Override pattern for local testing
-  uv run scripts/test-agent.py --local --pattern strands-single-agent
+  uv run scripts/test-agent.py --local --pattern ledgerlens
 
 Notes:
   - Remote mode: Tests deployed agent
@@ -422,7 +421,7 @@ Notes:
     parser.add_argument(
         "--pattern",
         type=str,
-        help="Override agent pattern from config (e.g., 'strands-single-agent', 'langgraph-single-agent')",
+        help="Override agent pattern from config (e.g., 'ledgerlens')",
     )
 
     return parser.parse_args()
@@ -444,9 +443,7 @@ def main():
     if args.local:
         # Determine pattern: CLI arg > config.yaml > default (only needed for local mode)
         pattern = (
-            args.pattern
-            if args.pattern
-            else stack_cfg.get("pattern", "strands-single-agent")
+            args.pattern if args.pattern else stack_cfg.get("pattern", "ledgerlens")
         )
         print(f"Using pattern: {pattern}\n")
         print_section("LOCAL MODE - Auto-starting agent")

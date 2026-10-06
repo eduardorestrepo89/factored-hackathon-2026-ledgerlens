@@ -80,11 +80,42 @@ export class AmplifyHostingConstruct extends Construct {
       })
     )
 
+    // The login tokens live in localStorage, so the CSP is what keeps an injected script from
+    // reading them. connect-src lists every origin the SPA calls: aws-exports.json, Cognito
+    // (OIDC discovery + the hosted-UI token endpoint), the AgentCore runtime and the feedback API.
+    const region = cdk.Aws.REGION
+    const cognitoHostedUi = `https://*.auth.${region}.amazoncognito.com`
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data: blob:",
+      `connect-src 'self' https://cognito-idp.${region}.amazonaws.com ${cognitoHostedUi} https://bedrock-agentcore.${region}.amazonaws.com https://*.execute-api.${region}.amazonaws.com`,
+      `frame-src ${cognitoHostedUi}`, // oidc-client-ts falls back to an iframe for silent renew
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join("; ")
+
     // Create the Amplify app
     this.amplifyApp = new amplify.App(this, "AmplifyApp", {
       appName: `${props.config.stack_name_base}-frontend`,
       description: `${props.config.stack_name_base} - React Frontend`,
       platform: amplify.Platform.WEB,
+      customResponseHeaders: [
+        {
+          pattern: "**",
+          headers: {
+            "Content-Security-Policy": csp,
+            "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+          },
+        },
+      ],
     })
 
     // Create main branch for the Amplify app

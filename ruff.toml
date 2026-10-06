@@ -1,6 +1,6 @@
 # Let's exclude some whole directories until we are ready to format them individually
 extend-exclude = [
-    "patterns",
+    "agent",
     "src",
     
 ]

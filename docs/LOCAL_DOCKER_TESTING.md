@@ -9,19 +9,19 @@ Build and test your AgentCore agent Docker image locally to validate Dockerfile 
 - AgentCore Identity only operates within AgentCore Runtime context
 - OAuth2 M2M authentication cannot be mocked outside Runtime
 
-**What works:** Dockerfile builds, dependency installation, Code Interpreter, non-Gateway tools  
+**What works:** Dockerfile builds, dependency installation, non-Gateway tools  
 **What doesn't work:** AgentCore Gateway tools (MCP-based Lambda tools)
 
 **For full local testing with Gateway support**, use `docker-compose` (see [Local Development Guide](LOCAL_DEVELOPMENT.md)).
 
 ## Why Docker Testing?
 
-| Testing Mode | Gateway Tools | Code Interpreter | Use Case |
-|--------------|---------------|------------------|----------|
-| `test-agent.py --local` | Yes | Yes | Quick Python iteration |
-| **Manual Docker** | No | Yes | Validate Dockerfile/dependencies |
-| **`docker-compose`** | Yes | Yes | Full local development |
-| `test-agent.py` (remote) | Yes | Yes | Test deployed agent |
+| Testing Mode | Gateway Tools | Use Case |
+|--------------|---------------|----------|
+| `test-agent.py --local` | Yes | Quick Python iteration |
+| **Manual Docker** | No | Validate Dockerfile/dependencies |
+| **`docker-compose`** | Yes | Full local development |
+| `test-agent.py` (remote) | Yes | Test deployed agent |
 
 Docker testing validates:
 - Dockerfile builds correctly
@@ -39,12 +39,7 @@ Docker testing validates:
 
 ```bash
 # Build image for your agent pattern
-docker build -f patterns/strands-single-agent/Dockerfile \
-  -t fast-agent-local \
-  --platform linux/arm64 .
-
-# Or for LangGraph pattern
-docker build -f patterns/langgraph-single-agent/Dockerfile \
+docker build -f agent/ledgerlens/Dockerfile \
   -t fast-agent-local \
   --platform linux/arm64 .
 ```
@@ -103,15 +98,14 @@ Since there's no AgentCore Runtime to provide a validated JWT, create a mock uns
 # Generate mock JWT with sub=test-user
 MOCK_JWT=$(python3 -c "import base64,json; h=base64.urlsafe_b64encode(json.dumps({'alg':'none','typ':'JWT'}).encode()).rstrip(b'=').decode(); p=base64.urlsafe_b64encode(json.dumps({'sub':'test-user'}).encode()).rstrip(b'=').decode(); print(f'{h}.{p}.')")
 
-# Test agent (will fail on Gateway tools but Code Interpreter should work)
+# Test agent (will fail on Gateway tools)
 curl -X POST http://localhost:8080/invocations \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $MOCK_JWT" \
-  -d '{"prompt": "Execute Python: print(2+2)", "runtimeSessionId": "test-123"}'
+  -d '{"prompt": "Hello", "runtimeSessionId": "test-123"}'
 ```
 
 **Expected behavior:**
-- Code Interpreter requests will work
 - Gateway tool requests will fail with authentication errors
 
 ## Architecture
@@ -122,7 +116,7 @@ curl -X POST http://localhost:8080/invocations \
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  Docker Container (ARM64)                           │   │
 │  │  ┌─────────────────────────────────────────────┐   │   │
-│  │  │  Agent (basic_agent.py / langgraph_agent.py)│   │   │
+│  │  │  Agent (ledgerlens_agent.py)                │   │   │
 │  │  │  - Listens on :8080                         │   │   │
 │  │  │  - Uses passed AWS credentials              │   │   │
 │  │  │  - Gateway auth will FAIL                   │   │   │
@@ -137,7 +131,6 @@ curl -X POST http://localhost:8080/invocations \
               ┌─────────────────────────────────┐
               │  AWS (Deployed Resources)       │
               │  - AgentCore Memory      (Yes)  │
-              │  - Code Interpreter      (Yes)  │
               │  - AgentCore Gateway     (No)   │
               │  - SSM Parameters        (Yes)  │
               └─────────────────────────────────┘
@@ -209,7 +202,7 @@ docker run --rm -p 8080:8080 \
 To validate Dockerfile without running:
 
 ```bash
-docker build -f patterns/strands-single-agent/Dockerfile \
+docker build -f agent/ledgerlens/Dockerfile \
   -t fast-agent-local \
   --platform linux/arm64 .
 

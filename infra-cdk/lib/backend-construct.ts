@@ -16,11 +16,20 @@ import * as cr from "aws-cdk-lib/custom-resources"
 import { Construct } from "constructs"
 import { AppConfig } from "./utils/config-manager"
 import { AgentCoreRole } from "./utils/agentcore-role"
+import { AgentGuardrail } from "./utils/agent-guardrail"
+import { DataConstruct } from "./data-construct"
 import * as path from "path"
 import * as fs from "fs"
 
+/** What the tool Lambdas need from the data stack to reach Aurora DSQL. */
+export type ToolsData = Pick<
+  DataConstruct,
+  "vpc" | "toolSubnets" | "toolsSecurityGroup" | "toolsRole" | "writeToolsRole" | "privateHost"
+>
+
 export interface BackendConstructProps {
   config: AppConfig
+  data: ToolsData
   userPoolId: string
   userPoolClientId: string
   userPoolDomain: cognito.UserPoolDomain
@@ -81,7 +90,7 @@ export class BackendConstruct extends Construct {
     // since it doesn't directly depend on the gateway.
 
     // Create AgentCore Gateway (before Runtime)
-    this.createAgentCoreGateway(props.config)
+    this.createAgentCoreGateway(props.config, props.data)
 
     // Create AgentCore Runtime resources
     this.createAgentCoreRuntime(props.config)
@@ -101,7 +110,7 @@ export class BackendConstruct extends Construct {
   }
 
   private createAgentCoreRuntime(config: AppConfig): void {
-    const pattern = config.backend?.pattern || "strands-single-agent"
+    const pattern = config.backend?.pattern || "ledgerlens"
 
     const stack = cdk.Stack.of(this)
     const deploymentType = config.backend.deployment_type
@@ -110,20 +119,10 @@ export class BackendConstruct extends Construct {
     let agentRuntimeArtifact: agentcore.AgentRuntimeArtifact
     let zipPackagerResource: cdk.CustomResource | undefined
 
-    if (
-      deploymentType === "zip" &&
-      (pattern === "claude-agent-sdk-single-agent" || pattern === "claude-agent-sdk-multi-agent")
-    ) {
-      throw new Error(
-        "claude-agent-sdk patterns require Docker deployment (deployment_type: docker) " +
-          "because they need Node.js and the claude-code CLI installed at build time."
-      )
-    }
-
     if (deploymentType === "zip") {
       // ZIP DEPLOYMENT: Use Lambda to package and upload to S3 (no Docker required)
       const repoRoot = path.resolve(__dirname, "..", "..") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const patternDir = path.join(repoRoot, "patterns", pattern) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const patternDir = path.join(repoRoot, "agent", pattern) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
 
       // Create S3 bucket for agent code
       const agentCodeBucket = new s3.Bucket(this, "AgentCodeBucket", {
@@ -162,21 +161,9 @@ export class BackendConstruct extends Construct {
       }
       readPatternFiles(patternDir, "")
 
-      // Read shared modules — gateway/ keeps its name, repo-root tools/ is
-      // packaged as agentcore_tools/ to match the Dockerfile convention and
-      // avoid conflicts with the pattern's own tools/ directory
-      const gatewayDir = path.join(repoRoot, "gateway") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      if (fs.existsSync(gatewayDir)) {
-        this.readDirRecursive(gatewayDir, "gateway", agentCode)
-      }
-      const repoToolsDir = path.join(repoRoot, "tools") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      if (fs.existsSync(repoToolsDir)) {
-        this.readDirRecursive(repoToolsDir, "agentcore_tools", agentCode)
-      }
-
-      // Read shared utilities (patterns/utils/) — contains auth.py and ssm.py
-      // used by all agent patterns for JWT extraction and SSM parameter access
-      const utilsDir = path.join(repoRoot, "patterns", "utils") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      // Read shared utilities (agent/utils/) — auth.py and ssm.py, used by the
+      // agent for JWT extraction and SSM parameter access
+      const utilsDir = path.join(repoRoot, "agent", "utils") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       if (fs.existsSync(utilsDir)) {
         this.readDirRecursive(utilsDir, "utils", agentCode)
       }
@@ -216,11 +203,8 @@ export class BackendConstruct extends Construct {
         description: "S3 bucket for agent code deployment packages",
       })
 
-      // Determine the main agent file for the pattern.
-      // Each pattern has a different entry point:
-      //   strands-single-agent → basic_agent.py
-      //   langgraph-single-agent → langgraph_agent.py
-      //   agui-*, claude-* → agent.py
+      // The entry point is the agent folder's only top-level .py file
+      // (agent/ledgerlens → ledgerlens_agent.py).
       const mainFiles = fs.readdirSync(patternDir).filter(
         (f: string) => f.endsWith(".py") && f !== "__init__.py"
       )
@@ -242,7 +226,7 @@ export class BackendConstruct extends Construct {
         path.resolve(__dirname, "..", ".."), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         {
           platform: ecr_assets.Platform.LINUX_ARM64,
-          file: `patterns/${pattern}/Dockerfile`,
+          file: `agent/${pattern}/Dockerfile`,
         }
       )
     }
@@ -316,17 +300,21 @@ export class BackendConstruct extends Construct {
       })
     )
 
-    // Add Code Interpreter permissions
+    // Guardrail on the agent's model: blocks prompt attacks and topics unrelated to
+    // banking, masks nothing. See lib/utils/agent-guardrail.ts.
+    const guardrail = new AgentGuardrail(this, "AgentGuardrail", {
+      namePrefix: config.stack_name_base,
+    })
     agentRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: "CodeInterpreterAccess",
+        sid: "GuardrailAccess",
         effect: iam.Effect.ALLOW,
-        actions: [
-          "bedrock-agentcore:StartCodeInterpreterSession",
-          "bedrock-agentcore:StopCodeInterpreterSession",
-          "bedrock-agentcore:InvokeCodeInterpreter",
+        actions: ["bedrock:ApplyGuardrail"],
+        resources: [
+          guardrail.guardrailArn,
+          // The Standard tier's cross-region profile, in every region it may route to.
+          `arn:aws:bedrock:*:${this.account}:guardrail-profile/${guardrail.guardrailProfileId}`,
         ],
-        resources: [`arn:aws:bedrock-agentcore:${this.region}:aws:code-interpreter/*`],
       })
     )
 
@@ -425,17 +413,29 @@ export class BackendConstruct extends Construct {
       // See config.yaml: ltm_top_k and ltm_relevance_score.
       LTM_TOP_K: String(config.backend.ltm_top_k),
       LTM_RELEVANCE_SCORE: String(config.backend.ltm_relevance_score),
+      // The agent's Bedrock model. See config.yaml: model_id.
+      MODEL_ID: config.backend.model_id,
+      // Models the "evaluators" Cognito group may pick per session. See config.yaml: eval_model_ids.
+      EVAL_MODEL_IDS: config.backend.eval_model_ids.join(","),
+      // Short-term memory: sliding window, optionally summarizing what falls out.
+      // See config.yaml: stm_window_size, use_stm_summarization, stm_summary_ratio,
+      // stm_preserve_recent_messages, stm_summarization_model_id, stm_summarization_prompt.
+      STM_WINDOW_SIZE: String(config.backend.stm_window_size),
+      USE_STM_SUMMARIZATION: config.backend.use_stm_summarization ? "true" : "false",
+      STM_SUMMARY_RATIO: String(config.backend.stm_summary_ratio),
+      STM_PRESERVE_RECENT_MESSAGES: String(config.backend.stm_preserve_recent_messages),
+      // Empty means the agent's own model and the built-in prompt.
+      STM_SUMMARIZATION_MODEL_ID: config.backend.stm_summarization_model_id,
+      STM_SUMMARIZATION_PROMPT: config.backend.stm_summarization_prompt,
       // Discover + auto-connect MCP servers from an AWS Agent Registry (opt-in).
       // When enabled, the agent lists the registry's Approved MCP records and
       // connects to each public streamable-HTTP server at runtime. See
       // config.yaml: mcp_registry and docs/MCP_REGISTRY_DISCOVERY.md.
       MCP_REGISTRY_DISCOVERY_ENABLED: config.backend.mcp_registry.enabled ? "true" : "false",
       MCP_REGISTRY_ID: config.backend.mcp_registry.registry_id,
-    }
-
-    // Add claude-agent-sdk specific environment variable
-    if (pattern === "claude-agent-sdk-single-agent" || pattern === "claude-agent-sdk-multi-agent") {
-      envVars["CLAUDE_CODE_USE_BEDROCK"] = "1"
+      // Read by agent/ledgerlens/tools/guardrail.py.
+      GUARDRAIL_ID: guardrail.guardrailId,
+      GUARDRAIL_VERSION: guardrail.guardrailVersion,
     }
 
     // Create the runtime using L2 construct
@@ -455,13 +455,6 @@ export class BackendConstruct extends Construct {
       },
       description: `${pattern} agent runtime for ${config.stack_name_base}`,
     })
-
-    // AGUI protocol override — CloudFormation doesn't support AGUI enum yet
-    // (only MCP | HTTP | A2A). Runtime deploys as HTTP, which also works properly.
-    // if (pattern.startsWith("agui-")) {
-    //   const cfnRuntime = this.agentRuntime.node.defaultChild as cdk.CfnResource
-    //   cfnRuntime.addPropertyOverride("ProtocolConfiguration", "AGUI")
-    // }
 
     // Make sure that ZIP is uploaded before Runtime is created
     if (zipPackagerResource) {
@@ -696,28 +689,12 @@ export class BackendConstruct extends Construct {
     })
   }
 
-  private createAgentCoreGateway(config: AppConfig): void {
-    // Create sample tool Lambda
-    const toolLambda = new lambda.Function(this, "SampleToolLambda", {
-      runtime: lambda.Runtime.PYTHON_3_13,
-      handler: "sample_tool_lambda.handler",
-      code: lambda.Code.fromAsset(path.join(__dirname, "../../gateway/tools/sample_tool")), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      timeout: cdk.Duration.seconds(30),
-      logGroup: new logs.LogGroup(this, "SampleToolLambdaLogGroup", {
-        logGroupName: `/aws/lambda/${config.stack_name_base}-sample-tool`,
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
-    })
-
+  private createAgentCoreGateway(config: AppConfig, data: ToolsData): void {
     // Create comprehensive IAM role for gateway
     const gatewayRole = new iam.Role(this, "GatewayRole", {
       assumedBy: new iam.ServicePrincipal("bedrock-agentcore.amazonaws.com"),
       description: "Role for AgentCore Gateway with comprehensive permissions",
     })
-
-    // Lambda invoke permission
-    toolLambda.grantInvoke(gatewayRole)
 
     // Bedrock permissions (region-agnostic)
     gatewayRole.addToPolicy(
@@ -778,9 +755,6 @@ export class BackendConstruct extends Construct {
         ],
       })
     )
-
-    // Load tool specification from JSON file
-    const toolSpecPath = path.join(__dirname, "../../gateway/tools/sample_tool/tool_spec.json") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
 
     // Cognito OAuth2 configuration for gateway
     const cognitoIssuer = `https://cognito-idp.${this.region}.amazonaws.com/${this.userPool.userPoolId}`
@@ -892,15 +866,66 @@ export class BackendConstruct extends Construct {
       description: "AgentCore Gateway with MCP protocol and JWT authentication",
     })
 
-    // Create Gateway Target using L2 addLambdaTarget().
-    // This grants the gateway role invoke permission and adds the resource-based
-    // Lambda permission the CreateGatewayTarget dry-run validation requires.
-    const gatewayTarget = gateway.addLambdaTarget("GatewayTarget", {
-      gatewayTargetName: "sample-tool-target",
-      description: "Sample tool Lambda target",
-      lambdaFunction: toolLambda,
-      toolSchema: agentcore.ToolSchema.fromLocalAsset(toolSpecPath),
-      // credentialProviderConfigurations defaults to [GatewayCredentialProvider.iamRole()]
+    // One Gateway target (MCP tool) per LedgerLens tool, each backed by its own Lambda,
+    // named ledgerlens-<slug>. The DSQL tools run in the data stack's VPC, in the DSQL
+    // endpoint's subnet: the read tools as ll_read (tools role), block_credit_card and
+    // open_claim as ll_write (write tools role, their DSQL_DB_USER default). The subnets are
+    // public, but Lambdas get no public IP, so the tools reach only the DSQL endpoint.
+    // The hand-off tool calls no AWS service, so it runs outside the VPC with the default role
+    // (docs/superpowers/specs/2026-10-03-human-hand-off-frontend-design.md).
+    // addLambdaTarget() grants the gateway role invoke permission.
+    // Target names are <slug>-target, so each tool's Cedar action is
+    // "<slug>-target___<tool>" (gateway/policies/policy.cedar). The model sees
+    // "gateway_<target>___<tool>", and Bedrock rejects every request if one tool name
+    // is over 64 characters, so a long tool gets a shorter target name.
+    const readRole: iam.IRole = data.toolsRole
+    const writeRole: iam.IRole = data.writeToolsRole
+    const toolTargets = [
+      { tool: "list_credit_cards", id: "ListCreditCards", role: readRole },
+      { tool: "list_card_transactions", id: "ListCardTransactions", role: readRole },
+      { tool: "get_session_context", id: "GetSessionContext", role: readRole },
+      { tool: "transaction_fraud_detection", id: "TransactionFraudDetection", role: readRole, target: "fraud-detection-target" },
+      { tool: "explain_transaction", id: "ExplainTransaction", role: readRole },
+      { tool: "classify_call_type", id: "ClassifyCallType", role: readRole },
+      { tool: "block_credit_card", id: "BlockCreditCard", role: writeRole },
+      { tool: "open_claim", id: "OpenClaim", role: writeRole },
+      { tool: "human_agent_hand_off", id: "HumanAgentHandOff" },
+    ].map(({ tool, id, target, role }) => {
+      const slug = tool.replace(/_/g, "-")
+      const toolFunction = new PythonFunction(this, `${id}Fn`, {
+        functionName: `ledgerlens-${slug}`,
+        runtime: lambda.Runtime.PYTHON_3_13,
+        architecture: lambda.Architecture.ARM_64,
+        entry: path.join(__dirname, "..", "..", "gateway", "tools", tool), // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        index: `${tool}_lambda/delivery/handler.py`,
+        handler: "handler",
+        // local test runs leave bytecode caches in the tool folder; don't ship them
+        bundling: { assetExcludes: ["**/__pycache__", "**/*.pyc"] },
+        // only the DSQL tools join the VPC and reach the database
+        timeout: cdk.Duration.seconds(role ? 30 : 10),
+        ...(role && {
+          role,
+          vpc: data.vpc,
+          vpcSubnets: data.toolSubnets,
+          allowPublicSubnet: true,
+          securityGroups: [data.toolsSecurityGroup],
+          environment: { DSQL_CLUSTER_ENDPOINT: data.privateHost, AS_OF: config.data.as_of },
+        }),
+        logGroup: new logs.LogGroup(this, `${id}Logs`, {
+          logGroupName: `/aws/lambda/${config.stack_name_base}-${slug}`,
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+        }),
+      })
+      return gateway.addLambdaTarget(`${id}Target`, {
+        gatewayTargetName: target ?? `${slug}-target`,
+        description: `LedgerLens ${tool} tool`,
+        lambdaFunction: toolFunction,
+        toolSchema: agentcore.ToolSchema.fromLocalAsset(
+          path.join(__dirname, "../../gateway/tools", tool, "tool_spec.json") // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        ),
+        // credentialProviderConfigurations defaults to [GatewayCredentialProvider.iamRole()]
+      })
     })
 
     // Ensure proper creation order
@@ -926,14 +951,11 @@ export class BackendConstruct extends Construct {
     // JWT claims. You can define custom claim names and match them in Cedar.
     //
     // The Cedar action name format is: "<TargetName>___<tool_name>" (triple underscore).
-    // Tool name comes from tool_spec.json: "text_analysis_tool"
-    // Target name is "sample-tool-target"
+    // Tool names come from each tool's tool_spec.json; target names are <slug>-target.
     //
-    // THREE POLICY VERSIONS FOR DEMO TESTING:
-    // - Version 1: Guest has full access — all departments can use tools
-    // - Version 2: Guest denied — only finance/engineering can use tools
-    //
-    // To switch versions: edit gateway/policies/policy.cedar, then run `cdk deploy`
+    // gateway/policies/policy.cedar permits the LedgerLens tools only for a token with
+    // a customer_id claim, and forbids any call whose customer_id input differs from it.
+    // To change the rules: edit policy.cedar, then run `cdk deploy`.
     //
     // CEDAR POLICY SYNTAX NOTES:
     // - Each create_policy call creates one policy containing one Cedar statement.
@@ -1031,12 +1053,13 @@ export class BackendConstruct extends Construct {
         // Policy name format: {PolicyEngineName}_cp_{timestamp}
         // The AgentCore API enforces a 48-character limit on policy names.
         PolicyEngineName: `${config.stack_name_base.replace(/-/g, "_")}_policy_engine`,
-        Description: "Department-based tool access control for AgentCore Policy demo",
+        Description: "Per-customer tool access control for LedgerLens",
       },
     })
 
-    // Policy must be created after the Gateway and its target are ready
-    cedarPolicy.node.addDependency(gatewayTarget)
+    // Policy must be created after the Gateway and its targets are ready: CreatePolicy
+    // fails on an action whose target doesn't exist yet.
+    toolTargets.forEach((target) => cedarPolicy.node.addDependency(target))
 
     // Store AgentCore Gateway URL in SSM for AgentCore Runtime access
     new ssm.StringParameter(this, "GatewayUrlParam", {
@@ -1061,23 +1084,13 @@ export class BackendConstruct extends Construct {
       description: "AgentCore Gateway ARN",
     })
 
-    new cdk.CfnOutput(this, "GatewayTargetId", {
-      value: gatewayTarget.targetId,
-      description: "AgentCore Gateway Target ID",
-    })
-
-    new cdk.CfnOutput(this, "ToolLambdaArn", {
-      description: "ARN of the sample tool Lambda",
-      value: toolLambda.functionArn,
-    })
-
     new cdk.CfnOutput(this, "PolicyEngineId", {
       description: "ID of the Policy Engine for Cedar policies",
       value: cedarPolicy.getAttString("PolicyEngineId"),
     })
 
     new cdk.CfnOutput(this, "CedarPolicyId", {
-      description: "ID of the Cedar policy for department-based access control",
+      description: "ID of the Cedar policy for per-customer access control",
       value: cedarPolicy.getAttString("PolicyId"),
     })
   }

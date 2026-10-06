@@ -1,198 +1,173 @@
-# Fullstack AgentCore Solution Template (FAST)
+# LedgerLens
 
-_Author's note: for the official name for this solution is the "Fullstack Solution Template for Agentcore" but it is referred to throughout this code base as FAST for convenience._
+LedgerLens is a customer-service agent for LATAM Bank's credit card holders. It answers questions about their cards and charges in the bank's app chat, blocks a card or opens a fraud claim when the customer confirms, and hands the case to a person with a summary. It is the team's entry to the Factored AI & Data Hackathon 2026, built on AWS from the [Fullstack AgentCore Solution Template (FAST)](https://github.com/awslabs/fullstack-solution-template-for-agentcore).
 
-The Fullstack AgentCore Solution Template (FAST) is a starter project repository that enables users (delivery scientists and engineers) to quickly deploy a secured, web-accessible React frontend connected to an AgentCore backend. Its purpose is to accelerate building full stack applications on AgentCore from weeks to days by handling the undifferentiated heavy lifting of infrastructure setup and to enable vibe-coding style development on top. The only central dependency of FAST is AgentCore. It is agnostic to agent SDK (Strands, LangGraph, etc) and to coding assistant platforms (Q, Kiro, Cline, Claude Code, etc).
+Live app: https://main.dteq5fgkcy7a4.amplifyapp.com (us-east-1). Repository: [eduardorestrepo89/factored-hackathon-2026-ledgerlens](https://github.com/eduardorestrepo89/factored-hackathon-2026-ledgerlens).
 
-FAST is designed with security and vibe-codability as primary tenets. Best practices and knowledge from experts are codified in _documentation_ in this repository rather than in _code_. By including this documentation in an AI coding assistant's context, or by instructing the AI coding assistant to leverage best practices and code snippets found in the documentation, delivery scientists and developers can quickly vibe-build AgentCore applications for any use case. AI coding assistants can be used to fully customize the frontend and the infrastructure, enabling scientists to focus the areas where their knowledge is most impactful: the actual prompt engineering and GenAI implementation details.
+## 📚 Documentation
 
-With FAST as a starting point and development framework, delivery scientists and engineers will accelerate their development process and deliver production quality AgentCore code following architecture and security best practices without having to learn any frontend or infrastructure code.
+| Document | What it covers |
+|---|---|
+| [Architecture](docs/architecture.md) | Components, the request path and the security layers |
+| [Structure](docs/structure.md) | What each folder holds |
+| [Installation](docs/installation.md) | Setting up a development machine |
+| [Technical decisions](docs/decisions.md) | Why the system is built the way it is |
+| [Usage guide](docs/usage.md) | Using the app, logins and personas, smoke scripts |
+| [API](docs/api.md) | The runtime invocation, the stream events, the Gateway tools and the feedback API |
+| [Testing](docs/testing.md) | Unit, frontend, CDK and evaluation tests |
+| [Deployment](docs/DEPLOYMENT.md) | Deploying the stacks and the frontend, and operating the data pipeline |
 
-## FAST Baseline System
+More docs, by topic:
+- **Agent:** [agent/ledgerlens/README.md](agent/ledgerlens/README.md), [STREAMING](docs/STREAMING.md), [CONTEXT_MANAGEMENT](docs/CONTEXT_MANAGEMENT.md), [MEMORY_INTEGRATION](docs/MEMORY_INTEGRATION.md), [MCP_REGISTRY_DISCOVERY](docs/MCP_REGISTRY_DISCOVERY.md).
+- **Frontend:** [frontend/README.md](frontend/README.md).
+- **Gateway and auth:** [GATEWAY](docs/GATEWAY.md), [CEDAR_POLICY_GUIDE](docs/CEDAR_POLICY_GUIDE.md), [IDENTITY_POLICY](docs/IDENTITY_POLICY.md), [RUNTIME_GATEWAY_AUTH](docs/RUNTIME_GATEWAY_AUTH.md), [REPLACING_COGNITO](docs/REPLACING_COGNITO.md).
+- **Data:** [LATAM_Bank_ERD](docs/LATAM_Bank_ERD.md), the [data pipeline spec](docs/superpowers/specs/2026-10-02-data-pipeline-design.md) and the [curate stage spec](docs/superpowers/specs/2026-10-03-curate-stage-design.md).
+- **Operations:** [OBSERVABILITY](docs/OBSERVABILITY.md), [evals/README.md](evals/README.md) (the evaluation harness).
+- **Design:** [LEDGERLENS_PRODUCT_DESIGN](docs/LEDGERLENS_PRODUCT_DESIGN.md), the [architecture diagram](docs/architecture-diagram/ledgerlens-architecture.drawio) (draw.io). `docs/superpowers/specs/` and `docs/superpowers/plans/` are dated design records: they show what was decided and when, not necessarily the current code.
 
-FAST comes deployable out-of-the-box with a fully functioning, full-stack application. This application represents starts as a basic multi-turn chat agent where the backend agent has access to tools. **Do not let this deter you, even if your use case is entirely different! If your application requires AgentCore, customizing FAST to any use case is extremely straightforward. That is the intended use of FAST!**
+## Description
 
-The application is intentionally kept very, very simple to allow developers to easily build up whatever they want on top of the baseline. The tools shipped out of the box include:
+Card holders contact the bank about a few recurring things: a purchase that was declined, a charge they don't recognise, a charge in another currency, a card that was lost or stolen. A generic chatbot makes them explain the problem from scratch and can't act on it. LedgerLens starts from the customer's own records and can act, but only with their consent.
 
-1. **Gateway Tools** - Lambda-based tools behind AgentCore Gateway with authentication:
-   - Text analysis tool (counts words and letter frequency)
-   
-2. **Code Interpreter** - Direct integration with Amazon Bedrock AgentCore Code Interpreter:
-   - Secure Python code execution in isolated sandbox
-   - Session management with state persistence
-   - Pre-built runtime with common libraries
+What it does:
+- **Knows why the customer is likely here.** At the start of a session the agent loads the customer's profile, cards, last 72 hours of card transactions, recent app signals and open cases (`get_session_context`), plus up to 3 likely reasons for the contact (`classify_call_type`). It opens with the most likely one and asks whether that's it.
+- **Explains charges from the records.** Merchant, amount, status, a decline's recorded meaning and, for a charge in another currency, the amount in the card's currency at that day's rate. When the records don't explain something, it says so instead of guessing.
+- **Acts only after a Yes.** Blocking a card, opening a claim and handing off to a person each wait for the customer to tap Yes on buttons in the chat.
+- **Speaks the customer's language.** The data's customers are in Argentina, Colombia and México. The agent replies in Spanish, Portuguese or English, following the customer, and the UI is available in the same three languages.
 
-Try asking the agent to analyze text or execute Python code to see these tools in action.
+A typical journey, a charge the customer doesn't recognise:
+1. The agent finds the charge (`list_card_transactions`) and explains it (`explain_transaction`).
+2. It can check the charge with the bank's fraud engine (`transaction_fraud_detection`). The verdict is never shown to the customer and never starts the fraud flow on its own: the customer saying they don't recognise the charge does.
+3. It offers to block the card. The app shows Yes/No, then a demo identity check; only Yes runs `block_credit_card`.
+4. It lists the card's recent charges, asks which ones the customer doesn't recognise, and opens a fraud claim for them (`open_claim`, again behind Yes/No). It gives the claim id and, when the bank's history has one, how long similar claims usually take.
+5. If the customer asks for a person, it hands off (`human_agent_hand_off`) with a summary. The screen splits into the customer's phone and a human agent's desk, so the person continues in the same chat and the customer repeats nothing. The desk is a front-end demo: the hand-off tool calls no other service.
 
+Other journeys: a declined purchase, a pending or reversed charge, a foreign-currency charge, "which card?", a card that isn't active, and out-of-scope requests (loans, limit increases), which go to a person. The data is the organizer's synthetic LATAM Bank dataset.
 
-## FAST User Setup
+## Quick start
 
-If you are a delivery scientist or engineer who wants to use FAST to build a full stack application, this is the section for you.
+**Use the live app.** Open https://main.dteq5fgkcy7a4.amplifyapp.com. Self sign-up is off, so ask the team for a login. Each login is linked to one customer; without that link the agent can't read any data. See [Logins and personas](docs/usage.md#logins-and-personas).
 
-FAST is designed to be forked and deployed out of the box with a security-approved baseline system working. Your task will be to customize it to create your own full stack application to do (literally) anything on AgentCore.
-
-Deploying the full stack out-of-the-box FAST baseline system is only a few cdk commands once you have forked the repo, namely: 
+**Deploy.** From the repo root, with the AWS CLI profile `ledgerlens` (the commands use bash syntax; Git Bash works on Windows):
 
 ```bash
-cd infra-cdk
-npm install
-cdk bootstrap # Once ever
-cdk deploy
-cd ..
-python scripts/deploy-frontend.py
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py   # data stack, then main stack, built on CodeBuild
+AWS_PROFILE=ledgerlens python scripts/deploy-frontend.py         # build the frontend and publish it to Amplify
 ```
 
-See the [deployment guide](docs/DEPLOYMENT.md) for detailed instructions on how to deploy FAST into an AWS account.
+A first deployment also needs the organizer's S3 keys, a data load and logins. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the full steps.
 
-> **Terraform alternative:** FAST also supports Terraform for infrastructure deployment. See [`infra-terraform/README.md`](infra-terraform/README.md) for the Terraform deployment guide. We recommend choosing one infrastructure tool and deleting the other directory (`infra-cdk/` or `infra-terraform/`) from your fork to keep things clean.
+**Run the frontend locally** against the deployed backend:
 
-What comes next? That's up to you, the developer. With your requirements in mind, open up your coding assistant, describe what you'd like to do, and begin. The steering docs in this repository help guide coding assistants with best practices, and encourage them to always refer to the documentation built-in to the repository to make sure you end up building something great.
-
-## Architecture
-
-![Architecture Diagram](docs/architecture-diagram/FAST-architecture-20260403.png)
-
-The out-of-the-box architecture is shown above. The diagram illustrates the authentication flows across the stack:
-1. User login to the frontend (Cognito User Pool — Authorization Code grant): The user authenticates with Cognito via the web application hosted on AWS Amplify. Cognito issues a JWT access token for the session.
-2. Frontend to AgentCore Runtime (Cognito User Pool JWT validation): The frontend passes the user's JWT in the Authorization header. The Runtime validates the token against the Cognito User Pool.
-3. AgentCore Runtime to AgentCore Gateway (OAuth2 Client Credentials / M2M): The Runtime authenticates using the OAuth2 Client Credentials grant with user identity propagated into the M2M token via the Cognito V3 Pre-Token Lambda. The Gateway evaluates Cedar policies against the user's claims to enforce fine-grained access control.
-4. Frontend to API Gateway (Cognito User Pool JWT validation): API requests are authenticated using a Cognito User Pools Authorizer with the same user JWT from Flow 1.
-
-### Tech Stack
-
-- **Frontend**: React with TypeScript, Vite, Tailwind CSS, and shadcn components - infinitely flexible and ready for coding assistants
-- **Agent Providers**: Multiple agent providers supported (Strands, LangGraph, etc.) running within AgentCore Runtime
-- **Authentication**: AWS Cognito User Pool with OAuth support for easy swapping out Cognito
-- **Infrastructure**: CDK deployment with Amplify Hosting for frontend and AgentCore backend ([Terraform also supported](infra-terraform/README.md))
-
-## Project Structure
-
-```
-fullstack-agentcore-solution-template/
-├── .amazonq/               # Amazon Q assistant rules
-├── .github/                # GitHub Actions workflows
-│   └── workflows/
-├── docker/                 # Docker development environment
-│   ├── docker-compose.yml  # Local development stack
-│   └── Dockerfile.frontend.dev # Frontend development container
-├── frontend/               # React frontend application
-│   ├── src/
-│   │   ├── app/            # Application pages
-│   │   ├── components/     # React components (shadcn/ui)
-│   │   ├── hooks/          # Custom React hooks
-│   │   ├── lib/            # Utility libraries
-│   │   │   └── agentcore-client/ # AgentCore streaming client
-│   │   ├── routes/         # React Router routes
-│   │   ├── services/       # API service layers
-│   │   ├── styles/         # Global styles
-│   │   ├── test/           # Frontend tests
-│   │   └── types/          # TypeScript type definitions
-│   ├── public/             # Static assets
-│   ├── components.json     # shadcn/ui configuration
-│   ├── vite.config.ts      # Vite configuration
-│   └── package.json
-├── infra-cdk/              # CDK infrastructure code
-│   ├── lib/                # CDK stack definitions
-│   │   ├── utils/          # Shared CDK utilities
-│   │   ├── amplify-hosting-stack.ts
-│   │   ├── backend-stack.ts
-│   │   ├── cognito-stack.ts
-│   │   └── fast-main-stack.ts
-│   ├── bin/                # CDK app entry point
-│   ├── lambdas/            # Lambda function code
-│   │   ├── cedar-policy/    # Cedar Policy Engine lifecycle
-│   │   ├── oauth2-provider/ # OAuth2 Credential Provider lifecycle
-│   │   ├── pretoken-v3/     # Cognito V3 Pre-Token Generation Lambda
-│   │   ├── feedback/       # Feedback API handler
-│   │   └── zip-packager/   # Runtime ZIP packager
-│   └── config.yaml         # Deployment configuration
-├── infra-terraform/        # Terraform infrastructure (alternative to CDK)
-│   ├── modules/            # Terraform modules
-│   │   ├── amplify-hosting/ # Amplify Hosting module
-│   │   ├── cognito/        # Cognito User Pool module
-│   │   └── backend/        # Backend resources module
-│   ├── scripts/            # Terraform-specific deployment scripts
-│   ├── lambdas/            # Terraform-specific Lambda code
-│   ├── terraform.tfvars.example # Example variable file
-│   └── README.md           # Terraform deployment guide
-├── patterns/               # Agent pattern implementations
-│   ├── strands-single-agent/ # Basic strands agent pattern
-│   │   ├── basic_agent.py  # Agent implementation
-│   │   ├── strands_code_interpreter.py # Code Interpreter wrapper
-│   │   ├── requirements.txt # Agent dependencies
-│   │   └── Dockerfile      # Container configuration
-│   ├── langgraph-single-agent/ # LangGraph agent pattern
-│   │   ├── langgraph_agent.py # Agent implementation
-│   │   ├── requirements.txt # Agent dependencies
-│   │   └── Dockerfile      # Container configuration
-│   └── utils/              # Shared agent utilities
-│       ├── auth.py         # Authentication helpers
-│       └── ssm.py          # SSM parameter helpers
-├── tools/                  # Reusable tools (framework-agnostic)
-│   └── code_interpreter/   # AgentCore Code Interpreter integration
-│       └── code_interpreter_tools.py # Core implementation
-├── gateway/                # Gateway utilities and tools
-│   ├── policies/           # Cedar policy definitions
-│   │   └── policy.cedar    # Department-based access control policy
-│   └── tools/              # Gateway tool implementations
-│       └── sample_tool/    # Example Gateway tool
-├── scripts/                # Deployment and utility scripts
-│   ├── deploy-frontend.py  # Cross-platform frontend deployment
-│   └── utils.py            # Shared script utilities
-├── test-scripts/           # Testing scripts
-│   ├── test-agent.py       # Agent testing
-│   ├── test-feedback-api.py # Feedback API testing
-│   ├── test-gateway.py     # Gateway testing
-│   └── test-memory.py      # Memory testing
-├── tests/                  # Test suite
-│   ├── unit/               # Unit tests
-│   ├── integration/        # Integration tests
-│   └── conftest.py         # Pytest configuration
-├── docs/                   # Documentation source files
-│   ├── architecture-diagram/ # Architecture diagrams
-│   ├── DEPLOYMENT.md       # Deployment guide
-│   ├── LOCAL_DEVELOPMENT.md # Local development guide
-│   ├── AGENT_CONFIGURATION.md # Agent setup guide
-│   ├── MEMORY_INTEGRATION.md # Memory integration guide
-│   ├── GATEWAY.md          # Gateway integration guide
-│   ├── IDENTITY_POLICY.md  # Identity propagation & Cedar policy guide
-│   ├── CEDAR_POLICY_GUIDE.md # Cedar policy syntax, capabilities & reference
-│   ├── REPLACING_COGNITO.md # Identity provider swap & Gateway interceptors guide
-│   ├── RUNTIME_GATEWAY_AUTH.md # M2M authentication workflow
-│   ├── SESSION_MANAGEMENT.md # Session persistence & resumption guide
-│   ├── CONTEXT_MANAGEMENT.md # Context window management guide
-│   ├── STREAMING.md        # Streaming implementation guide
-│   ├── TOOL_AC_CODE_INTERPRETER.md # Code Interpreter guide
-│   ├── OBSERVABILITY.md    # Observability overview (telemetry & logging)
-│   ├── AGENTCORE_TELEMETRY.md # AgentCore telemetry enablement guide
-│   ├── BEDROCK_MODEL_INVOCATION_LOGGING.md # Bedrock model invocation logging guide
-│   └── VERSION_BUMP_PLAYBOOK.md # Version management
-├── .mkdocs/                # MkDocs build configuration
-│   ├── mkdocs.yml          # MkDocs configuration
-│   ├── requirements.txt    # Documentation dependencies
-│   └── Makefile            # Build and deployment commands
-├── vibe-context/           # AI coding assistant context and rules
-│   ├── AGENTS.md           # Rules for AI assistants
-│   ├── coding-conventions.md # Code style guidelines
-│   └── development-best-practices.md # Development guidelines
-├── .kiro/                  # Kiro CLI configuration
-├── CHANGELOG.md            # Version history
-├── Makefile                # Project-level build commands
-└── README.md
+```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-frontend.py --config-only   # writes frontend/public/aws-exports.json
+cd frontend && npm install && npm run dev                                # http://localhost:3000
 ```
 
-## DeepWiki
-Have a question about how FAST works? Consider asking DeepWiki!
+## Technologies used
 
+| Area | Technology |
+|---|---|
+| Frontend | React 19, TypeScript 5.9, Vite 8, Tailwind CSS 4, shadcn/ui (Radix UI), Lucide icons, React Router 6, react-markdown 10, react-oidc-context 3 with oidc-client-ts 3, three.js with React Three Fiber (the sign-in scene) |
+| Agent | Python 3.13 container on AgentCore Runtime, Strands Agents 1.32.0, bedrock-agentcore 1.4.7, MCP 1.28.1, PyJWT 2.13 |
+| Model | Claude Haiku 4.5 on Amazon Bedrock through the global inference profile (`global.anthropic.claude-haiku-4-5-20251001-v1:0`), with a Bedrock guardrail. Evaluation logins may switch to DeepSeek V3.2 or gpt-oss-120b. |
+| AgentCore | Runtime, Memory (short-term), Gateway (MCP), Policy (Cedar), Observability, Evaluations (used by the eval harness) |
+| Identity | Amazon Cognito: managed login, Authorization Code grant for customers, client credentials for the agent, a V3 pre-token Lambda |
+| Tools and data | AWS Lambda (Python 3.13, ARM64) with psycopg 3, Aurora DSQL behind a PrivateLink endpoint, Amazon S3, AWS Step Functions, AWS CodeBuild, DuckDB 1.5 (transform and curate), aurora-dsql-loader 3.3.0 |
+| Infrastructure | AWS CDK v2 in TypeScript (aws-cdk-lib 2.260), Amplify Hosting, API Gateway and DynamoDB (feedback), Secrets Manager, SSM Parameter Store |
+| Development | ruff 0.14, pytest, Vitest 4 with Testing Library, Jest 30 (CDK), ESLint 9, Prettier 3, uv (smoke and data scripts) |
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/awslabs/fullstack-solution-template-for-agentcore)
+## Quick installation
 
-## Security
+You need git, Python 3.11+, Node.js 20.19+ or 22.12+, and the AWS CLI v2 with the `ledgerlens` profile. Full steps, including Windows notes: [docs/installation.md](docs/installation.md).
 
-Note: this asset represents a proof-of-value for the services included and is not intended as a production-ready solution. You must determine how the AWS Shared Responsibility applies to their specific use case and implement the needed controls to achieve their desired security outcomes. AWS offers a broad set of security tools and configurations to enable our customers.
+1. Clone the repo:
 
-Ultimately it is your responsibility as the developer of a full stack application to ensure all of its aspects are secure. We provide security best practices in repository documentation and provide a secure baseline but Amazon holds no responsibility for the security of applications built from this tool.
+   ```bash
+   git clone https://github.com/eduardorestrepo89/factored-hackathon-2026-ledgerlens.git
+   cd factored-hackathon-2026-ledgerlens
+   ```
+
+2. Install the Python test dependencies and the frontend (`requirements-dev.txt` doesn't install: its CDK pins conflict):
+
+   ```bash
+   python -m pip install pytest -r agent/ledgerlens/requirements.txt -r data_load/requirements.txt
+   cd frontend && npm install && cd ..
+   ```
+
+3. Point the frontend at the deployed backend and start it, as in [Quick start](#quick-start).
+
+## Architecture (summary)
+
+Two CDK stacks plus a frontend on Amplify. The data stack (`ledgerlens-bank-assistant-data`) holds Aurora DSQL, its VPC endpoint, the tool IAM roles and the data pipeline. The main stack (`ledgerlens-bank-assistant`) holds the Amplify app, Cognito, the AgentCore Runtime, Memory and Gateway, the Cedar policy, the guardrail, the 9 tool Lambdas and the feedback API. The tool Lambdas live in the main stack but use the data stack's VPC, roles and DSQL host, so the data stack deploys first.
+
+One chat turn:
+1. The browser loads the React app from AWS Amplify Hosting.
+2. The customer signs in through Cognito's managed login (Authorization Code grant) and gets a user JWT.
+3. The frontend sends the message to the AgentCore Runtime with that JWT and reads the answer as a stream. The Runtime's JWT authorizer validates it against the user pool. The agent takes the user's identity from the validated token, never from the request body.
+4. The agent gets a machine token for the Gateway: it POSTs to Cognito's `/oauth2/token` itself (client credentials), passing the verified user id in `aws_client_metadata`. The V3 pre-token Lambda looks that user up in `USER_CUSTOMER_IDS_MAP` and adds a `customer_id` claim, blank when the login isn't linked.
+5. The agent reads `customer_id` from that token. `CustomerIdHook` overwrites `customer_id` on every tool call with it, so the model is never the source of the value.
+6. On a session's first turn, the agent calls `get_session_context` and `classify_call_type` and keeps the result in the agent state. It renders it into the system prompt on every turn, out of reach of the conversation window. AgentCore Memory keeps the conversation and that state.
+7. The agent calls Claude Haiku 4.5 on Amazon Bedrock, behind a guardrail that blocks prompt attacks, harmful content and topics unrelated to banking. The guardrail masks nothing.
+8. The agent calls the 9 tools on the AgentCore Gateway (MCP) with the machine token. The Gateway's Cedar policy has three rules:
+   1. Only a token with a non-blank `customer_id` can use the tools.
+   2. No call may carry a `customer_id` different from the token's.
+   3. `block_credit_card` and `open_claim` need `customer_confirmed` set to true.
+9. Before `block_credit_card`, `open_claim` and `human_agent_hand_off` run, `ConfirmationHook` pauses the call and the frontend shows Yes/No buttons. Only a click on Yes runs the call and sets `customer_confirmed`, so the flag Cedar checks comes from the click, never from the model.
+10. The Gateway invokes the tool Lambda. The DSQL tools run in the data stack's VPC and reach Aurora DSQL only through its private endpoint: the read tools as `ll_read`, `block_credit_card` and `open_claim` as `ll_write`. `human_agent_hand_off` uses no database and runs outside the VPC.
+11. Thumbs up/down feedback goes through API Gateway (Cognito authorizer) to a Lambda that writes to DynamoDB.
+
+An evaluation harness ([evals/](evals/README.md)) runs scripted cases against the deployed agent. Logins in the Cognito group `evaluators` may switch the model and base prompt per session; the hooks, guardrail and Cedar apply to them as to customers.
+
+Full description: [docs/architecture.md](docs/architecture.md). Diagram: [docs/architecture-diagram/ledgerlens-architecture.drawio](docs/architecture-diagram/ledgerlens-architecture.drawio) (open it in draw.io).
+
+## LedgerLens database (Aurora DSQL)
+
+Aurora DSQL holds a curated slice of the organizer's LATAM Bank dataset: 1,500 coherent customers (10 pinned demo personas among them) plus a 159-customer defect cohort kept as delivered for evaluation. That is 270,866 rows across the 13 tables, in the `public` schema. S3 `clean/` keeps all 23,495,188 repaired rows. The database lives in the data stack, which deploys without the agent backend or the frontend.
+
+- **Pipeline:** a Step Functions state machine runs ingest, transform (repairs R1–R6), curate (rules C1–C12, then the customer selection) and load on CodeBuild, then a read-check Lambda. It runs on demand.
+- **Tool access:** the read tools connect as `ll_read` (IAM role `ledgerlens-tools`, SELECT only). `block_credit_card` and `open_claim` connect as `ll_write` (IAM role `ledgerlens-write-tools`): SELECT on `products`, `transactions` and `complaints`, UPDATE on `products`, INSERT on `complaints`. Both connect only from inside the VPC, through the private endpoint.
+- **The loader's exception:** the loader (CodeBuild) is the only identity allowed in from outside the VPC.
+- **No laptop access:** the cluster policy refuses laptops, admin credentials included. Ad-hoc queries need a temporary exception in that policy.
+
+Design: the [data pipeline spec](docs/superpowers/specs/2026-10-02-data-pipeline-design.md) and the [curate stage spec](docs/superpowers/specs/2026-10-03-curate-stage-design.md). Customers and personas: [datathon/docs/analysis/2026-10-03-curated-customers.md](datathon/docs/analysis/2026-10-03-curated-customers.md). Code: `data_load/`, `infra-cdk/lib/data-stack.ts`, `infra-cdk/lib/data-construct.ts`.
+
+Loading the data, rerunning a stage, the reload downtime, cost and deleting the cluster: [docs/DEPLOYMENT.md, Operating the data pipeline](docs/DEPLOYMENT.md#operating-the-data-pipeline).
+
+## Project structure
+
+```
+factored-hackathon-2026-ledgerlens/
+├── agent/
+│   ├── ledgerlens/          # Strands agent: ledgerlens_agent.py, Dockerfile
+│   │   └── tools/           # system prompt, hooks (customer_id, confirmation), guardrail, memory, session context
+│   └── utils/               # auth.py (Gateway token), ssm.py
+├── gateway/
+│   ├── policies/policy.cedar   # the Gateway's Cedar policy
+│   └── tools/               # 9 tool Lambdas, one folder each with tool_spec.json:
+│                            #   list_credit_cards, list_card_transactions, get_session_context,
+│                            #   classify_call_type, explain_transaction, transaction_fraud_detection,
+│                            #   block_credit_card, open_claim, human_agent_hand_off
+├── infra-cdk/
+│   ├── bin/ledgerlens-cdk.ts   # CDK app entry
+│   ├── lib/                 # ledgerlens-app.ts, data-stack.ts, ledgerlens-main-stack.ts, *-construct.ts, utils/
+│   ├── lambdas/             # cedar-policy, dsql-read-check, feedback, oauth2-provider, pretoken-v3, zip-packager
+│   ├── test/                # Jest tests
+│   └── config.yaml          # deployment configuration (model, memory, scope)
+├── frontend/                # React + Vite app (see frontend/README.md)
+├── data_load/               # data pipeline stages (python -m data_load)
+├── evals/                   # evaluation harness: cases, graders, runner, report
+├── scripts/                 # deploy-with-codebuild.py, deploy-frontend.py
+├── test-scripts/            # smoke scripts against the deployed stack
+├── tests/unit/              # pytest unit tests
+├── datathon/                # data analysis and research notes
+├── docker/                  # docker-compose for running the agent and frontend containers locally
+├── docs/                    # documentation
+└── Makefile                 # lint, lint-cicd, load-data
+```
+
+Folder by folder: [docs/structure.md](docs/structure.md).
 
 ## License
 
-This project is licensed under the Apache-2.0 License.
+Apache-2.0, see [LICENSE](LICENSE). The project is forked from AWS's FAST template; [NOTICE](NOTICE) keeps its notices. It is a hackathon prototype on synthetic data, not a production banking system.

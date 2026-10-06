@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Ephemeral CodeBuild deployment script for FAST.
+Ephemeral CodeBuild deployment script for LedgerLens.
 
-Deploys the full FAST stack using a CodeBuild project. Requires Python 3.11+,
+Deploys the LedgerLens stacks using a CodeBuild project. Requires Python 3.11+,
 AWS CLI, and git. Only git-tracked or staged files are deployed; untracked
 files are skipped with a warning.
 
@@ -15,9 +15,14 @@ Flow: zip source → create source bucket/IAM role/boundary/project →
 On success, all created resources (source bucket, project, IAM role, boundary)
 are removed. On failure, they are retained for debugging and reused on the next
 run. The bucket has a 1-day object-expiry rule so a leftover archive can't
-linger. Does NOT remove the deployed FAST stack (use `cd infra-cdk && cdk destroy`).
+linger. Does NOT remove the deployed LedgerLens stacks (use `cd infra-cdk && cdk destroy`).
 
-Usage: python scripts/deploy-with-codebuild.py
+Usage: python scripts/deploy-with-codebuild.py [STACK ...]
+  No stack names deploys every stack in deploy_scope (cdk deploy --all). With
+  deploy_scope: full (the default in infra-cdk/config.yaml) that is the data stack and
+  the main stack; with deploy_scope: data, only the data stack. To deploy only the
+  database and its pipeline under a full scope:
+  python scripts/deploy-with-codebuild.py <stack_name_base>-data
 """
 
 import io
@@ -36,7 +41,7 @@ if sys.version_info < (3, 11):
     print("Error: Python 3.11 or higher is required")
     sys.exit(1)
 
-RESOURCE_PREFIX: str = "fast-deploy"
+RESOURCE_PREFIX: str = "ledgerlens-deploy"
 LOG_POLL_INTERVAL: int = 5
 
 
@@ -178,7 +183,7 @@ def _collect_tracked_files(repo_root: Path) -> List[str]:
     except subprocess.CalledProcessError:
         log_error(
             "Failed to list files with git. Run this script from inside the "
-            "FAST git repository."
+            "LedgerLens git repository."
         )
         sys.exit(1)
 
@@ -511,10 +516,9 @@ def get_or_create_codebuild_project(
         "    commands:\n"
         '      - echo "Source dir contents:" && ls -la $CODEBUILD_SRC_DIR/\n'
         "      - cd $CODEBUILD_SRC_DIR/infra-cdk && cdk bootstrap\n"
-        "      - cd $CODEBUILD_SRC_DIR/infra-cdk && cdk deploy --all --require-approval never\n"
-        "  post_build:\n"
-        "    commands:\n"
-        "      - cd $CODEBUILD_SRC_DIR && python scripts/deploy-frontend.py\n"
+        # DEPLOY_STACKS (set per build) names the stacks to deploy; unset means all
+        "      - cd $CODEBUILD_SRC_DIR/infra-cdk && "
+        "cdk deploy ${DEPLOY_STACKS:---all} --require-approval never\n"
     )
 
     # Check if project already exists
@@ -596,7 +600,7 @@ def get_or_create_codebuild_project(
     log_success(f"CodeBuild project created: {project_name}")
 
 
-def start_codebuild(project_name: str) -> str:
+def start_codebuild(project_name: str, stacks: Optional[List[str]] = None) -> str:
     """
     Start a CodeBuild build and return the build ID.
 
@@ -607,17 +611,22 @@ def start_codebuild(project_name: str) -> str:
         The build ID string
     """
     log_info("Starting CodeBuild build...")
-    result = run_command(
-        [
-            "aws",
-            "codebuild",
-            "start-build",
-            "--project-name",
-            project_name,
-            "--output",
-            "json",
+    command = [
+        "aws",
+        "codebuild",
+        "start-build",
+        "--project-name",
+        project_name,
+        "--output",
+        "json",
+    ]
+    if stacks:
+        value = " ".join(stacks)
+        command += [
+            "--environment-variables-override",
+            f"name=DEPLOY_STACKS,value={value},type=PLAINTEXT",
         ]
-    )
+    result = run_command(command)
     build_id: str = json.loads(result.stdout)["build"]["id"]
     log_success(f"Build ID: {build_id}")
     return build_id
@@ -837,13 +846,23 @@ def teardown(resources: Dict[str, Optional[str]]) -> None:
 # --- Main ---
 
 
-def main() -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     """
     Main deployment function.
+
+    Args:
+        argv: Stack names to deploy (default: sys.argv[1:]); none means all stacks,
+            e.g. `python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant-data`
 
     Returns:
         Exit code (0 for success, 1 for failure)
     """
+    stacks = sys.argv[1:] if argv is None else argv
+    bad = [name for name in stacks if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", name)]
+    if bad:  # names go into a shell command inside CodeBuild
+        log_error(f"Not a CDK stack name: {', '.join(bad)}")
+        return 1
+
     # Track every resource this run creates so we can tear them all down on a
     # successful build, or report them for debugging if the build fails.
     resources: Dict[str, Optional[str]] = {
@@ -953,7 +972,7 @@ def main() -> int:
     )
 
     # Start build
-    build_id: str = start_codebuild(project_name=project_name)
+    build_id: str = start_codebuild(project_name=project_name, stacks=stacks)
 
     # Stream logs
     final_status: str = stream_build_logs(build_id=build_id)
@@ -962,13 +981,9 @@ def main() -> int:
     print()
     if final_status == "SUCCEEDED":
         log_success(f"Build finished with status: {final_status}")
-        try:
-            outputs = get_stack_outputs(stack_name=stack_name)
-            app_url = outputs.get("AmplifyUrl")
-            if app_url:
-                log_success(f"App URL: {app_url}")
-        except (subprocess.CalledProcessError, ValueError):
-            log_info("Could not retrieve App URL - check the AWS console")
+        log_info(
+            "Backend deployed. Frontend not deployed - run scripts/deploy-frontend.py when needed"
+        )
 
         # Success: remove all build resources, leaving zero footprint.
         print()

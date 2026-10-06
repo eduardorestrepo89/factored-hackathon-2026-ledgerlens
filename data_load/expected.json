@@ -1,0 +1,56 @@
+{
+  "rows": {
+    "branches": 350,
+    "call_center_interactions": 686296,
+    "call_transcripts": 171321,
+    "campaign_sends": 1746801,
+    "complaints": 67095,
+    "customers": 150000,
+    "daily_exchange_rates": 13164,
+    "digital_events": 15620994,
+    "marketing_campaigns": 200,
+    "products": 400000,
+    "satisfaction_surveys": 212759,
+    "service_agents": 1200,
+    "transactions": 4425008
+  },
+  "repairs": {
+    "R6a": {"changed": 117640},
+    "R1": {"resolved": 139573, "set_null": 10422},
+    "R6b": {"changed": 99633},
+    "R2": {"set_null": 831},
+    "R3": {"resolved": 13808, "set_null": 30762},
+    "R4": {"resolved": 337760, "set_null": 1102562}
+  },
+  "curation": {
+    "rules": {
+      "C1": {"changed": 40515},
+      "C2": {"changed": 99477},
+      "C3": {"changed": 51952},
+      "C4": {"changed": 203369},
+      "C5": {"changed": 339965},
+      "C6": {"customers": 9316, "products": 25113},
+      "C7": {"changed": 283},
+      "C8": {"kept_expired": 5171, "reissued": 51493},
+      "C9": {"changed": 87740},
+      "C10": {"changed": 43006},
+      "C11": {"closed": 48943, "rejected_dated": 685},
+      "C12": {"changed": 23299}
+    },
+    "rows": {
+      "branches": 350,
+      "call_center_interactions": 7685,
+      "call_transcripts": 1919,
+      "campaign_sends": 19575,
+      "complaints": 778,
+      "customers": 1659,
+      "daily_exchange_rates": 13164,
+      "digital_events": 130513,
+      "marketing_campaigns": 200,
+      "products": 6952,
+      "satisfaction_surveys": 2327,
+      "service_agents": 1200,
+      "transactions": 84544
+    }
+  }
+}

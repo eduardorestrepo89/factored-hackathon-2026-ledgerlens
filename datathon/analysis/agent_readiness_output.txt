@@ -1,0 +1,640 @@
+
+##### -- AR-00 Agent-readiness probes over the raw local copy (before repairs R1-R6). as_of = 2026-06-17.
+┌──────────────────┐
+│       note       │
+│     varchar      │
+├──────────────────┤
+│ as_of 2026-06-17 │
+└──────────────────┘
+
+
+##### -- AR-SETUP-1 cards with a usable flag: Active, not expired at as_of, credit cards with a limit and not over it
+
+##### -- AR-SETUP-2 card transactions up to as_of with window flags
+
+##### -- AR-SETUP-3 one row per customer: what the agent would find for them
+
+##### -- AR-SETUP-4 the candidate pool and its draft score (section 6 of the diagnostic)
+
+##### -- AR-C1 customer status by country
+┌───────────┬─────────────────┬───────┐
+│  country  │ customer_status │   n   │
+│  varchar  │     varchar     │ int64 │
+├───────────┼─────────────────┼───────┤
+│ Argentina │ Active          │ 25420 │
+│ Argentina │ Inactive        │  2961 │
+│ Argentina │ Suspended       │   832 │
+│ Argentina │ Closed          │   629 │
+│ Colombia  │ Active          │ 38476 │
+│ Colombia  │ Inactive        │  4527 │
+│ Colombia  │ Suspended       │  1369 │
+│ Colombia  │ Closed          │   879 │
+│ México    │ Active          │ 63804 │
+│ México    │ Inactive        │  7426 │
+│ México    │ Suspended       │  2206 │
+│ México    │ Closed          │  1471 │
+└───────────┴─────────────────┴───────┘
+  12 rows                   3 columns
+
+
+##### -- AR-C2 document type and mobile prefix by country (Mexico: DNI and +54)
+┌───────────┬───────────────┬─────────┬───────┐
+│  country  │ document_type │ prefix  │   n   │
+│  varchar  │    varchar    │ varchar │ int64 │
+├───────────┼───────────────┼─────────┼───────┤
+│ Argentina │ DNI           │ +54     │ 28897 │
+│ Argentina │ DNI           │ NULL    │   945 │
+│ Colombia  │ CE            │ +57     │ 14690 │
+│ Colombia  │ Pasaporte     │ +57     │ 14594 │
+│ Colombia  │ CC            │ +57     │ 14564 │
+│ Colombia  │ CC            │ NULL    │   475 │
+│ Colombia  │ Pasaporte     │ NULL    │   468 │
+│ Colombia  │ CE            │ NULL    │   460 │
+│ México    │ DNI           │ +54     │ 72548 │
+│ México    │ DNI           │ NULL    │  2359 │
+└───────────┴───────────────┴─────────┴───────┘
+  10 rows                           4 columns
+
+
+##### -- AR-C3 age, registration and future last_updated
+┌─────────────────────────┬─────────────────────────┬──────────────────────────┐
+│ under18_at_registration │ min_age_at_registration │ last_updated_after_as_of │
+│          int64          │          int64          │          int64           │
+├─────────────────────────┼─────────────────────────┼──────────────────────────┤
+│                    3106 │                      13 │                     9316 │
+└─────────────────────────┴─────────────────────────┴──────────────────────────┘
+
+
+##### -- AR-C4 missing contact and profile fields
+┌────────────┬─────────────┬──────────────┬───────────────────┬─────────────┬─────────────┐
+│ email_null │ mobile_null │ address_null │ credit_score_null │ income_null │ accent_null │
+│   int64    │    int64    │    int64     │       int64       │    int64    │    int64    │
+├────────────┼─────────────┼──────────────┼───────────────────┼─────────────┼─────────────┤
+│       2984 │        4707 │         7370 │             22492 │       30033 │       44817 │
+└────────────┴─────────────┴──────────────┴───────────────────┴─────────────┴─────────────┘
+
+
+##### -- AR-C5 shared email addresses, and those shared across countries
+┌──────────────────┬───────────────────┬─────────────────────────┐
+│ shared_addresses │ customers_on_them │ shared_across_countries │
+│      int64       │      int128       │          int64          │
+├──────────────────┼───────────────────┼─────────────────────────┤
+│            24203 │             79930 │                   13147 │
+└──────────────────┴───────────────────┴─────────────────────────┘
+
+
+##### -- AR-C6 gender values
+┌─────────┬──────────────┐
+│ gender  │ count_star() │
+│ varchar │    int64     │
+├─────────┼──────────────┤
+│ F       │        50508 │
+│ M       │        49684 │
+│ O       │        49808 │
+└─────────┴──────────────┘
+
+
+##### -- AR-C7 customer status vs product status (Closed customers holding Active products)
+┌─────────────────┬────────────────┬────────┐
+│ customer_status │ product_status │   n    │
+│     varchar     │    varchar     │ int64  │
+├─────────────────┼────────────────┼────────┤
+│ Active          │ Active         │ 289769 │
+│ Active          │ Closed         │  27228 │
+│ Active          │ Blocked        │  17032 │
+│ Active          │ Suspended      │   6836 │
+│ Closed          │ Active         │   6721 │
+│ Closed          │ Closed         │    597 │
+│ Closed          │ Blocked        │    380 │
+│ Closed          │ Suspended      │    167 │
+│ Inactive        │ Active         │  33623 │
+│ Inactive        │ Closed         │   3251 │
+│ Inactive        │ Blocked        │   1964 │
+│ Inactive        │ Suspended      │    823 │
+│ Suspended       │ Active         │   9852 │
+│ Suspended       │ Closed         │    963 │
+│ Suspended       │ Blocked        │    559 │
+│ Suspended       │ Suspended      │    235 │
+└─────────────────┴────────────────┴────────┘
+  16 rows                         3 columns
+
+
+##### -- AR-C8 customers by number of products
+┌──────────┬───────────┐
+│ products │ customers │
+│  int64   │   int64   │
+├──────────┼───────────┤
+│        0 │     10422 │
+│        1 │     27847 │
+│        2 │     36943 │
+│        3 │     33112 │
+│        4 │     21822 │
+│        5 │     11691 │
+│        6 │      5259 │
+│        7 │      1947 │
+│        8 │       690 │
+│        9 │       198 │
+│       10 │        57 │
+│       11 │        11 │
+│       12 │         1 │
+└──────────┴───────────┘
+  13 rows    2 columns
+
+
+##### -- AR-C9 first names: compound names and a repeated token ("María María")
+┌────────┬────────┬────────────────┐
+│ tokens │   n    │ repeated_token │
+│ int64  │ int64  │     int64      │
+├────────┼────────┼────────────────┤
+│      1 │ 105129 │              0 │
+│      2 │  44871 │            746 │
+└────────┴────────┴────────────────┘
+
+
+##### -- AR-C10 gender O: compound names that join a male-list and a female-list name ("Sergio Carolina")
+┌──────────┬──────────┬───────────────────────┐
+│ gender_o │ compound │ mixed_gender_compound │
+│  int64   │  int64   │         int64         │
+├──────────┼──────────┼───────────────────────┤
+│    49808 │    14879 │                  7410 │
+└──────────┴──────────┴───────────────────────┘
+
+
+##### -- AR-P1 card and loan field gaps and contradictions
+┌──────────────────────┬────────┬────────────┬─────────────┬────────────────────┬────────────────────┬──────────────────────────┐
+│     product_type     │   n    │ limit_null │ expiry_null │ balance_over_limit │ active_but_expired │ last_updated_after_as_of │
+│       varchar        │ int64  │   int64    │    int64    │       int64        │       int64        │          int64           │
+├──────────────────────┼────────┼────────────┼─────────────┼────────────────────┼────────────────────┼──────────────────────────┤
+│ Cuenta Ahorro        │ 120203 │     120203 │      120203 │                  0 │                  0 │                     7580 │
+│ Tarjeta Crédito      │ 100102 │       5059 │        4983 │               1203 │              40484 │                     6237 │
+│ Cuenta Corriente     │  99979 │      99979 │       99979 │                  0 │                  0 │                     6259 │
+│ Tarjeta Débito       │  39938 │      39938 │        1896 │                  0 │              16180 │                     2455 │
+│ Préstamo Personal    │  19960 │        992 │       19960 │                453 │                  0 │                     1262 │
+│ Préstamo Hipotecario │  11910 │        604 │       11910 │               5854 │                  0 │                      806 │
+│ Inversión            │   5859 │       5859 │        5859 │                  0 │                  0 │                      371 │
+│ Seguro               │   2049 │       2049 │        2049 │                  0 │                  0 │                      143 │
+└──────────────────────┴────────┴────────────┴─────────────┴────────────────────┴────────────────────┴──────────────────────────┘
+
+
+##### -- AR-P2 product currency by customer country (Mexico has no MXN)
+┌───────────┬──────────┬────────┐
+│  country  │ currency │   n    │
+│  varchar  │ varchar  │ int64  │
+├───────────┼──────────┼────────┤
+│ Argentina │ ARS      │  71524 │
+│ Argentina │ USD      │   7918 │
+│ Colombia  │ COP      │ 107975 │
+│ Colombia  │ USD      │  12185 │
+│ México    │ USD      │ 200398 │
+└───────────┴──────────┴────────┘
+
+
+##### -- AR-P3 products.last_transaction_date vs the real last transaction
+┌──────────┬────────────┬──────────────────────────┬───────────────────────┐
+│ products │ mismatched │ date_but_no_transactions │ transactions_after_it │
+│  int64   │   int64    │          int64           │         int64         │
+├──────────┼────────────┼──────────────────────────┼───────────────────────┤
+│   400000 │     339965 │                        2 │                270483 │
+└──────────┴────────────┴──────────────────────────┴───────────────────────┘
+
+
+##### -- AR-P4 card numbers: Luhn check digit and same-customer last-4 collisions
+┌─────────────────┬────────┬────────────┬───────────────────────────┐
+│  product_type   │   n    │ luhn_valid │ same_customer_last4_pairs │
+│     varchar     │ int64  │   int64    │           int64           │
+├─────────────────┼────────┼────────────┼───────────────────────────┤
+│ Tarjeta Crédito │ 100102 │       9989 │                         6 │
+│ Tarjeta Débito  │  39938 │       3988 │                         6 │
+└─────────────────┴────────┴────────────┴───────────────────────────┘
+
+
+##### -- AR-T1 transaction status x response code
+┌────────────────────┬───────────────┬─────────┐
+│ transaction_status │ response_code │    n    │
+│      varchar       │    varchar    │  int64  │
+├────────────────────┼───────────────┼─────────┤
+│ Approved           │ 00            │ 3867312 │
+│ Approved           │ NULL          │  203369 │
+│ Declined           │ 51            │   52788 │
+│ Declined           │ 14            │   52711 │
+│ Declined           │ 54            │   52527 │
+│ Declined           │ 05            │   52246 │
+│ Declined           │ NULL          │   10962 │
+│ Pending            │ 05            │   21191 │
+│ Pending            │ 14            │   21096 │
+│ Pending            │ 51            │   20911 │
+│ Pending            │ 54            │   20753 │
+│ Pending            │ NULL          │    4392 │
+│ Reversed           │ 05            │   10704 │
+│ Reversed           │ 14            │   10665 │
+│ Reversed           │ 54            │   10591 │
+│ Reversed           │ 51            │   10480 │
+│ Reversed           │ NULL          │    2310 │
+└────────────────────┴───────────────┴─────────┘
+  17 rows                            3 columns
+
+
+##### -- AR-T2 card-state contradictions: decline codes vs the card, approvals after expiry
+┌───────────────────┬─────────────────────────┬───────────────────────┬────────────────────────────┐
+│ code54_not_a_card │ code54_card_not_expired │ declines_on_non_cards │ approved_after_card_expiry │
+│       int64       │          int64          │         int64         │           int64            │
+├───────────────────┼─────────────────────────┼───────────────────────┼────────────────────────────┤
+│             34077 │                   12020 │                143520 │                     425290 │
+└───────────────────┴─────────────────────────┴───────────────────────┴────────────────────────────┘
+
+
+##### -- AR-T3 Pending/Reversed age at as_of (statuses that never settle)
+┌────────────────────┬───────┬───────┬─────────────────┐
+│ transaction_status │   n   │ last7 │ median_age_days │
+│      varchar       │ int64 │ int64 │     double      │
+├────────────────────┼───────┼───────┼─────────────────┤
+│ Reversed           │ 44750 │   297 │           552.0 │
+│ Pending            │ 88343 │   603 │           547.0 │
+└────────────────────┴───────┴───────┴─────────────────┘
+
+
+##### -- AR-T4 product type x transaction type, and channel oddities
+┌──────────────────────┬──────────────────┬────────┐
+│     product_type     │ transaction_type │   n    │
+│       varchar        │     varchar      │ int64  │
+├──────────────────────┼──────────────────┼────────┤
+│ Cuenta Ahorro        │ Transfer         │ 465507 │
+│ Cuenta Ahorro        │ Withdrawal       │ 399588 │
+│ Cuenta Ahorro        │ Deposit          │ 332203 │
+│ Cuenta Ahorro        │ Payment          │ 132835 │
+│ Cuenta Corriente     │ Transfer         │ 386990 │
+│ Cuenta Corriente     │ Withdrawal       │ 332693 │
+│ Cuenta Corriente     │ Deposit          │ 277206 │
+│ Cuenta Corriente     │ Payment          │ 110234 │
+│ Inversión            │ Payment          │  39121 │
+│ Inversión            │ Adjustment       │  19577 │
+│ Inversión            │ Transfer         │   6367 │
+│ Préstamo Hipotecario │ Payment          │  78908 │
+│ Préstamo Hipotecario │ Adjustment       │  39352 │
+│ Préstamo Hipotecario │ Transfer         │  13125 │
+│ Préstamo Personal    │ Payment          │ 132653 │
+│ Préstamo Personal    │ Adjustment       │  66330 │
+│ Préstamo Personal    │ Transfer         │  22181 │
+│ Seguro               │ Payment          │  13579 │
+│ Seguro               │ Adjustment       │   6859 │
+│ Seguro               │ Transfer         │   2268 │
+│ Tarjeta Crédito      │ Purchase         │ 775834 │
+│ Tarjeta Crédito      │ Withdrawal       │ 166613 │
+│ Tarjeta Crédito      │ Payment          │ 165838 │
+│ Tarjeta Débito       │ Purchase         │ 307572 │
+│ Tarjeta Débito       │ Payment          │  65796 │
+│ Tarjeta Débito       │ Withdrawal       │  65779 │
+└──────────────────────┴──────────────────┴────────┘
+  26 rows                                3 columns
+
+
+##### -- AR-T5 channel x type oddities (ATM purchases, POS deposits)
+┌───────────────┬───────────────────┬────────────────────────────┬───────────────────────────┐
+│ atm_purchases │ pos_non_purchases │ purchases_without_merchant │ merchant_without_category │
+│     int64     │       int64       │           int64            │           int64           │
+├───────────────┼───────────────────┼────────────────────────────┼───────────────────────────┤
+│        325993 │            864805 │                      54172 │                     51952 │
+└───────────────┴───────────────────┴────────────────────────────┴───────────────────────────┘
+
+
+##### -- AR-T6 home country vs transaction country ('Mexico' unaccented beside 'México')
+┌───────────┬─────────────────────┬─────────┐
+│   home    │ transaction_country │    n    │
+│  varchar  │       varchar       │  int64  │
+├───────────┼─────────────────────┼─────────┤
+│ Argentina │ Argentina           │  835805 │
+│ Argentina │ Mexico              │    8895 │
+│ Argentina │ Colombia            │    8887 │
+│ Argentina │ USA                 │    8866 │
+│ Argentina │ Spain               │    8836 │
+│ Argentina │ Brazil              │    8716 │
+│ Colombia  │ Colombia            │ 1262197 │
+│ Colombia  │ Argentina           │   13401 │
+│ Colombia  │ USA                 │   13384 │
+│ Colombia  │ Brazil              │   13260 │
+│ Colombia  │ Mexico              │   13208 │
+│ Colombia  │ Spain               │   13122 │
+│ México    │ México              │ 2105794 │
+│ México    │ Spain               │   18584 │
+│ México    │ Brazil              │   18496 │
+│ México    │ Colombia            │   18419 │
+│ México    │ Mexico              │   18412 │
+│ México    │ USA                 │   18371 │
+│ México    │ Argentina           │   18355 │
+└───────────┴─────────────────────┴─────────┘
+  19 rows                         3 columns
+
+
+##### -- AR-T7 recency: customers with card transactions in each window
+┌───────┬───────┬───────┬───────┬───────┐
+│  d3   │  d7   │  d30  │  d90  │ ever  │
+│ int64 │ int64 │ int64 │ int64 │ int64 │
+├───────┼───────┼───────┼───────┼───────┤
+│  4850 │  9265 │ 32588 │ 61735 │ 82138 │
+└───────┴───────┴───────┴───────┴───────┘
+
+
+##### -- AR-T8 credit-card transactions per customer in the last 30 days
+┌───────┬───────────┐
+│   n   │ customers │
+│ int64 │   int64   │
+├───────┼───────────┤
+│     1 │     18223 │
+│     2 │      4682 │
+│     3 │      1014 │
+│     4 │       179 │
+│     5 │        37 │
+│     6 │         6 │
+└───────┴───────────┘
+
+
+##### -- AR-T9 recent card transactions by customer status (Closed customers still buying)
+┌─────────────────┬───────────┬───────┐
+│ customer_status │ customers │ tx30  │
+│     varchar     │   int64   │ int64 │
+├─────────────────┼───────────┼───────┤
+│ Suspended       │       883 │  1217 │
+│ Inactive        │      3258 │  4369 │
+│ Active          │     27815 │ 37564 │
+│ Closed          │       632 │   853 │
+└─────────────────┴───────────┴───────┘
+
+
+##### -- AR-V1 card amounts by currency and type (uniform, merchant-independent)
+┌──────────┬──────────────────┬────────┬───────────┬────────────┬────────────┬────────────┐
+│ currency │ transaction_type │   n    │    p5     │    p50     │    p95     │    max     │
+│ varchar  │     varchar      │ int64  │  double   │   double   │   double   │   double   │
+├──────────┼──────────────────┼────────┼───────────┼────────────┼────────────┼────────────┤
+│ ARS      │ Payment          │  41826 │  50377.16 │  356559.78 │  666909.08 │  699998.08 │
+│ ARS      │ Purchase         │ 194216 │  10436.71 │   88306.28 │  166164.13 │  174999.31 │
+│ ARS      │ Withdrawal       │  41859 │  15692.43 │   91322.77 │  166307.93 │  174998.59 │
+│ COP      │ Payment          │  62465 │ 587805.16 │ 4103886.01 │ 7613994.34 │  7999997.1 │
+│ COP      │ Purchase         │ 292781 │ 117378.65 │ 1010984.32 │ 1901662.08 │ 1999997.03 │
+│ COP      │ Withdrawal       │  62831 │ 174766.18 │ 1040324.07 │ 1902711.83 │ 1999998.29 │
+│ USD      │ Payment          │ 127343 │    145.83 │    1027.06 │    1902.36 │     2000.0 │
+│ USD      │ Purchase         │ 596409 │      29.7 │     252.14 │     475.21 │      500.0 │
+│ USD      │ Withdrawal       │ 127702 │     44.34 │     259.83 │     476.51 │     499.99 │
+└──────────┴──────────────────┴────────┴───────────┴────────────┴────────────┴────────────┘
+
+
+##### -- AR-V2 median USD amount per merchant (every merchant ~ USD 250)
+┌─────────────────────────┬─────────────────────────┬───────────┐
+│ min_merchant_median_usd │ max_merchant_median_usd │ merchants │
+│         double          │         double          │   int64   │
+├─────────────────────────┼─────────────────────────┼───────────┤
+│                 250.025 │      254.35500000000002 │        24 │
+└─────────────────────────┴─────────────────────────┴───────────┘
+
+
+##### -- AR-V3 card purchases by hour of day (flat 24 h)
+┌──────────────┬──────────────┐
+│ min_per_hour │ max_per_hour │
+│    int64     │    int64     │
+├──────────────┼──────────────┤
+│        44765 │        45788 │
+└──────────────┴──────────────┘
+
+
+##### -- AR-V4 credit limit vs monthly income by country (Mexico: USD limits vs peso-scale incomes)
+┌───────────┬────────────┬──────────┬────────────┬─────────────────┐
+│  country  │ limit_p50  │ currency │ income_p50 │ limit_to_income │
+│  varchar  │   double   │ varchar  │   double   │     double      │
+├───────────┼────────────┼──────────┼────────────┼─────────────────┤
+│ Colombia  │ 90649340.0 │ COP      │  9232537.0 │            6.67 │
+│ Argentina │  7920479.0 │ ARS      │   799809.0 │            6.66 │
+│ México    │    25652.0 │ USD      │    39302.0 │            0.49 │
+└───────────┴────────────┴──────────┴────────────┴─────────────────┘
+
+
+##### -- AR-K1 complaint status vs lifecycle fields
+┌────────────┬───────┬──────────┬────────────────┬──────────┬────────┬─────────────────┬───────┐
+│   status   │   n   │ assigned │ first_response │ resolved │ closed │ resolution_text │ agent │
+│  varchar   │ int64 │  int64   │     int64      │  int64   │ int64  │      int64      │ int64 │
+├────────────┼───────┼──────────┼────────────────┼──────────┼────────┼─────────────────┼───────┤
+│ In Process │ 26823 │    25482 │          25492 │        0 │      0 │               0 │ 25498 │
+│ Open       │ 20125 │        0 │              0 │        0 │      0 │               0 │     0 │
+│ Resolved   │ 13512 │    12830 │          12861 │    12880 │      0 │           12833 │ 12856 │
+│ Escalated  │  3321 │     3178 │              0 │        0 │      0 │               0 │  3142 │
+│ Closed     │  2609 │     2477 │           2500 │     2469 │   2481 │            2477 │  2484 │
+│ Rejected   │   705 │        0 │              0 │        0 │      0 │               0 │     0 │
+└────────────┴───────┴──────────┴────────────────┴──────────┴────────┴─────────────────┴───────┘
+
+
+##### -- AR-K2 complaints without a closing_date: age at as_of by status
+┌────────────┬───────┬─────────────────┬──────────────────┐
+│   status   │   n   │ median_age_days │ created_last_30d │
+│  varchar   │ int64 │     double      │      int64       │
+├────────────┼───────┼─────────────────┼──────────────────┤
+│ In Process │ 26823 │           545.0 │              742 │
+│ Open       │ 20125 │           552.0 │              577 │
+│ Resolved   │ 13512 │           545.0 │              391 │
+│ Escalated  │  3321 │           525.0 │              106 │
+│ Rejected   │   705 │           550.0 │               19 │
+│ Closed     │   128 │           527.5 │                2 │
+└────────────┴───────┴─────────────────┴──────────────────┘
+
+
+##### -- AR-K3 complaint dates after as_of
+┌──────────────────┬───────────────┬──────────────────────┐
+│ resolution_after │ closing_after │ first_response_after │
+│      int64       │     int64     │        int64         │
+├──────────────────┼───────────────┼──────────────────────┤
+│              213 │            47 │                   85 │
+└──────────────────┴───────────────┴──────────────────────┘
+
+
+##### -- AR-K4 claimed amount does not scale with its currency
+┌──────────┬───────┬────────┬────────┐
+│ currency │   n   │  p50   │  p95   │
+│ varchar  │ int64 │ double │ double │
+├──────────┼───────┼────────┼────────┤
+│ ARS      │  5132 │ 2521.0 │ 4735.0 │
+│ COP      │  5192 │ 2467.0 │ 4769.0 │
+│ MXN      │  5215 │ 2551.0 │ 4765.0 │
+│ USD      │  5172 │ 2564.0 │ 4780.0 │
+│ NULL     │  1040 │ 2631.0 │ 4737.0 │
+└──────────┴───────┴────────┴────────┘
+
+
+##### -- AR-K5 complaint currency and related branch country vs the customer's country
+┌───────────┬────────────┬───────────────┬───────────────┬─────────────┬────────────────────────┐
+│  country  │ complaints │ with_currency │ home_currency │ with_branch │ branch_in_home_country │
+│  varchar  │   int64    │     int64     │     int64     │    int64    │         int64          │
+├───────────┼────────────┼───────────────┼───────────────┼─────────────┼────────────────────────┤
+│ México    │      33375 │         10772 │          2713 │        9568 │                   4792 │
+│ Colombia  │      20384 │          6677 │          1634 │        5798 │                   1724 │
+│ Argentina │      13336 │          4327 │          1082 │        3812 │                    754 │
+└───────────┴────────────┴───────────────┴───────────────┴─────────────┴────────────────────────┘
+
+
+##### -- AR-K6 description text is one template per category
+┌──────────────┬──────────────┬────────────────────────────────────┐
+│   category   │ descriptions │              example               │
+│   varchar    │    int64     │              varchar               │
+├──────────────┼──────────────┼────────────────────────────────────┤
+│ Technical    │            1 │ Queja relacionada con technical    │
+│ Fees         │            1 │ Queja relacionada con fees         │
+│ Branch       │            1 │ Queja relacionada con branch       │
+│ Transactions │            1 │ Queja relacionada con transactions │
+│ Service      │            1 │ Queja relacionada con service      │
+└──────────────┴──────────────┴────────────────────────────────────┘
+
+
+##### -- AR-I1 interactions handled by agents hired after the call; agent country vs customer country
+┌──────────────┬───────────────────┬────────────────────┐
+│ interactions │ agent_hired_later │ agent_same_country │
+│    int64     │       int64       │       int64        │
+├──────────────┼───────────────────┼────────────────────┤
+│       686296 │             64179 │             261730 │
+└──────────────┴───────────────────┴────────────────────┘
+
+
+##### -- AR-I2 mentioned_products: listed ids that exist, and that the caller owns
+┌──────────┬───────┬─────────────────┐
+│ mentions │ exist │ owned_by_caller │
+│  int64   │ int64 │      int64      │
+├──────────┼───────┼─────────────────┤
+│   548680 │  3562 │               0 │
+└──────────┴───────┴─────────────────┘
+
+
+##### -- AR-E1 customers with digital events in the 24 h and 7 days before as_of
+┌──────────┬─────────┐
+│ last_24h │ last_7d │
+│  int64   │  int64  │
+├──────────┼─────────┤
+│      897 │    9932 │
+└──────────┴─────────┘
+
+
+##### -- AR-S1 selection funnel
+┌───────────────┬────────┬────────┬─────────────┬────────────────────┬─────────────┬───────────────────┬───────────────────┐
+│ all_customers │ active │ adult  │ contactable │ usable_credit_card │ card_tx_30d │ card_tx_30d_2plus │ card_tx_30d_3plus │
+│     int64     │ int64  │ int64  │    int64    │       int64        │    int64    │       int64       │       int64       │
+├───────────────┼────────┼────────┼─────────────┼────────────────────┼─────────────┼───────────────────┼───────────────────┤
+│        150000 │ 127700 │ 125065 │      118786 │              26591 │        9509 │              2170 │               409 │
+└───────────────┴────────┴────────┴─────────────┴────────────────────┴─────────────┴───────────────────┴───────────────────┘
+
+
+##### -- AR-S2 scenario coverage in the pool
+┌───────┬────────────┬─────────────┬─────────────────────────┬─────────────┬────────────────┬──────────────────────────────┬──────────────┬───────────────────────┬──────────────────┬──────────────────┬──────────┬─────────────────┐
+│ pool  │ decline_7d │ decline_30d │ pending_or_reversed_30d │ foreign_30d │ fraud_flag_90d │ unrecognized_charge_case_90d │ any_case_90d │ two_plus_usable_cards │ has_blocked_card │ app_activity_24h │ call_90d │ stale_open_case │
+│ int64 │   int64    │    int64    │          int64          │    int64    │     int64      │            int64             │    int64     │         int64         │      int64       │      int64       │  int64   │      int64      │
+├───────┼────────────┼─────────────┼─────────────────────────┼─────────────┼────────────────┼──────────────────────────────┼──────────────┼───────────────────────┼──────────────────┼──────────────────┼──────────┼─────────────────┤
+│  9509 │        166 │         690 │                     417 │         600 │             16 │                           68 │          347 │                  2992 │              603 │               63 │     2925 │            2662 │
+└───────┴────────────┴─────────────┴─────────────────────────┴─────────────┴────────────────┴──────────────────────────────┴──────────────┴───────────────────────┴──────────────────┴──────────────────┴──────────┴─────────────────┘
+
+
+##### -- AR-S3 pool by country and segment
+┌───────────┬─────────┬───────┬────────┬────────┐
+│  country  │ segment │   n   │ tier_a │ tier_b │
+│  varchar  │ varchar │ int64 │ int64  │ int64  │
+├───────────┼─────────┼───────┼────────┼────────┤
+│ Argentina │ Basic   │  1128 │     54 │    158 │
+│ Argentina │ Plus    │   454 │     25 │     71 │
+│ Argentina │ Premium │   197 │      7 │     29 │
+│ Argentina │ Student │    94 │      6 │     12 │
+│ Colombia  │ Basic   │  1696 │     80 │    249 │
+│ Colombia  │ Plus    │   695 │     21 │    122 │
+│ Colombia  │ Premium │   300 │     12 │     42 │
+│ Colombia  │ Student │   146 │      6 │     16 │
+│ México    │ Basic   │  2904 │    130 │    412 │
+│ México    │ Plus    │  1190 │     64 │    156 │
+│ México    │ Premium │   479 │     21 │     79 │
+│ México    │ Student │   226 │     13 │     41 │
+└───────────┴─────────┴───────┴────────┴────────┘
+  12 rows                             5 columns
+
+
+##### -- AR-S4 score distribution (cumulative from the top)
+┌───────┬───────┬────────────┐
+│ score │   n   │ cumulative │
+│ int64 │ int64 │   int128   │
+├───────┼───────┼────────────┤
+│    19 │     2 │          2 │
+│    18 │     3 │          5 │
+│    17 │     7 │         12 │
+│    16 │    13 │         25 │
+│    15 │    15 │         40 │
+│    14 │    22 │         62 │
+│    13 │    39 │        101 │
+│    12 │    55 │        156 │
+│    11 │    89 │        245 │
+│    10 │   194 │        439 │
+│     9 │   225 │        664 │
+│     8 │   382 │       1046 │
+│     7 │   780 │       1826 │
+│     6 │   807 │       2633 │
+│     5 │  1027 │       3660 │
+│     4 │  2744 │       6404 │
+│     3 │  3105 │       9509 │
+└───────┴───────┴────────────┘
+  17 rows          3 columns
+
+
+##### -- AR-S5 defects inside the pool's own rows
+┌──────────────┬─────────────────┬──────────────────────┬──────────────────────┬───────────────────┬────────────────────────┬───────────────────┐
+│ transactions │ pending_over_7d │ status_code_mismatch │ code54_contradiction │ after_card_expiry │ before_product_opening │ unaccented_mexico │
+│    int64     │      int64      │        int64         │        int64         │       int64       │         int64          │       int64       │
+├──────────────┼─────────────────┼──────────────────────┼──────────────────────┼───────────────────┼────────────────────────┼───────────────────┤
+│       412913 │            8209 │                11801 │                 4571 │             29029 │                 100482 │              3839 │
+└──────────────┴─────────────────┴──────────────────────┴──────────────────────┴───────────────────┴────────────────────────┴───────────────────┘
+
+
+##### -- AR-S6 rows a pool-only database would hold
+┌───────────┬──────────┬──────────────┬────────────┬──────────────┬─────────────┬─────────┬────────────────┬────────────────┐
+│ customers │ products │ transactions │ complaints │ interactions │ transcripts │ surveys │ digital_events │ campaign_sends │
+│   int64   │  int64   │    int64     │   int64    │    int64     │    int64    │  int64  │     int64      │     int64      │
+├───────────┼──────────┼──────────────┼────────────┼──────────────┼─────────────┼─────────┼────────────────┼────────────────┤
+│      9509 │    34912 │       412913 │       4323 │        43923 │       11039 │   13755 │         750337 │         111089 │
+└───────────┴──────────┴──────────────┴────────────┴──────────────┴─────────────┴─────────┴────────────────┴────────────────┘
+
+
+##### -- AR-S7 top 40 candidates
+┌──────────────────┬──────────────────┬───────────┬─────────┬───────┬───────────┬───────────┬────────┬───────┬─────────────┬───────┬───────┬───────────┬─────────────┬───────┬─────────┬─────────┬───────┬────────────┐
+│   customer_id    │    first_name    │  country  │ segment │ score │ usable_cc │ usable_dc │ tx_all │ tx90  │ tx30_usable │ dec30 │ pr30  │ foreign30 │ fraudflag90 │  k90  │ unrec90 │ calls90 │ ev24h │ stale_open │
+│     varchar      │     varchar      │  varchar  │ varchar │ int64 │   int64   │   int64   │ int64  │ int64 │    int64    │ int64 │ int64 │   int64   │    int64    │ int64 │  int64  │  int64  │ int64 │   int64    │
+├──────────────────┼──────────────────┼───────────┼─────────┼───────┼───────────┼───────────┼────────┼───────┼─────────────┼───────┼───────┼───────────┼─────────────┼───────┼─────────┼─────────┼───────┼────────────┤
+│ CLI-BGY8RP21TB5E │ Adriana          │ Colombia  │ Basic   │    19 │         2 │         0 │     42 │     6 │           5 │     0 │     1 │         1 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-RIUFHK8815NH │ Alberto          │ Colombia  │ Plus    │    19 │         2 │         0 │     29 │     6 │           5 │     2 │     0 │         0 │           0 │     0 │       0 │       1 │     0 │          0 │
+│ CLI-JLLEM8RQT11E │ Pilar            │ Colombia  │ Basic   │    18 │         1 │         2 │     46 │     8 │           6 │     1 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-AS8Q51DKZK2C │ Martín Alberto   │ Argentina │ Basic   │    18 │         1 │         1 │     30 │     7 │           5 │     1 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-ZS2L1VHUVAZD │ Sergio Carolina  │ México    │ Plus    │    18 │         2 │         0 │     48 │     6 │           5 │     0 │     2 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-2DZ0UP83E9F4 │ Mauricio         │ México    │ Basic   │    17 │         3 │         0 │     62 │    10 │           4 │     1 │     2 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-YM4I17DWSPMB │ Miguel Rafael    │ México    │ Basic   │    17 │         1 │         0 │     30 │     9 │           5 │     2 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-DUCBPTMK8KCJ │ Teresa           │ México    │ Basic   │    17 │         1 │         2 │     40 │     7 │           5 │     0 │     0 │         0 │           0 │     0 │       0 │       1 │     0 │          0 │
+│ CLI-5R46E0NV15EA │ Silvia María     │ Argentina │ Basic   │    17 │         2 │         1 │     54 │     6 │           6 │     0 │     0 │         1 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-IPQMFP13EZAK │ Juliana Isabella │ Argentina │ Basic   │    17 │         1 │         1 │     30 │     6 │           5 │     0 │     0 │         1 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-RZ4WXL7LRLSU │ Laura Isabella   │ Colombia  │ Basic   │    17 │         1 │         2 │     48 │     6 │           4 │     1 │     1 │         0 │           0 │     0 │       0 │       0 │     0 │          1 │
+│ CLI-UZCGR9SV1YCG │ Gerardo Arturo   │ México    │ Premium │    17 │         1 │         1 │     54 │     6 │           5 │     0 │     0 │         0 │           0 │     0 │       0 │       2 │     0 │          0 │
+│ CLI-0QW8ITXI8M49 │ Santiago         │ México    │ Basic   │    16 │         3 │         1 │     59 │    11 │           5 │     0 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-GNF0VRS6X1YO │ Javier           │ México    │ Basic   │    16 │         2 │         1 │     54 │     9 │           5 │     0 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          1 │
+│ CLI-MFQ17C073K96 │ Beatriz          │ México    │ Basic   │    16 │         2 │         0 │     74 │     8 │           5 │     0 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-NURII98WHBJD │ Victoria         │ México    │ Plus    │    16 │         1 │         1 │     32 │     8 │           5 │     0 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-4M3TSONKPVRZ │ Pedro            │ Colombia  │ Basic   │    16 │         2 │         0 │     24 │     7 │           5 │     0 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-66EXKAIA0P6K │ Angélica         │ México    │ Basic   │    16 │         2 │         0 │     55 │     7 │           4 │     1 │     0 │         0 │           0 │     1 │       0 │       0 │     0 │          1 │
+│ CLI-6DC1L8DX72FB │ Mariana          │ Colombia  │ Plus    │    16 │         1 │         2 │     46 │     7 │           4 │     0 │     1 │         0 │           0 │     0 │       0 │       1 │     0 │          0 │
+│ CLI-HO7050QNWYVH │ César Mauricio   │ México    │ Plus    │    16 │         1 │         1 │     32 │     7 │           4 │     1 │     0 │         2 │           0 │     0 │       0 │       0 │     0 │          1 │
+│ CLI-HXV7S7SQWQTG │ Emilio           │ México    │ Plus    │    16 │         2 │         0 │     44 │     7 │           4 │     1 │     0 │         0 │           0 │     0 │       0 │       1 │     0 │          0 │
+│ CLI-6Z6G250Y7K56 │ Verónica Teresa  │ México    │ Basic   │    16 │         2 │         0 │     27 │     6 │           4 │     0 │     1 │         0 │           0 │     0 │       0 │       1 │     0 │          0 │
+│ CLI-MUH1GEOL8NF8 │ Pedro            │ Argentina │ Basic   │    16 │         2 │         0 │     29 │     6 │           3 │     0 │     1 │         0 │           0 │     1 │       1 │       1 │     0 │          1 │
+│ CLI-GUYKXNSN7XQ6 │ Camila           │ Colombia  │ Premium │    16 │         2 │         0 │     34 │     5 │           4 │     0 │     1 │         1 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-JXC6NM0NVH4C │ Rafael           │ Colombia  │ Basic   │    16 │         2 │         1 │     39 │     5 │           4 │     1 │     0 │         1 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-N4FPJIEGD917 │ Óscar Diego      │ Colombia  │ Plus    │    15 │         1 │         0 │     44 │    10 │           4 │     0 │     1 │         0 │           0 │     1 │       0 │       0 │     0 │          1 │
+│ CLI-EBDNFF4OKCH8 │ Claudia          │ Colombia  │ Basic   │    15 │         3 │         0 │     79 │     9 │           4 │     0 │     0 │         0 │           0 │     1 │       0 │       1 │     0 │          0 │
+│ CLI-53QSNHGHDOEX │ Silvia           │ Colombia  │ Basic   │    15 │         1 │         0 │     18 │     7 │           6 │     0 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-B2J89VPSRTFN │ Patricia Camila  │ Argentina │ Premium │    15 │         2 │         0 │     34 │     6 │           4 │     0 │     0 │         1 │           0 │     0 │       0 │       1 │     0 │          2 │
+│ CLI-O0ES9N1QU1IF │ Gabriela         │ Colombia  │ Plus    │    15 │         2 │         0 │     42 │     6 │           4 │     0 │     1 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-4LF5D2NZZWAW │ Fernanda Norma   │ Argentina │ Basic   │    15 │         2 │         0 │     30 │     5 │           4 │     1 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-6XKFWJWZHJE1 │ Camila           │ México    │ Basic   │    15 │         1 │         2 │     40 │     5 │           4 │     0 │     0 │         1 │           0 │     0 │       0 │       1 │     0 │          0 │
+│ CLI-8CA0I0U1XJRJ │ María María      │ México    │ Basic   │    15 │         2 │         0 │     24 │     5 │           4 │     0 │     0 │         1 │           0 │     0 │       0 │       1 │     0 │          1 │
+│ CLI-ECRM8AW5556O │ Javier Rafael    │ México    │ Student │    15 │         1 │         1 │     25 │     5 │           4 │     0 │     1 │         0 │           0 │     0 │       0 │       0 │     0 │          2 │
+│ CLI-FHB2YTHG2X7T │ Ricardo Mercedes │ Colombia  │ Basic   │    15 │         3 │         0 │     47 │     5 │           4 │     1 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          1 │
+│ CLI-FNIAJ3LZ4DK7 │ Raúl             │ México    │ Basic   │    15 │         1 │         1 │     27 │     5 │           4 │     0 │     1 │         0 │           0 │     0 │       0 │       0 │     0 │          3 │
+│ CLI-GIACJQDCUIRS │ Cristina         │ Argentina │ Plus    │    15 │         1 │         1 │     21 │     4 │           4 │     1 │     0 │         0 │           0 │     0 │       0 │       0 │     0 │          0 │
+│ CLI-LIJ8KLBZCEUY │ Pablo            │ México    │ Plus    │    15 │         2 │         0 │     29 │     4 │           3 │     1 │     1 │         0 │           0 │     0 │       0 │       1 │     0 │          1 │
+│ CLI-MZ4RHSEATO5I │ Francisco        │ México    │ Basic   │    15 │         1 │         1 │     24 │     4 │           3 │     1 │     1 │         0 │           0 │     0 │       0 │       1 │     0 │          1 │
+│ CLI-S4487PMQ5ODF │ Rocío Natalia    │ Colombia  │ Basic   │    15 │         3 │         0 │     43 │     4 │           3 │     1 │     1 │         0 │           0 │     0 │       0 │       1 │     0 │          0 │
+└──────────────────┴──────────────────┴───────────┴─────────┴───────┴───────────┴───────────┴────────┴───────┴─────────────┴───────┴───────┴───────────┴─────────────┴───────┴─────────┴─────────┴───────┴────────────┘
+  40 rows                                                                                                                                                                                                  19 columns
+

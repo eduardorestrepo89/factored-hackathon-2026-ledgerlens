@@ -104,13 +104,13 @@ Then run: `cd docker && docker compose up --build`
 
 ### Using Different Agent Patterns
 
-To use a different agent pattern (e.g., LangGraph):
+To use a different agent pattern (e.g., your own folder under `agent/`):
 
 1. **Edit docker/docker-compose.yml**:
    ```yaml
    agent:
      build:
-       dockerfile: patterns/langgraph-single-agent/Dockerfile
+       dockerfile: agent/my-custom-agent/Dockerfile
    ```
 
 2. **Rebuild**:
@@ -198,9 +198,9 @@ python scripts/deploy-frontend.py
 
 ## Next Steps
 
-- Customize the agent code in `patterns/`
+- Customize the agent code in `agent/`
 - Modify the frontend in `frontend/src/`
-- Add new tools in `tools/` or `gateway/tools/`
+- Add new tools in `gateway/tools/`
 - Update infrastructure in `infra-cdk/`
 
 Remember: Changes to infrastructure require redeployment via CDK, not just Docker Compose restart.

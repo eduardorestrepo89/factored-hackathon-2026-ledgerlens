@@ -12,6 +12,10 @@ Deploys the React frontend to AWS Amplify by:
 4. Packaging and uploading to S3
 5. Triggering Amplify deployment
 
+With --config-only, it only writes aws-exports.json for the local dev server
+(http://localhost:3000) and stops: no build and no Amplify deployment.
+Usage: python deploy-frontend.py [<stack-name>] [--config-only]
+
 Requires: Python 3.11+, AWS CLI, npm, Node.js
 No external Python dependencies - uses standard library only.
 """
@@ -25,7 +29,7 @@ import subprocess  # nosec B404 - subprocess used securely with explicit paramet
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 # Minimum Python version check
 if sys.version_info < (3, 8):
@@ -35,6 +39,7 @@ if sys.version_info < (3, 8):
 # Constants
 BRANCH_NAME = "main"
 NEXT_BUILD_DIR = "build"
+LOCAL_DEV_URL = "http://localhost:3000"  # Vite dev server; Cognito already allows it
 CLEANUP_FILES: list = []
 
 
@@ -90,6 +95,8 @@ def run_command(
     Returns:
         CompletedProcess instance with command results
     """
+    # Windows can't start npm.cmd by its bare name without a shell; the full path works
+    command = [shutil.which(command[0]) or command[0], *command[1:]]
     return subprocess.run(  # nosec B603 - command constructed from safe list
         command,
         capture_output=capture_output,
@@ -124,7 +131,7 @@ def parse_config_yaml(config_path: Path) -> Dict[str, str]:
     Returns:
         Dictionary with stack_name_base and pattern values
     """
-    config = {"stack_name_base": "", "pattern": "strands-single-agent"}
+    config = {"stack_name_base": "", "pattern": "ledgerlens"}
 
     if not config_path.exists():
         return config
@@ -342,6 +349,7 @@ def generate_aws_exports(
     region: str,
     pattern: str,
     frontend_dir: Path,
+    redirect_uri: Optional[str] = None,
 ) -> None:
     """
     Generate aws-exports.json configuration file.
@@ -352,6 +360,7 @@ def generate_aws_exports(
         region: AWS region
         pattern: Agent pattern name
         frontend_dir: Path to frontend directory
+        redirect_uri: Sign-in and sign-out redirect; defaults to the Amplify URL
     """
     required = [
         "CognitoClientId",
@@ -368,8 +377,8 @@ def generate_aws_exports(
     aws_exports = {
         "authority": f"https://cognito-idp.{region}.amazonaws.com/{outputs['CognitoUserPoolId']}",
         "client_id": outputs["CognitoClientId"],
-        "redirect_uri": outputs["AmplifyUrl"],
-        "post_logout_redirect_uri": outputs["AmplifyUrl"],
+        "redirect_uri": redirect_uri or outputs["AmplifyUrl"],
+        "post_logout_redirect_uri": redirect_uri or outputs["AmplifyUrl"],
         "response_type": "code",
         "scope": "email openid profile",
         "automaticSilentRenew": True,
@@ -400,6 +409,21 @@ def create_deployment_zip(build_dir: Path, output_path: Path) -> None:
     shutil.make_archive(
         str(output_path.with_suffix("")), "zip", root_dir=str(build_dir)
     )
+
+
+def parse_args(argv: list) -> Tuple[Optional[str], bool]:
+    """
+    Split the command line into the stack name and the --config-only flag.
+
+    Args:
+        argv: The arguments after the script name
+
+    Returns:
+        The stack name (None when not given) and True when --config-only was given
+    """
+    config_only = "--config-only" in argv
+    names = [arg for arg in argv if arg != "--config-only"]
+    return (names[0] if names else None), config_only
 
 
 def main() -> int:
@@ -443,7 +467,8 @@ def main() -> int:
         return 1
 
     # Get stack name
-    stack_name = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("STACK_NAME")
+    stack_arg, config_only = parse_args(sys.argv[1:])
+    stack_name = stack_arg or os.environ.get("STACK_NAME")
 
     if not stack_name:
         config = parse_config_yaml(config_path)
@@ -451,7 +476,7 @@ def main() -> int:
 
     if not stack_name:
         log_error("Stack name is required")
-        log_info("Usage: python deploy-frontend.py <stack-name>")
+        log_info("Usage: python deploy-frontend.py <stack-name> [--config-only]")
         log_info("   or: STACK_NAME=your-stack ./deploy-frontend.py")
         return 1
 
@@ -484,16 +509,29 @@ def main() -> int:
 
     # Get agent pattern from config
     config = parse_config_yaml(config_path)
-    pattern = config.get("pattern", "strands-single-agent")
+    pattern = config.get("pattern", "ledgerlens")
     log_info(f"Agent pattern: {pattern}")
 
     # Generate aws-exports.json
     log_info("Generating aws-exports.json...")
     try:
-        generate_aws_exports(stack_name, outputs, region, pattern, frontend_dir)
+        generate_aws_exports(
+            stack_name,
+            outputs,
+            region,
+            pattern,
+            frontend_dir,
+            redirect_uri=LOCAL_DEV_URL if config_only else None,
+        )
     except ValueError as e:
         log_error(str(e))
         return 1
+
+    if config_only:
+        log_success(f"Config written for the local dev server ({LOCAL_DEV_URL})")
+        log_info("Skipping the build and the Amplify deployment. Next:")
+        log_info("  cd frontend && npm install && npm run dev")
+        return 0
 
     # Change to frontend directory
     os.chdir(frontend_dir)

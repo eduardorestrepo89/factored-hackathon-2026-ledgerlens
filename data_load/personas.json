@@ -1,0 +1,70 @@
+{
+  "as_of": "2026-06-17T23:59:59",
+  "spec": "docs/superpowers/specs/2026-10-03-curate-stage-design.md, section 6.4",
+  "personas": {
+    "P01": {
+      "customer_id": "CLI-1GL7QBDG3QG0",
+      "use_case": "Decline explained",
+      "expected_outcome": "exit 1: explain the code's meaning from the record; no cause guessed",
+      "evidence": ["TRX-SSJAIUCVVU1L4605ZLNM", "PRD-GKI6NTZU2AEX"]
+    },
+    "P02": {
+      "customer_id": "CLI-7EC6UCDZMSKV",
+      "use_case": "Pending charge",
+      "expected_outcome": "exit 1: explain that the charge is pending",
+      "evidence": ["TRX-M8SV89D2QGIE6WRUB79K", "PRD-1CF5T9HNCQ1X"]
+    },
+    "P03": {
+      "customer_id": "CLI-70U0WJ1NH1MN",
+      "use_case": "Reversed charge with app context",
+      "expected_outcome": "exit 1: explain the reversal; session opens with the app signal",
+      "evidence": ["TRX-LJGEBUAOX0G4CL4RQSIU", "PRD-UUY4Z9TDEF96"]
+    },
+    "P04": {
+      "customer_id": "CLI-N4FPJIEGD917",
+      "use_case": "Which card?",
+      "expected_outcome": "clarify which card before anything else",
+      "evidence": ["TRX-19B2TR7A8QXK7243KZV6", "TRX-9TDT782N9PARVY8IMPRE", "PRD-TVC3HHMH0II0", "PRD-VLRZ7201XLV1"]
+    },
+    "P05": {
+      "customer_id": "CLI-50OIF5EIYSWK",
+      "use_case": "Portuguese persona, foreign charge",
+      "expected_outcome": "answer in Portuguese; explain the charge in Brazil",
+      "evidence": ["TRX-MQKFELIPWT098DXTN2WN", "TRX-YLR3CXW0CFHFUNT2IUWZ", "PRD-MTDX0544YHDL"]
+    },
+    "P06": {
+      "customer_id": "CLI-PV0OIEA8DAAE",
+      "use_case": "Limit increase (out of scope)",
+      "expected_outcome": "abstain and offer a human; read-only servicing facts allowed",
+      "evidence": ["PRD-QM9G50SHLSY4"]
+    },
+    "P07": {
+      "customer_id": "CLI-EX6BOAOEFZHQ",
+      "use_case": "Suspected fraud",
+      "expected_outcome": "exit 2 then 3: confirm, block card 4497, read back, dispute intake",
+      "evidence": ["TRX-23BIJAU4GL46ATPW9STY", "PRD-Z3Y8BK8CKUTN"]
+    },
+    "P08": {
+      "customer_id": "CLI-GG3Z1440277M",
+      "use_case": "Open unrecognized-charge case",
+      "expected_outcome": "exit 3: follow up the open case, no duplicate; hand-off",
+      "evidence": ["CMP-FHCLR8TGWMBD0YFOCLYS", "TRX-OW0S5SQC8JI9MJDLTKU1"]
+    },
+    "P09": {
+      "customer_id": "CLI-UBR2NCZWTD4K",
+      "use_case": "Records contradict",
+      "expected_outcome": "say the records don't match (code 54 on a valid card); offer a hand-off",
+      "evidence": ["TRX-RX1ENVJQ5J26GXX7T8F7", "PRD-0Z61E1KSEEMC"]
+    },
+    "P10": {
+      "customer_id": "CLI-Z3V3SBS18YWQ",
+      "use_case": "Card not active",
+      "expected_outcome": "state the Blocked status only (no reason in the data); offer a human",
+      "evidence": ["PRD-AK4W4IPVS8N8"]
+    }
+  },
+  "alternates": {
+    "P01": "CLI-S2QIJKEZV442",
+    "P07": "CLI-HTX9ITCO0IMR"
+  }
+}

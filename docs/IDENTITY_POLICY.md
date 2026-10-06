@@ -1,399 +1,303 @@
-# Identity Propagation & Cedar Policy Guide
+# Identity Propagation & Cedar Policy
 
-This document describes how FAST propagates user identity from the frontend through to AgentCore Gateway Cedar policies, enabling fine-grained, user-level access control on Gateway tools.
+This page explains how the signed-in user's identity reaches the AgentCore Gateway, so Cedar can limit every tool call to that user's own customer. The code comments in `infra-cdk/lambdas/pretoken-v3/index.py` and `infra-cdk/lib/cognito-construct.ts` point here.
 
 ## Overview
 
-AgentCore Gateway authenticates requests using OAuth2 tokens validated by a CUSTOM_JWT authorizer. By default, the Runtime obtains M2M tokens via the Client Credentials flow, and all requests carry the same machine identity. This means the Gateway cannot distinguish between individual users.
+The Gateway authenticates with a machine token: the agent gets it from Cognito with the client credentials grant. On its own, that token carries no user, so every call would look the same to the Gateway.
 
-This feature adds **identity propagation** on top of the existing M2M flow: the authenticated user's identity is embedded into the M2M token using Cognito's `aws_client_metadata` parameter and V3 Pre-Token Lambda trigger. The enriched token is then evaluated by Cedar policies at the Gateway, enabling access control rules like "only users in the finance department can access the billing tool."
+LedgerLens adds the user to that token:
+1. When the agent asks Cognito for the machine token, it passes the user's Cognito `sub` as `aws_client_metadata`.
+2. The V3 pre-token Lambda looks the `sub` up in `USER_CUSTOMER_IDS_MAP` and adds a `customer_id` claim to the token.
+3. Cedar at the Gateway compares the tool's `customer_id` argument with that claim.
 
-**Use this when:** Gateway tools need user-level access control based on attributes like department, role, or user ID.
-
-> **Scope of this demo:** This implementation demonstrates user-to-tool access control (e.g., "guest users cannot use the text_analysis_tool from the AgentCore Gateway"). AgentCore Policy supports additional capabilities — including input validation, conditional access based on request parameters, and multi-tool policies — which are documented in [Cedar Policy Capabilities](CEDAR_POLICY_GUIDE.md#cedar-policy-capabilities).
+The result: access is per customer. A login can read and act on its linked customer only, and a login with no linked customer gets no tools.
 
 ## What is AgentCore Policy?
 
-AgentCore Policy is a service that controls what your AI agents are allowed to do. Think of it as a security guard sitting between your agent and its tools — every time the agent tries to use a tool, the guard checks the rules and decides: allow or deny.
+AgentCore Policy decides, on every tool call, whether the agent may make it. You write the rules as [Cedar](https://www.cedarpolicy.com/) policies; the policy engine applies them at the Gateway.
+- If no rule allows an action, it is denied (deny-by-default).
+- The decision is deterministic: unlike instructions in a prompt, a clever message can't talk its way past it.
 
-**The simple version:**
-- You write rules (Cedar policies) that say who can use which tools, and under what conditions
-- The Policy Engine enforces those rules automatically on every single tool call
-- If no rule explicitly allows an action, it's denied (deny-by-default)
-- Enforcement is deterministic — unlike prompt engineering, policies cannot be bypassed by clever phrasing
+| Capability | Example rule | Used in LedgerLens? |
+|---|---|---|
+| Claim-based access | "Only a login linked to a customer can use the tools" | Yes, statement 1 |
+| Input validation | "The `customer_id` argument must match the token" | Yes, statements 2 and 3 |
+| Multi-tool policies | One rule for a list of tools | Yes, `action in [...]` |
+| Environment isolation | "Only the production runtime can use production tools" | No (see [Runtime-level access control](#runtime-level-access-control)) |
 
-**What it can control:**
+See the [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md) for the full policy and the syntax reference.
 
-| Capability | Example Rule | Demonstrated in This Demo? |
-|-----------|-------------|---------------------------|
-| User-to-tool access | "Only finance users can access the billing tool" | Yes |
-| Input validation | "Refund amount cannot exceed $1000" | No (see [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md#cedar-policy-capabilities)) |
-| Multi-tool policies | "Developers can use read tools but not write tools" | No (see [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md#cedar-policy-capabilities)) |
-| Environment isolation | "Only production runtime can access production tools" | No (see [Runtime-Level Access Control](#runtime-level-access-control)) |
-| Conditional access | "Allow tool only when query targets a specific account" | No (see [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md#cedar-policy-capabilities)) |
+Key concepts:
+- **Policy engine:** evaluates the Cedar policies. One engine is attached to the Gateway.
+- **Cedar policy:** one declarative rule. LedgerLens has three, one per statement in `policy.cedar`.
+- **Custom JWT authorizer:** the Gateway component that validates the token and maps its claims to Cedar principal tags.
+- **Tool filtering:** tools a caller can't use are hidden from `tools/list`, not only blocked at call time. See [Tool discovery vs execution](CEDAR_POLICY_GUIDE.md#tool-discovery-vs-execution).
 
-**This demo implements** user-to-tool access control based on custom `department` claims. The other capabilities use the same infrastructure (Policy Engine + Cedar + Gateway) with different policy conditions. See [Cedar Policy Capabilities](CEDAR_POLICY_GUIDE.md#cedar-policy-capabilities) for the full syntax reference with examples of each capability.
-
-**Key concepts:**
-- **Policy Engine** — The evaluation engine that processes Cedar policies. One engine attaches to one Gateway.
-- **Cedar Policy** — A declarative rule written in [Cedar](https://www.cedarpolicy.com/), AWS's open-source policy language. Deterministic, not probabilistic.
-- **CUSTOM_JWT Authorizer** — The Gateway component that validates tokens and maps JWT claims to Cedar principal tags.
-- **Deny-by-default** — If no `permit` statement matches, the request is denied. No explicit `forbid` needed.
-- **Tool filtering** — Denied tools are hidden from the agent at discovery time (`tools/list`), not just blocked at execution time. See [Tool Discovery vs Execution](CEDAR_POLICY_GUIDE.md#tool-discovery-vs-execution).
-
-## Architecture / Flow
-
-The identity propagation flow has six steps:
+## Flow
 
 ```
-1. User logs in → Frontend gets JWT from Cognito
-2. Frontend sends request → Runtime validates JWT, extracts user_id (sub claim)
-3. Runtime calls Cognito /oauth2/token with aws_client_metadata containing user_id
-4. Cognito V3 Pre-Token Lambda fires → reads user_id (UUID) → looks up department/role from UUID mapping → injects claims into M2M token
-5. Runtime calls Gateway tool with the enriched M2M token
-6. Gateway's CUSTOM_JWT Authorizer maps token claims to Cedar principal tags → Policy Engine evaluates Cedar policy → allow or deny
+1. User signs in → the frontend gets a JWT from Cognito (web client)
+2. Frontend calls the runtime → its JWT authorizer validates the token;
+   the Authorization header is allowlisted, so the agent can read it
+3. extract_user_id_from_context() reads the sub claim
+4. get_gateway_access_token(sub) → POST https://<cognito_provider>/oauth2/token
+       grant_type=client_credentials
+       aws_client_metadata={"verified_user_id": "<sub>"}
+5. Cognito runs the V3 pre-token Lambda → customer_id = USER_CUSTOMER_IDS_MAP[sub] or ""
+6. extract_customer_id_from_token() reads customer_id from that same token
+       → system prompt, CustomerIdHook
+7. The agent calls tools through the Gateway with that token
+       → JWT authorizer → Cedar (customer_id claim vs context.input) → tool Lambda
 ```
 
-Key security property: the `user_id` comes from the validated JWT in the Runtime's Session Context (`sub` claim), not from the LLM or request payload. This ensures the identity chain is cryptographically secure end-to-end.
+Security properties:
+- The `sub` comes from the token the runtime already validated, never from the model or the request body.
+- The `customer_id` comes from the machine token, never from the model. The model is told which id to pass, but `CustomerIdHook` overwrites whatever it writes, and Cedar checks it again.
 
 ## Components
 
-### Cognito ESSENTIALS Tier
+### Cognito Essentials tier
 
-**File:** `infra-cdk/lib/cognito-stack.ts`
+**File:** `infra-cdk/lib/cognito-construct.ts`
 
-The Cognito User Pool is configured with `featurePlan: ESSENTIALS`. This is required because V3 Pre-Token Generation Lambda triggers only fire on Client Credentials (M2M) grants when the ESSENTIALS tier is enabled. Without it, the Pre-Token Lambda would not be invoked during M2M token generation.
+The user pool uses `featurePlan: ESSENTIALS`. V3 pre-token triggers fire on client credentials grants only on the Essentials tier (or higher). Without it, the Lambda wouldn't run for the machine token and no `customer_id` would be added.
 
-### V3 Pre-Token Lambda
+The CDK `UserPool.addTrigger()` supports only trigger versions V1 and V2, so the construct sets `LambdaConfig.PreTokenGenerationConfig` with `LambdaVersion: "V3_0"` through an L1 property override.
 
-**File:** `infra-cdk/lambdas/pretoken-v3/index.py`
+### V3 pre-token Lambda
 
-This Lambda fires on every token generation event (both user login and M2M). It only processes M2M flows (`TokenGeneration_ClientCredentials`) and skips user login flows.
+**File:** `infra-cdk/lambdas/pretoken-v3/index.py`, deployed as `ledgerlens-bank-assistant-pretoken-v3`.
 
-For M2M flows, it reads `verified_user_id` (the Cognito `sub` — a UUID) from `clientMetadata` and assigns department/role claims based on a UUID-to-group mapping:
+It fires on every token Cognito issues and acts only on client credentials grants (`TokenGeneration_ClientCredentials`). For those:
+- With no `verified_user_id` in `clientMetadata`, it returns the event unchanged: the token gets **no** custom claims.
+- Otherwise it adds four claims through `claimsToAddOrOverride`:
 
-| User Sub (UUID) | Department | Role |
-|-----------------|------------|------|
-| `<fastprojectadmin-user-sub-uuid>` | finance | admin |
-| `<fastuser-user-sub-uuid>` | engineering | developer |
-| (any UUID not in the map) | guest | viewer |
+| Claim | Value | Used by |
+|---|---|---|
+| `customer_id` | `USER_CUSTOMER_IDS_MAP[sub]`, or `""` | Cedar statements 1 and 2, the agent |
+| `user_id` | The user's `sub` | Nothing |
+| `department` | Always `"guest"` | Nothing |
+| `role` | Always `"viewer"` | Nothing |
 
-> **Note:** The Cognito `sub` is an immutable, unique UUID assigned to each user at creation time — a recommended identifier for authorization decisions.
+`department` and `role` come from the template the project started from. `USER_ROLE_MAP` maps `sub` values to them, but it holds only placeholder keys (`<fastprojectadmin-user-sub-uuid>`, `<fastuser-user-sub-uuid>`). So every user gets `DEFAULT_GROUP`, guest/viewer. The "two-step deployment" in the Lambda's docstring is about filling `USER_ROLE_MAP`; for LedgerLens, the mapping that matters is `USER_CUSTOMER_IDS_MAP`.
 
-**Setup (two-step deployment):**
-1. Deploy the stack once — all users are assigned `guest/viewer` by default
-2. Look up user UUIDs: `aws cognito-idp list-users --user-pool-id <pool-id>`
-3. Replace the placeholder UUIDs in `USER_ROLE_MAP` with actual user subs
-4. Redeploy (`cdk deploy`) to apply the updated mapping
+`customer_id` is `""` when:
+- `USER_CUSTOMER_IDS_MAP` is missing or blank, isn't valid JSON, or isn't a JSON object;
+- the `sub` has no entry;
+- the entry isn't a string.
 
-**Alternative (email-based matching without two-step deploy):**
-To avoid the UUID lookup step, the Lambda can resolve the user's email from the sub via the Cognito `ListUsers` API and match against email substrings (e.g., `"fastprojectadmin" in email`). This requires adding `cognito-idp:ListUsers` permission to the Pre-Token Lambda role. UUID-based mapping is recommended because UUIDs are immutable and not PII. See the [Changing Group Assignment](#changing-group-assignment) section for details.
+The token is still issued in every case. Cedar then denies the tools. The Lambda logs which case applied (`[PRE-TOKEN] ...` lines), but never the `sub` or the customer id.
 
-**Dynamic group assignment:** Replace the hardcoded `USER_ROLE_MAP` with a DynamoDB table keyed by the user's sub (UUID), a directory service query, or other identity provider.
+### USER_CUSTOMER_IDS_MAP
 
-These claims are injected into the M2M access token via `claimsToAddOrOverride`:
-- `user_id` — the authenticated user's Cognito sub (UUID)
-- `department` — the user's department
-- `role` — the user's role
+The Lambda's `USER_CUSTOMER_IDS_MAP` environment variable is a JSON object, as a string, from Cognito `sub` to customer id:
 
-> **Note:** These claim names (`user_id`, `department`, `role`) are custom, application-defined claims — not standard JWT/OIDC claims. Custom claim names are defined based on the application's access control needs. See [Understanding Claims](CEDAR_POLICY_GUIDE.md#understanding-claims-custom-vs-standard) for details.
-
-### Cedar Policy File
-
-**File:** `gateway/policies/policy.cedar`
-
-The Cedar policy defines access control rules for Gateway tools. It is loaded by CDK at deploy time, with `//` comment lines stripped and the `{{GATEWAY_ARN}}` placeholder replaced with the actual Gateway ARN.
-
-Two policy versions are provided:
-
-**Version 1 (Active by default):** All departments — including guest — can access the tool.
-
-```cedar
-permit(
-  principal is AgentCore::OAuthUser,
-  action == AgentCore::Action::"sample-tool-target___text_analysis_tool",
-  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
-)
-when {
-  principal.hasTag("department") &&
-  (principal.getTag("department") == "finance" ||
-   principal.getTag("department") == "engineering" ||
-   principal.getTag("department") == "guest")
-};
+```json
+{"<cognito-sub>": "CLI-50OIF5EIYSWK", "<another-sub>": "CLI-70U0WJ1NH1MN"}
 ```
 
-**Version 2 (Commented out):** Only finance and engineering can access the tool. Guests are denied automatically because Cedar is deny-by-default.
+- **Where it is set:** hard-coded in `cognito-construct.ts`. It holds 15 subs today (the demo, evaluation and judge logins); several map to the same customer.
+- **Console edits:** a change in the Lambda console applies to the next token. The agent fetches a new token on every request, so the next message already uses it. This is how the demo login switches personas.
+- **Redeploys:** a deploy of the main stack resets the variable to the committed value. Subs added only in the console are lost.
 
-```cedar
-permit(
-  principal is AgentCore::OAuthUser,
-  action == AgentCore::Action::"sample-tool-target___text_analysis_tool",
-  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
-)
-when {
-  principal.hasTag("department") &&
-  (principal.getTag("department") == "finance" ||
-   principal.getTag("department") == "engineering")
-};
+To link a new login: create the user, find its `sub`, add it to the map in `cognito-construct.ts`, commit, and deploy the main stack. The full steps, including the evaluation logins, are in [DEPLOYMENT.md, Create logins and link them to customers](DEPLOYMENT.md#5-create-logins-and-link-them-to-customers).
+
+To find a login's `sub`:
+
+```bash
+aws cognito-idp list-users --profile ledgerlens --user-pool-id <pool-id> \
+  --filter 'email = "demo@ledgerlens.example"' \
+  --query "Users[0].Attributes[?Name=='sub'].Value" --output text
 ```
 
-To switch versions: edit `gateway/policies/policy.cedar` (comment out one version, uncomment the other), then run `cdk deploy`.
+### Cedar policy file
 
-### Policy Engine Custom Resource
+**File:** `gateway/policies/policy.cedar`. One file, three statements:
+1. Permit the 9 tools when `customer_id` is present and non-empty.
+2. Forbid a call whose `customer_id` argument differs from the claim.
+3. Forbid `block_credit_card` and `open_claim` unless `customer_confirmed` is `true`.
+
+CDK strips the `//` comment lines and replaces `{{GATEWAY_ARN}}` at synth time. The custom resource creates one AgentCore policy per statement. See the [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md#the-ledgerlens-policy) for the statements and why each is written the way it is.
+
+### Policy engine custom resource
 
 **Files:**
-- `infra-cdk/lambdas/cedar-policy/index.py` — Custom Resource Lambda
-- `infra-cdk/lib/backend-stack.ts` — CDK resource definition
+- `infra-cdk/lambdas/cedar-policy/index.py`: the custom resource Lambda
+- `infra-cdk/lib/backend-construct.ts`: the `GatewayPolicy` custom resource, in `createAgentCoreGateway()`
 
-A CloudFormation Custom Resource manages the full Policy Engine lifecycle because no L1/L2 CDK construct exists for AgentCore Policy. The Lambda handles three CloudFormation events:
+The Lambda handles three CloudFormation events:
+- **Create:** creates the engine `ledgerlens_bank_assistant_policy_engine`, one policy per statement, then attaches the engine to the Gateway in `ENFORCE` mode.
+- **Update:** deletes the policies it manages, creates one per statement from the new document, and re-attaches the engine if it was detached. The engine is kept.
+- **Delete:** detaches the engine, deletes the policies, deletes the engine.
 
-- **Create:** Creates Policy Engine → creates Cedar Policy → attaches Policy Engine to Gateway
-- **Update:** Deletes existing policies → creates new policy with updated document → verifies engine is still attached to Gateway
-- **Delete:** Detaches Policy Engine from Gateway → deletes all policies → deletes Policy Engine
+It waits with the boto3 waiters `policy_engine_active`, `policy_engine_deleted`, `policy_active` and `policy_deleted`. Gateway status changes have no waiter, so it polls until the Gateway is `READY` (up to 5 minutes).
 
-All operations use official boto3 waiters (`policy_engine_active`, `policy_engine_deleted`, `policy_active`, `policy_deleted`). Gateway status changes use a custom polling loop as no official waiter exists.
+### Gateway authorizer
 
-### Gateway Authorizer
+**File:** `infra-cdk/lib/backend-construct.ts`
 
-**File:** `infra-cdk/lib/backend-stack.ts`
+```typescript
+authorizerConfiguration: agentcore.GatewayAuthorizer.usingCustomJwt({
+  discoveryUrl: cognitoDiscoveryUrl,
+  allowedClients: [this.machineClient.userPoolClientId],
+}),
+```
 
-The Gateway uses a `CUSTOM_JWT` authorizer configured with the Cognito OIDC discovery URL and the machine client ID. The authorizer validates M2M tokens and maps JWT claims to Cedar principal tags:
+It accepts only tokens issued to the machine client and maps their claims to Cedar principal tags:
 
-| JWT Claim | Cedar Principal Tag | Claim Type |
-|-----------|-------------------|------------|
-| `department` | `principal.getTag("department")` | Custom (injected by Pre-Token Lambda) |
-| `role` | `principal.getTag("role")` | Custom (injected by Pre-Token Lambda) |
-| `user_id` | `principal.getTag("user_id")` | Custom (injected by Pre-Token Lambda) |
+| JWT claim | Cedar | Read by the policy? |
+|---|---|---|
+| `customer_id` | `principal.getTag("customer_id")` | Yes |
+| `user_id` | `principal.getTag("user_id")` | No |
+| `department` | `principal.getTag("department")` | No |
+| `role` | `principal.getTag("role")` | No |
 
-## Cedar Policy Guide
+### Agent side: system prompt and hooks
 
-For the full Cedar policy reference — including claims, action format, schema constraints, tool discovery vs execution, and policy capabilities — see [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md).
+The agent uses the same `customer_id` as Cedar, read from the same token:
+- `build_system_prompt(customer_id, ...)` in `agent/ledgerlens/tools/system_prompt.py` tells the model the customer's id. With `""`, it uses a different block for a user with no linked customer.
+- `CustomerIdHook` (`agent/ledgerlens/tools/customer_id_hook.py`) runs before every tool call whose schema has a `customer_id` property. It overwrites the argument with the token's value. With `""`, it cancels the call with "This user's account is not linked to a customer, so customer data can't be looked up."
+- `ConfirmationHook` (`agent/ledgerlens/tools/confirmation_hook.py`) sets `customer_confirmed` to `true` on `block_credit_card` and `open_claim` only after the customer taps Yes.
 
-## Two Authentication Approaches
+Why both the hooks and Cedar: the hooks make the normal path correct and give the model a clear message. Cedar enforces the same rules even if the agent code has a bug or is bypassed.
 
-FAST provides two approaches for Gateway authentication in each pattern's `tools/gateway.py`:
+## Two authentication approaches
 
-> **Replacing Cognito?** For swapping Cognito with another Identity Provider (Okta, Auth0, Entra ID, etc.) or using Gateway Interceptors for dynamic access control, see [Replacing Cognito](REPLACING_COGNITO.md).
+`agent/ledgerlens/tools/gateway.py` holds two ways to get the Gateway token. Only the first is active.
 
-### Approach 1 (Active): Direct Cognito Call
+> **Replacing Cognito?** For swapping Cognito for another identity provider, or using Gateway interceptors instead of Cedar, see [Replacing Cognito](REPLACING_COGNITO.md).
 
-Calls the Cognito `/oauth2/token` endpoint directly with `aws_client_metadata` containing the user's identity. The V3 Pre-Token Lambda reads this metadata and injects user-specific claims into the M2M token.
+### Approach 1 (active): direct Cognito call
 
-**Use when:** The M2M token needs to carry user-specific claims for Cedar policy evaluation.
+- `get_gateway_access_token(user_id: str) -> str` in `agent/utils/auth.py` calls the Cognito `/oauth2/token` endpoint with `aws_client_metadata`. The pre-token Lambda reads that metadata and adds `customer_id`.
+- `extract_customer_id_from_token(access_token: str) -> str` reads the claim back.
+- `create_gateway_mcp_client(access_token: str) -> MCPClient` in `gateway.py` uses the same token for the Gateway.
 
-**Trade-off:** Requires outbound HTTPS access to the Cognito hosted domain (NAT Gateway needed in VPC mode).
+**Why:** it is the only way to get user claims into the machine token. Cedar needs them.
 
-### Approach 2 (Commented Out): @requires_access_token Decorator
+**Trade-off:** the runtime needs outbound HTTPS to the Cognito domain. The deployed runtime is in PUBLIC network mode, so it has it. In VPC mode it needs a NAT gateway (see [VPC mode](#vpc-mode)).
 
-Uses the AgentCore Identity SDK decorator for automatic token retrieval, caching, and refresh via the Token Vault. Simpler setup, but does not support `aws_client_metadata`, so the Pre-Token Lambda cannot identify the user.
+### Approach 2 (commented out): `@requires_access_token`
 
-**Use when:** Pure M2M authentication is sufficient and no user identity is needed in the token.
+The commented code uses the AgentCore Identity SDK decorator. The decorator gets the token from the Token Vault through the OAuth2 credential provider `ledgerlens-bank-assistant-runtime-gateway-auth`, with caching and refresh built in. The stack still deploys that provider and the runtime's `GATEWAY_CREDENTIAL_PROVIDER_NAME` variable, but nothing uses them.
+
+The decorator can't pass `aws_client_metadata`. So in LedgerLens, switching to it breaks every tool:
+1. The pre-token Lambda sees no `verified_user_id` and adds no claims, so the token has no `customer_id`.
+2. Cedar statement 1 doesn't match, so `tools/list` returns nothing and every call is denied.
+3. The agent reads `""` as the customer id, so `CustomerIdHook` cancels every call (all 9 tools take `customer_id`).
+
+Use it only if access control moves somewhere else, for example to Gateway interceptors (see [Replacing Cognito](REPLACING_COGNITO.md)).
 
 ### Switching from Approach 1 to Approach 2
 
-Each pattern's `tools/gateway.py` contains both approaches with switching instructions:
-
-1. Uncomment the decorator-based `_fetch_gateway_token()` function
-2. Comment out the Approach 1 `create_gateway_mcp_client(user_id)`
-3. Uncomment the Approach 2 `create_gateway_mcp_client()` (no `user_id` param)
-4. Update callers to not pass `user_id`
-5. Verify `GATEWAY_CREDENTIAL_PROVIDER_NAME` env var is set in the CDK Runtime config (already configured in `backend-stack.ts`)
+The steps from `gateway.py`'s docstring:
+1. Uncomment the decorator-based `_fetch_gateway_token()`.
+2. Comment out the Approach 1 `create_gateway_mcp_client(access_token)`.
+3. Uncomment the Approach 2 `create_gateway_mcp_client()` (no parameter).
+4. In `invocations()` in `agent/ledgerlens/ledgerlens_agent.py`, stop fetching and passing the token. The agent then has no `customer_id`.
+5. Check that `GATEWAY_CREDENTIAL_PROVIDER_NAME` is set in the runtime's environment. `createAgentCoreRuntime()` in `backend-construct.ts` already sets it.
 
 ## Customization
 
-### Changing Group Assignment
+### Replacing the user-to-customer mapping
 
-Edit `infra-cdk/lambdas/pretoken-v3/index.py` to replace the `USER_ROLE_MAP` with your own identity resolution. Options:
+`USER_CUSTOMER_IDS_MAP` is a demo shortcut: every new login needs a code change and a deploy. In `pretoken-v3/index.py`, replace `_lookup_customer_id()` with a real lookup:
+- **DynamoDB table:** partition key `sub`, attribute `customer_id`. The Lambda queries it with the `verified_user_id` from `clientMetadata`. Linking a login then needs no deploy. Grant the Lambda's role read access to the table.
+- **Email-based lookup:** resolve the user's email from the `sub` with the Cognito `ListUsers` API, then map the email to a customer. This needs `cognito-idp:ListUsers` on the Lambda's role. Prefer the `sub`: it is immutable and isn't PII.
+- **The bank's own directory:** call the customer system with the `sub` as the key.
 
-- **DynamoDB table (dynamic mapping):** Create a table with the user's `sub` (UUID) as the partition key and `department`/`role` as attributes. The Lambda queries the table using the `verified_user_id` received in `clientMetadata`. This avoids redeployment when group assignments change.
-- **Cognito ListUsers (email-based):** Resolve the user's email from the sub via `cognito-idp:ListUsers`, and match against email substrings. Avoids two-step deployment but requires adding `cognito-idp:ListUsers` permission to the Pre-Token Lambda role.
-- **External directory service:** Call LDAP, Active Directory, or another identity provider using the UUID as the lookup key.
+Keep two behaviours whatever you choose:
+- Return `""` when there is no customer, so Cedar denies.
+- Don't fail the token request. The Lambda never raises today.
 
-### Adding New Claims
+### Using department and role
 
-To add new claims to the M2M token:
+To use `department` and `role` in Cedar, replace the placeholder keys in `USER_ROLE_MAP` with real `sub` values, deploy, and add conditions on `principal.getTag("department")` or `principal.getTag("role")`. Remember that every statement change goes through `CreatePolicy` validation at deploy.
 
-1. Add the claim to `claimsToAddOrOverride` in the Pre-Token Lambda
-2. Reference the claim in Cedar policy using `principal.getTag("claim_name")`
-3. No Gateway configuration change is needed — the CUSTOM_JWT authorizer maps all JWT claims to Cedar tags automatically
+### Adding new claims
 
-### VPC Mode
+1. Add the claim to `claimsToAddOrOverride` in the pre-token Lambda.
+2. Read it in Cedar with `principal.getTag("claim_name")`.
+3. No Gateway change is needed: the custom JWT authorizer maps all claims to tags.
 
-When deploying in VPC mode, Approach 1 (direct Cognito call) requires a **NAT Gateway** because the Cognito `/oauth2/token` hosted domain is a public HTTPS endpoint with no VPC endpoint available.
+### VPC mode
 
-Approach 2 (`@requires_access_token` decorator) does not require a NAT Gateway — the AgentCore Identity service handles the Cognito token exchange server-side within AWS, reachable through the `bedrock-agentcore` VPC endpoint.
+In VPC mode, Approach 1 needs a **NAT gateway**: the Cognito `/oauth2/token` domain is a public HTTPS endpoint with no VPC endpoint.
 
-See `docs/DEPLOYMENT.md` for full VPC configuration details.
+Approach 2 doesn't: AgentCore Identity exchanges the token on the AWS side, reachable through the `bedrock-agentcore` VPC endpoint. But see above for why Approach 2 breaks LedgerLens.
 
-### Runtime-Level Access Control
+See [DEPLOYMENT.md, VPC mode](DEPLOYMENT.md#appendix-vpc-mode-for-the-runtime).
 
-By default, all requests through a Gateway share the same machine client identity. If you deploy multiple AgentCore Runtimes and need to control which runtime can access which tools, you can use the Cognito `clientId` as a cryptographically verified runtime identity.
+### Runtime-level access control
 
-**Why not use `context.runtime.arn` in Cedar?**
-The Cedar schema only supports `context.input` (tool parameters) — there is no `context.runtime.arn` or similar field. Attempting to reference unsupported context fields will cause policy creation to fail.
+LedgerLens has one runtime and one machine client. If you ever run several runtimes against one Gateway and need to control which runtime may use which tools, use the Cognito `clientId` as the runtime's identity. This pattern is not implemented here.
 
-**Why not use Cognito Groups?**
-Cognito User Pool Groups only apply to user identities, not app clients. In `client_credentials` (M2M) flows, there is no user, so the `cognito:groups` claim is never present in the token.
+**Why not `context.runtime.arn` in Cedar?** The schema has no such field, so policy creation would fail.
 
-**Solution: One Cognito App Client Per Runtime**
+**Why not Cognito groups?** Groups apply to users, not app clients. A client credentials token never has `cognito:groups`.
 
-Since each CDK stack creates both the Cognito app client and the AgentCore Runtime, the `clientId` serves as the runtime identity — verified cryptographically via the `client_secret`. The Pre-Token Lambda maps the `clientId` to a `runtime_env` claim without any self-reporting.
-
-**Architecture:**
+**Solution: one Cognito machine client per runtime.** The `clientId` is verified by the client secret, so the runtime can't fake it. The pre-token Lambda maps the `clientId` to a `runtime_env` claim:
 
 ```
-Runtime A (production) → authenticates with Client A (client_secret_A)
-                          → Cognito verifies clientId = "abc123"
-                          → Pre-Token Lambda maps "abc123" → runtime_env: "production"
-                          → Cedar policy checks principal.getTag("runtime_env")
-
-Runtime B (staging)    → authenticates with Client B (client_secret_B)
-                          → Cognito verifies clientId = "def456"
-                          → Pre-Token Lambda maps "def456" → runtime_env: "staging"
-                          → Cedar policy checks principal.getTag("runtime_env")
+Runtime A (production) → client A + secret A → Cognito verifies clientId "abc123"
+                       → pre-token Lambda: "abc123" → runtime_env "production"
+Runtime B (staging)    → client B + secret B → Cognito verifies clientId "def456"
+                       → pre-token Lambda: "def456" → runtime_env "staging"
 ```
 
-**Step 1: Create separate machine clients in CDK**
-
-```typescript
-// Create one machine client per runtime environment
-const machineClientProd = new cognito.UserPoolClient(this, 'MachineClientProd', {
-  userPool: this.userPool,
-  generateSecret: true,
-  oAuth: {
-    flows: { clientCredentials: true },
-    // Use the same resource server scopes as the existing machine client
-    scopes: [
-      cognito.OAuthScope.resourceServer(resourceServer,
-        new cognito.ResourceServerScope({ scopeName: 'read', scopeDescription: 'Read access' })),
-      cognito.OAuthScope.resourceServer(resourceServer,
-        new cognito.ResourceServerScope({ scopeName: 'write', scopeDescription: 'Write access' })),
-    ],
-  },
-});
-
-const machineClientStaging = new cognito.UserPoolClient(this, 'MachineClientStaging', {
-  userPool: this.userPool,
-  generateSecret: true,
-  oAuth: {
-    flows: { clientCredentials: true },
-    scopes: [
-      cognito.OAuthScope.resourceServer(resourceServer,
-        new cognito.ResourceServerScope({ scopeName: 'read', scopeDescription: 'Read access' })),
-      cognito.OAuthScope.resourceServer(resourceServer,
-        new cognito.ResourceServerScope({ scopeName: 'write', scopeDescription: 'Write access' })),
-    ],
-  },
-});
-
-// Pass the mapping to the Pre-Token Lambda as an environment variable
-preTokenLambda.addEnvironment('CLIENT_RUNTIME_MAP', JSON.stringify({
-  [machineClientProd.userPoolClientId]: 'production',
-  [machineClientStaging.userPoolClientId]: 'staging',
-}));
-```
-
-**Step 2: Map clientId → runtime_env in the Pre-Token Lambda**
+What changes:
+1. **Machine clients:** create one per runtime in `createMachineAuthentication()` in `backend-construct.ts`, each with the same resource server scopes. Add every client to the Gateway's `allowedClients`.
+2. **Mapping:** pass `{clientId: runtime_env}` to the pre-token Lambda, for example as a `CLIENT_RUNTIME_MAP` environment variable. The Lambda is created in `cognito-construct.ts`, so the client IDs must be passed into that construct.
+3. **Pre-token Lambda:** read `event["callerContext"]["clientId"]`, look it up, and add `runtime_env` to `claimsToAddOrOverride` next to `customer_id`:
 
 ```python
-import os, json
-
-def lambda_handler(event, context):
-    if event["triggerSource"] != "TokenGeneration_ClientCredentials":
-        return event
-
-    # clientId is Cognito-verified
-    client_id = event["callerContext"]["clientId"]
-
-    # Mapping set at deploy time by CDK
-    client_runtime_map = json.loads(os.environ.get("CLIENT_RUNTIME_MAP", "{}"))
-    runtime_env = client_runtime_map.get(client_id, "unknown")
-
-    # Existing user identity logic (unchanged)
-    meta = event["request"].get("clientMetadata", {})
-    user_id = meta.get("verified_user_id", "")  # Cognito sub (UUID)
-
-    # UUID-based group mapping (see USER_ROLE_MAP in pretoken-v3/index.py)
-    user_role_map = {
-        "<fastprojectadmin-sub-uuid>": {"department": "finance", "role": "admin"},
-        "<fastuser-sub-uuid>": {"department": "engineering", "role": "developer"},
-    }
-    default_group = {"department": "guest", "role": "viewer"}
-    group = user_role_map.get(user_id, default_group)
-    department, role = group["department"], group["role"]
-
-    event["response"]["claimsAndScopeOverrideDetails"] = {
-        "accessTokenGeneration": {
-            "claimsToAddOrOverride": {
-                "user_id": user_id,
-                "department": department,
-                "role": role,
-                "runtime_env": runtime_env,
-            }
-        }
-    }
-    return event
+client_id = event["callerContext"]["clientId"]  # verified by Cognito
+client_runtime_map = json.loads(os.environ.get("CLIENT_RUNTIME_MAP", "{}"))
+runtime_env = client_runtime_map.get(client_id, "unknown")
 ```
 
-**Step 3: Add runtime_env to Cedar policy**
+4. **Cedar:** add `principal.hasTag("runtime_env") && principal.getTag("runtime_env") == "production"` to the `permit` (see [Capability 5](CEDAR_POLICY_GUIDE.md#capability-5-environment-based-access-control)).
 
-```cedar
-permit(
-  principal is AgentCore::OAuthUser,
-  action == AgentCore::Action::"sample-tool-target___text_analysis_tool",
-  resource == AgentCore::Gateway::"{{GATEWAY_ARN}}"
-)
-when {
-  principal.hasTag("runtime_env") &&
-  principal.getTag("runtime_env") == "production" &&
-  principal.hasTag("department") &&
-  (principal.getTag("department") == "finance" ||
-   principal.getTag("department") == "engineering")
-};
+Two layers of identity result:
+
+| Layer | Claim | Source | Trust |
+|---|---|---|---|
+| Runtime | `runtime_env` | `callerContext.clientId` | Cryptographic: needs the client secret |
+| User | `customer_id`, `user_id` | `clientMetadata.verified_user_id`, the `sub` from the runtime-validated user JWT | JWT-verified, extracted server-side by `extract_user_id_from_context()` |
+
+## Verifying the deployed policy
+
+In the console:
+1. Open **Amazon Bedrock AgentCore → Policy**.
+2. Open the policy engine `ledgerlens_bank_assistant_policy_engine`.
+3. Under **Policies** there are three, one per statement: `ledgerlens_bank_assistant_polic_cp1_<timestamp>`, `_cp2_`, `_cp3_`.
+4. Each policy's **Definition** shows the effect (`permit` or `forbid`), the principal (`AgentCore::OAuthUser`), the actions, the Gateway and the conditions. The **Cedar** section shows the statement as deployed.
+
+From the CLI:
+
+```bash
+export AWS_PROFILE=ledgerlens
+aws bedrock-agentcore-control list-policies --policy-engine-id <PolicyEngineId>
+aws bedrock-agentcore-control get-gateway --gateway-identifier <GatewayId> \
+  --query policyEngineConfiguration   # should show the engine ARN and "mode": "ENFORCE"
 ```
 
-**Security model — two-layer identity:**
+`PolicyEngineId` and `GatewayId` are main stack outputs. The `CedarPolicyId` output is the ID of the first policy only.
 
-| Layer | Claim | Source | Trust Level |
-|-------|-------|--------|-------------|
-| Runtime identity | `runtime_env` | `callerContext.clientId` (Cognito-verified) | Cryptographic — requires `client_secret` |
-| User identity | `user_id`, `department`, `role` | `clientMetadata.verified_user_id` (from validated JWT `sub` claim) | JWT-verified — extracted server-side by Runtime from Cognito-validated token |
+## Verifying policy decisions via tracing
 
-Both layers are secured by Cognito: the `clientId` is verified through the client secret exchange, and the `user_id` originates from the validated JWT `sub` claim extracted by `extract_user_id_from_context()` in the Runtime.
+CDK doesn't turn on tracing for the runtime or the Gateway. To see Cedar's decisions, turn it on in the console. Trace delivery also needs CloudWatch Transaction Search (see [OBSERVABILITY.md](OBSERVABILITY.md)).
 
-> **Note:** This section documents the architecture pattern for runtime-level access control. The current FAST implementation uses a single machine client. To implement this pattern, create additional machine clients in `cognito-stack.ts` and update the Pre-Token Lambda with the mapping logic above.
+1. Go to **Amazon Bedrock AgentCore → Runtimes** and open `ledgerlens_bank_assistant_ledgerlens_agent`.
+2. Under **Tracing**, choose **Edit** and enable tracing.
+3. Go to **Amazon Bedrock AgentCore → Gateways**, open `ledgerlens-bank-assistant-gateway`, and enable tracing the same way.
+4. Send a message from the frontend that makes the agent call a tool.
+5. In **CloudWatch → Log groups**, open `aws/spans` and its default log stream.
+6. Filter events for `policy`.
+7. Find the `AgentCore.Policy.PartiallyAuthorizeActions` span. It has:
+    - `aws.agentcore.policy.allowed_tools`: tools the login may use
+    - `aws.agentcore.policy.denied_tools`: tools it may not
+    - `aws.agentcore.gateway.policy.mode`: should be `ENFORCE`
 
-## Verifying the Deployed Policy
-
-To check which Cedar policy is currently active on the Gateway:
-
-1. Go to **AWS Console → Bedrock AgentCore → Policy**
-2. Click on your Policy Engine (e.g., `FAST_stack_policy_engine`) from the Policy engines section
-3. In the **Policies** section, click on your policy (e.g., `FAST_stack_policy_engine_cp_<timestamp>`)
-4. The **Definition** section shows the policy breakdown:
-    - **Effect**: `permit` or `forbid`
-    - **Scope: Principal**: `AgentCore::OAuthUser`
-    - **Scope: Actions**: the tool action name (e.g., `sample-tool-target___text_analysis_tool`)
-    - **Scope: Resource**: the Gateway name
-    - **Conditions**: the `when` clause logic
-5. The **Cedar** section shows the full Cedar policy statement as deployed
-
-Use this to confirm that a `cdk deploy` applied the expected policy version.
-
-## Verifying Policy Decisions via Tracing
-
-To verify Cedar policy allow/deny decisions in CloudWatch logs:
-
-1. Go to **AWS Console → Bedrock AgentCore → Runtimes**
-2. Click on your runtime (e.g., `FAST_stack_FASTAgent`) from the Runtime resources section
-3. Scroll down to **Tracing**, click **Edit**, and toggle **Enable tracing** to Enable
-4. Go to **Bedrock AgentCore → Gateways**
-5. Click on your gateway (e.g., `FAST-stack-gateway`), scroll down to **Tracing**, click **Edit**, and toggle **Enable tracing** to Enable
-6. Run a query from the frontend that triggers a tool call
-7. Go to **CloudWatch Console → Log Management → Log groups**
-8. Find and click on the `aws/spans` log group, then click on the default log stream
-9. In the **Filter events** search box, type `policy`
-10. Look for the `AgentCore.Policy.PartiallyAuthorizeActions` span — it contains:
-    - `aws.agentcore.policy.allowed_tools`: tools the user is permitted to use
-    - `aws.agentcore.policy.denied_tools`: tools the user is denied access to
-    - `aws.agentcore.gateway.policy.mode`: should show `ENFORCE`
+For a quicker check without tracing, run `python test-scripts/test-gateway.py --user-sub <sub>` (see [GATEWAY.md](GATEWAY.md#testing-the-gateway-directly)).

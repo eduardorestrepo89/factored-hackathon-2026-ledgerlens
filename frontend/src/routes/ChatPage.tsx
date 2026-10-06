@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import ChatInterface from "@/components/chat/ChatInterface"
-import { Button } from "@/components/ui/button"
+import { SignInScreen } from "@/components/auth/SignInScreen"
 import { useAuth } from "@/hooks/useAuth"
 import { GlobalContextProvider } from "@/app/context/GlobalContext"
 
@@ -11,12 +11,7 @@ export default function ChatPage() {
   const { isAuthenticated, signIn } = useAuth()
 
   if (!isAuthenticated) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-        <p className="text-4xl">Please sign in</p>
-        <Button onClick={() => signIn()}>Sign In</Button>
-      </div>
-    )
+    return <SignInScreen onSignIn={() => signIn()} />
   }
 
   return (

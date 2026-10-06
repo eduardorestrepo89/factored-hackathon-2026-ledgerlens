@@ -1,5 +1,6 @@
 // Define message types
-export type MessageRole = "user" | "assistant"
+// "human" is the human agent (Laura) after a hand-off; those messages never reach AgentCore
+export type MessageRole = "user" | "assistant" | "human"
 
 export type ToolCallStatus = "streaming" | "executing" | "complete"
 
@@ -11,9 +12,23 @@ export interface ToolCall {
   status: ToolCallStatus
 }
 
+/** A tool call the agent paused until the customer answers Yes or No (agent tools/confirmation_hook.py). */
+export interface Confirmation {
+  id: string
+  tool: string
+  toolUseId: string
+  details: Record<string, unknown>
+  /** How it was answered: a button, the biometric check after Yes, or "typed" when the customer wrote instead. */
+  answer?: "yes" | "no" | "typed" | BiometricCheck
+}
+
+/** The demo biometric check a card block goes through after Yes (ConfirmCard). */
+export type BiometricCheck = "verified" | "unverified"
+
 export type MessageSegment =
   | { type: "text"; content: string }
   | { type: "tool"; toolCall: ToolCall }
+  | { type: "confirm"; confirm: Confirmation }
 
 export interface Message {
   role: MessageRole
