@@ -81,12 +81,13 @@ describe("Build Output Tests", () => {
         const files = readdirSync(assetsPath)
         const jsFiles = files.filter(f => f.endsWith(".js") && !f.endsWith(".map"))
 
-        if (jsFiles.length > 0) {
-          const sampleFile = join(assetsPath, jsFiles[0])
-          const content = readFileSync(sampleFile, "utf-8")
-          // Minified files typically have no newlines or very few
-          const lineCount = content.split("\n").length
-          expect(lineCount).toBeLessThan(10) // Minified files should have very few lines
+        // Every file, not the first one listed: the listing order differs by OS. Minified code
+        // averages hundreds of characters a line, source about 30-40. A line count doesn't work:
+        // three.js keeps its GLSL shaders as multi-line strings, so the 3D scene chunk has thousands.
+        for (const file of jsFiles) {
+          const content = readFileSync(join(assetsPath, file), "utf-8")
+          const averageLine = content.length / content.split("\n").length
+          expect(averageLine, file).toBeGreaterThan(100)
         }
       }
     })
@@ -97,11 +98,11 @@ describe("Build Output Tests", () => {
         const files = readdirSync(assetsPath)
         const cssFiles = files.filter(f => f.endsWith(".css") && !f.endsWith(".map"))
 
-        if (cssFiles.length > 0) {
-          const sampleFile = join(assetsPath, cssFiles[0])
-          const content = readFileSync(sampleFile, "utf-8")
+        // Every file: the listing order differs by OS
+        for (const file of cssFiles) {
+          const content = readFileSync(join(assetsPath, file), "utf-8")
           // Minified CSS should have minimal whitespace
-          expect(content).not.toMatch(/\n\s+/g) // Should not have indented lines
+          expect(content, file).not.toMatch(/\n\s+/g) // Should not have indented lines
         }
       }
     })

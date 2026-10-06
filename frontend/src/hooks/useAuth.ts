@@ -50,11 +50,14 @@ export function useAuth() {
     user: auth.user,
     signIn: auth.signinRedirect,
     signOut: () => {
-      const clientId = authConfig?.client_id || import.meta.env.VITE_COGNITO_CLIENT_ID || ""
+      // The .env values and the localhost default are dev-server fallbacks, as in lib/auth.ts
+      const dev = import.meta.env.DEV
+      const clientId =
+        authConfig?.client_id || (dev ? import.meta.env.VITE_COGNITO_CLIENT_ID : "") || ""
       const logoutUri =
         authConfig?.redirect_uri ||
-        import.meta.env.VITE_COGNITO_REDIRECT_URI ||
-        "http://localhost:3000"
+        (dev ? import.meta.env.VITE_COGNITO_REDIRECT_URI || "http://localhost:3000" : "") ||
+        window.location.origin
 
       auth.signoutRedirect({
         extraQueryParams: {
