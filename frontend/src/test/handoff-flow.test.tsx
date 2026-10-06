@@ -15,9 +15,13 @@ vi.mock("@/lib/agentcore-client", () => ({
   },
 }))
 vi.mock("react-oidc-context", () => ({
-  useAuth: () => ({ user: { access_token: "token", id_token: "id", profile: { name: "Carlos Rendón" } } }),
+  useAuth: () => ({
+    user: { access_token: "token", id_token: "id", profile: { name: "Carlos Rendón" } },
+  }),
 }))
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: false, signOut: vi.fn() }) }))
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ isAuthenticated: false, signOut: vi.fn() }),
+}))
 
 const HAND_OFF = {
   hand_off_id: "HO-7Q3KX2MA",
@@ -35,12 +39,18 @@ type OnEvent = (event: Record<string, unknown>) => void
 
 /** The agent's next turn: a line, the hand-off tool returning `result`, then the goodbye. */
 function agentTurn(result: string) {
-  invoke.mockImplementationOnce(async (_message: string, _session: string, _token: string, onEvent: OnEvent) => {
-    onEvent({ type: "text", content: "Te paso con una persona." })
-    onEvent({ type: "tool_use_start", toolUseId: "t1", name: "human-agent-hand-off-target___human_agent_hand_off" })
-    onEvent({ type: "tool_result", toolUseId: "t1", result })
-    onEvent({ type: "text", content: GOODBYE })
-  })
+  invoke.mockImplementationOnce(
+    async (_message: string, _session: string, _token: string, onEvent: OnEvent) => {
+      onEvent({ type: "text", content: "Te paso con una persona." })
+      onEvent({
+        type: "tool_use_start",
+        toolUseId: "t1",
+        name: "human-agent-hand-off-target___human_agent_hand_off",
+      })
+      onEvent({ type: "tool_result", toolUseId: "t1", result })
+      onEvent({ type: "text", content: GOODBYE })
+    }
+  )
 }
 
 async function startChat() {
@@ -53,7 +63,8 @@ async function startChat() {
 }
 
 /** Waits until the turn has finished streaming (the composer is enabled again). */
-const turnFinished = () => waitFor(() => expect(screen.getByPlaceholderText("Escribe un mensaje…")).toBeEnabled())
+const turnFinished = () =>
+  waitFor(() => expect(screen.getByPlaceholderText("Escribe un mensaje…")).toBeEnabled())
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 beforeEach(() => {
@@ -62,7 +73,10 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => ({ agentRuntimeArn: "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x" }) }))
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ agentRuntimeArn: "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x" }),
+    }))
   )
 })
 
@@ -72,7 +86,10 @@ describe("hand-off flow", () => {
     agentTurn(JSON.stringify(HAND_OFF))
     await startChat()
 
-    await user.type(screen.getByPlaceholderText("Escribe un mensaje…"), "quiero hablar con una persona{Enter}")
+    await user.type(
+      screen.getByPlaceholderText("Escribe un mensaje…"),
+      "quiero hablar con una persona{Enter}"
+    )
 
     const desk = await screen.findByRole("region", DESK, { timeout: 2000 })
     expect(within(desk).getByText("Carlos Rendón")).toBeInTheDocument()
@@ -97,7 +114,10 @@ describe("hand-off flow", () => {
     agentTurn(JSON.stringify({ error: "The hand-off couldn't be sent." }))
     await startChat()
 
-    await user.type(screen.getByPlaceholderText("Escribe un mensaje…"), "quiero hablar con una persona{Enter}")
+    await user.type(
+      screen.getByPlaceholderText("Escribe un mensaje…"),
+      "quiero hablar con una persona{Enter}"
+    )
     await turnFinished()
     await pause(900)
 
@@ -107,18 +127,27 @@ describe("hand-off flow", () => {
   it("starting a new chat while the goodbye is still streaming cancels the split", async () => {
     const user = userEvent.setup()
     let finish: () => void = () => {}
-    invoke.mockImplementationOnce(async (_message: string, _session: string, _token: string, onEvent: OnEvent) => {
-      onEvent({ type: "text", content: "Te paso con una persona." })
-      onEvent({ type: "tool_use_start", toolUseId: "t1", name: "human-agent-hand-off-target___human_agent_hand_off" })
-      onEvent({ type: "tool_result", toolUseId: "t1", result: JSON.stringify(HAND_OFF) })
-      await new Promise<void>(resolve => {
-        finish = resolve
-      })
-      onEvent({ type: "text", content: GOODBYE })
-    })
+    invoke.mockImplementationOnce(
+      async (_message: string, _session: string, _token: string, onEvent: OnEvent) => {
+        onEvent({ type: "text", content: "Te paso con una persona." })
+        onEvent({
+          type: "tool_use_start",
+          toolUseId: "t1",
+          name: "human-agent-hand-off-target___human_agent_hand_off",
+        })
+        onEvent({ type: "tool_result", toolUseId: "t1", result: JSON.stringify(HAND_OFF) })
+        await new Promise<void>(resolve => {
+          finish = resolve
+        })
+        onEvent({ type: "text", content: GOODBYE })
+      }
+    )
     await startChat()
 
-    await user.type(screen.getByPlaceholderText("Escribe un mensaje…"), "quiero hablar con una persona{Enter}")
+    await user.type(
+      screen.getByPlaceholderText("Escribe un mensaje…"),
+      "quiero hablar con una persona{Enter}"
+    )
     // the agent is thinking after the tool call: the typing dots sit in its message
     await screen.findByRole("status", { name: "Escribiendo…" })
     await user.click(screen.getByRole("button", { name: /Nueva conversación/ }))
@@ -134,7 +163,10 @@ describe("hand-off flow", () => {
     agentTurn(JSON.stringify(HAND_OFF))
     await startChat()
 
-    await user.type(screen.getByPlaceholderText("Escribe un mensaje…"), "quiero hablar con una persona{Enter}")
+    await user.type(
+      screen.getByPlaceholderText("Escribe un mensaje…"),
+      "quiero hablar con una persona{Enter}"
+    )
     await turnFinished()
     await user.click(screen.getByRole("button", { name: /Nueva conversación/ }))
     await pause(900)

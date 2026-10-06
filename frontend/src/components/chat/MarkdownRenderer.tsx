@@ -61,9 +61,7 @@ const components: Record<string, any> = {
         </div>
       )
     }
-    return (
-      <code className="px-1 py-0.5 bg-muted rounded text-[0.85em] font-mono">{children}</code>
-    )
+    return <code className="px-1 py-0.5 bg-muted rounded text-[0.85em] font-mono">{children}</code>
   },
   pre({ children }: { children?: React.ReactNode }) {
     return <>{children}</>

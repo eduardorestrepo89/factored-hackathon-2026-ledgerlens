@@ -52,7 +52,10 @@ def test_claims_include_the_cognito_groups(auth):
 def test_a_token_without_the_bearer_prefix_is_read(auth):
     token = jwt.encode({"sub": "u1"}, KEY, algorithm="HS256")
 
-    assert auth.extract_claims_from_context(context({"Authorization": token}))["sub"] == "u1"
+    assert (
+        auth.extract_claims_from_context(context({"Authorization": token}))["sub"]
+        == "u1"
+    )
 
 
 def test_missing_headers_raise(auth):

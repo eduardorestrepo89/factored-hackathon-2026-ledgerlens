@@ -108,17 +108,26 @@ export function ChatMessage({
     <div className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}>
       {message.role === "assistant" && <LensMark phase="ai" className="mt-6 h-8 w-8" />}
       {message.role === "human" && (
-        <span aria-hidden className="mt-6 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-mango font-bold text-[#161a33]">
+        <span
+          aria-hidden
+          className="mt-6 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-mango font-bold text-[#161a33]"
+        >
           L
         </span>
       )}
-      <div className={`flex min-w-0 max-w-[85%] flex-col gap-1 ${message.role === "user" ? "items-end" : "items-start"}`}>
+      <div
+        className={`flex min-w-0 max-w-[85%] flex-col gap-1 ${message.role === "user" ? "items-end" : "items-start"}`}
+      >
         {message.role === "assistant" && <span className={`${TAG} text-ai`}>LedgerLens</span>}
         {message.role === "human" && <span className={`${TAG} text-human`}>{t("lauraTag")}</span>}
         <div className={`break-words text-[15px] leading-relaxed ${bubbleClass}`}>
           {message.role === "assistant" ? renderAssistantContent() : message.content}
           {showDots && (
-            <div role="status" aria-label={t("typing")} className={`${BUBBLE} flex w-fit gap-1 bg-ai-bg py-3.5`}>
+            <div
+              role="status"
+              aria-label={t("typing")}
+              className={`${BUBBLE} flex w-fit gap-1 bg-ai-bg py-3.5`}
+            >
               {[0, 150, 300].map(delay => (
                 <span
                   key={delay}
@@ -132,7 +141,9 @@ export function ChatMessage({
 
         {/* Timestamp and Feedback buttons for assistant messages */}
         <div className="flex items-center gap-2 px-1">
-          <div className="figures text-xs text-muted-foreground">{formatTime(message.timestamp)}</div>
+          <div className="figures text-xs text-muted-foreground">
+            {formatTime(message.timestamp)}
+          </div>
 
           {/* Show feedback buttons only for assistant messages with content */}
           {!hideFeedback && message.role === "assistant" && message.content && (

@@ -26,7 +26,10 @@ PERSONAS = {
 PRICES = {
     "deepseek.v3.2": (0.62, 1.85),
     "openai.gpt-oss-120b-1:0": (0.15, 0.60),
-    "global.anthropic.claude-haiku-4-5-20251001-v1:0": (1.00, 5.00),  # global profile, 2026-09-01
+    "global.anthropic.claude-haiku-4-5-20251001-v1:0": (
+        1.00,
+        5.00,
+    ),  # global profile, 2026-09-01
 }
 
 # Tokens per session (input, output) for the dry-run estimate (spec section 10).
@@ -84,7 +87,9 @@ def read_env(path: Path = ENV_PATH) -> dict[str, str]:
 
 def write_env(values: dict[str, str], path: Path = ENV_PATH) -> None:
     """Write KEY=VALUE lines, sorted by key."""
-    path.write_text("".join(f"{k}={values[k]}\n" for k in sorted(values)), encoding="utf-8")
+    path.write_text(
+        "".join(f"{k}={values[k]}\n" for k in sorted(values)), encoding="utf-8"
+    )
 
 
 def aws_session():
@@ -96,5 +101,7 @@ def aws_session():
 
 def stack_outputs(session) -> dict[str, str]:
     """The main stack's outputs (CognitoUserPoolId, CognitoClientId, RuntimeArn, ...)."""
-    stack = session.client("cloudformation").describe_stacks(StackName=STACK_NAME)["Stacks"][0]
+    stack = session.client("cloudformation").describe_stacks(StackName=STACK_NAME)[
+        "Stacks"
+    ][0]
     return {o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs", [])}

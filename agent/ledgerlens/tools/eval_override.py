@@ -75,7 +75,9 @@ def resolve_eval_settings(
     if request is None:
         return defaults
     if EVALUATORS_GROUP not in _groups(claims):
-        logger.warning("[EVAL] override ignored: not an evaluator sub=%s", claims.get("sub"))
+        logger.warning(
+            "[EVAL] override ignored: not an evaluator sub=%s", claims.get("sub")
+        )
         return defaults
     if not isinstance(request, dict):
         raise EvalOverrideRejected("eval must be an object")
@@ -88,13 +90,19 @@ def resolve_eval_settings(
     if text is None:
         settings = EvalSettings(model_id, BASE_SYSTEM_PROMPT, PROMPT_VERSION, True)
     else:
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_PROMPT_CHARS:
+        if (
+            not isinstance(text, str)
+            or not text.strip()
+            or len(text) > MAX_PROMPT_CHARS
+        ):
             raise EvalOverrideRejected(
                 f"system_prompt must be 1 to {MAX_PROMPT_CHARS} characters of text"
             )
         name = request.get("prompt_name")
         if not isinstance(name, str) or not _PROMPT_NAME.fullmatch(name):
-            raise EvalOverrideRejected("prompt_name must match [a-z0-9][a-z0-9._-]{0,31}")
+            raise EvalOverrideRejected(
+                "prompt_name must match [a-z0-9][a-z0-9._-]{0,31}"
+            )
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
         settings = EvalSettings(model_id, text, f"{name}-{digest}", True)
 

@@ -34,7 +34,8 @@ export function ChatInput({
   // Back to the composer when the agent finishes, on devices with a keyboard (on touch it
   // would pop the keyboard up after every reply)
   useEffect(() => {
-    if (!locked && window.matchMedia?.("(pointer: fine)").matches) textareaRef.current?.focus({ preventScroll: true })
+    if (!locked && window.matchMedia?.("(pointer: fine)").matches)
+      textareaRef.current?.focus({ preventScroll: true })
   }, [locked])
 
   // Auto-resize the textarea based on content

@@ -48,11 +48,23 @@ def test_text_that_only_looks_like_a_marker_start_is_kept(markup):
 
 
 def test_complete_messages_are_cleaned_too(markup):
-    event = {"message": {"role": "assistant", "content": [{"text": f"{MARKER} Listo"}, {"toolUse": {}}]}}
+    event = {
+        "message": {
+            "role": "assistant",
+            "content": [{"text": f"{MARKER} Listo"}, {"toolUse": {}}],
+        }
+    }
 
     cleaned = markup.LeakedMarkupFilter().clean(event)
 
-    assert cleaned == [{"message": {"role": "assistant", "content": [{"text": "Listo"}, {"toolUse": {}}]}}]
+    assert cleaned == [
+        {
+            "message": {
+                "role": "assistant",
+                "content": [{"text": "Listo"}, {"toolUse": {}}],
+            }
+        }
+    ]
 
 
 def test_other_events_pass_through(markup):

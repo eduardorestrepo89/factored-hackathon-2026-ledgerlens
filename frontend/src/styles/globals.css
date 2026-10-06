@@ -188,7 +188,11 @@
   }
   .band::before {
     background: repeating-linear-gradient(90deg, var(--ai) 0 2px, transparent 2px var(--pitch));
-    mask: linear-gradient(var(--dir), #000 calc(var(--mix) - 35%), transparent calc(var(--mix) + 35%));
+    mask: linear-gradient(
+      var(--dir),
+      #000 calc(var(--mix) - 35%),
+      transparent calc(var(--mix) + 35%)
+    );
   }
   .band::after {
     background: repeating-linear-gradient(
@@ -197,7 +201,11 @@
       var(--mango) calc(var(--pitch) / 2) calc(var(--pitch) / 2 + 2px),
       transparent calc(var(--pitch) / 2 + 2px) var(--pitch)
     );
-    mask: linear-gradient(var(--dir), transparent calc(var(--mix) - 35%), #000 calc(var(--mix) + 35%));
+    mask: linear-gradient(
+      var(--dir),
+      transparent calc(var(--mix) - 35%),
+      #000 calc(var(--mix) + 35%)
+    );
   }
   .band[data-phase="ai"] {
     --mix: 130%;
@@ -215,8 +223,10 @@
     --notch: 9px;
     position: relative;
     mask:
-      radial-gradient(circle var(--notch) at 0 var(--perf), #0000 98%, #000) left / 51% 100% no-repeat,
-      radial-gradient(circle var(--notch) at 100% var(--perf), #0000 98%, #000) right / 51% 100% no-repeat;
+      radial-gradient(circle var(--notch) at 0 var(--perf), #0000 98%, #000) left / 51% 100%
+        no-repeat,
+      radial-gradient(circle var(--notch) at 100% var(--perf), #0000 98%, #000) right / 51% 100%
+        no-repeat;
   }
   .ticket::after {
     content: "";
@@ -237,7 +247,9 @@
 
 /* Typing dots in the agent's line: a wave that hops and brightens each dot in turn */
 @keyframes typing-dot {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     opacity: 0.35;
     transform: translateY(0);
   }
@@ -248,7 +260,9 @@
 }
 
 @keyframes typing-dot-fade {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     opacity: 0.35;
   }
   30% {

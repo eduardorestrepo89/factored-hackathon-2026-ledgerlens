@@ -22,7 +22,13 @@ export function createStrandsParser(): ChunkParser {
       // A claim or hand-off waits for the customer's Yes/No
       if (json.confirmation) {
         const c = json.confirmation
-        callback({ type: "confirmation", id: c.id, tool: c.tool, toolUseId: c.toolUseId, details: c.details ?? {} })
+        callback({
+          type: "confirmation",
+          id: c.id,
+          tool: c.tool,
+          toolUseId: c.toolUseId,
+          details: c.details ?? {},
+        })
         return
       }
 

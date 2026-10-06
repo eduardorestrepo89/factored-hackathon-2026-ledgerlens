@@ -21,8 +21,14 @@ export function ToolCallDisplay({ name, args, status, result }: ToolRenderProps)
         aria-expanded={expanded}
         className="inline-flex items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-3 text-muted-foreground transition-colors hover:text-foreground"
       >
-        <span className={`grid h-6 w-6 place-items-center rounded-full ${done ? "bg-ai-bg text-ai" : "text-ai"}`}>
-          {done ? <Check size={13} strokeWidth={3} /> : <Loader2 size={15} className="animate-spin" />}
+        <span
+          className={`grid h-6 w-6 place-items-center rounded-full ${done ? "bg-ai-bg text-ai" : "text-ai"}`}
+        >
+          {done ? (
+            <Check size={13} strokeWidth={3} />
+          ) : (
+            <Loader2 size={15} className="animate-spin" />
+          )}
         </span>
         {hasKey(key) ? t(key) : bare}
         <ChevronDown size={14} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
@@ -34,13 +40,17 @@ export function ToolCallDisplay({ name, args, status, result }: ToolRenderProps)
           {args && (
             <div>
               <div className="text-xs text-muted-foreground">{t("toolInput")}</div>
-              <pre className="figures mt-0.5 whitespace-pre-wrap break-words text-xs text-foreground/80">{args}</pre>
+              <pre className="figures mt-0.5 whitespace-pre-wrap break-words text-xs text-foreground/80">
+                {args}
+              </pre>
             </div>
           )}
           {result && (
             <div>
               <div className="text-xs text-muted-foreground">{t("toolResult")}</div>
-              <pre className="figures mt-0.5 whitespace-pre-wrap break-words text-xs text-foreground/80">{result}</pre>
+              <pre className="figures mt-0.5 whitespace-pre-wrap break-words text-xs text-foreground/80">
+                {result}
+              </pre>
             </div>
           )}
         </div>

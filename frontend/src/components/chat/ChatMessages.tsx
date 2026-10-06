@@ -15,7 +15,8 @@ interface ChatMessagesProps {
   isLoading?: boolean
 }
 
-const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+const time = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 
 export function ChatMessages({
   messages,

@@ -16,9 +16,13 @@ vi.mock("@/lib/agentcore-client", () => ({
   },
 }))
 vi.mock("react-oidc-context", () => ({
-  useAuth: () => ({ user: { access_token: "token", id_token: "id", profile: { name: "Carlos Rendón" } } }),
+  useAuth: () => ({
+    user: { access_token: "token", id_token: "id", profile: { name: "Carlos Rendón" } },
+  }),
 }))
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: false, signOut: vi.fn() }) }))
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ isAuthenticated: false, signOut: vi.fn() }),
+}))
 
 type OnEvent = (event: Record<string, unknown>) => void
 const CLAIM = "gateway_open-claim-target___open_claim"
@@ -62,7 +66,10 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => ({ agentRuntimeArn: "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x" }) }))
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ agentRuntimeArn: "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x" }),
+    }))
   )
 })
 
@@ -77,64 +84,108 @@ describe("confirmation card (agent ConfirmationHook)", () => {
 
     // The resumed call streams only its result: no new tool_use_start
     invoke.mockImplementationOnce(async (_m: string, _s: string, _t: string, onEvent: OnEvent) => {
-      onEvent({ type: "tool_result", toolUseId: "tu2", result: '{"claims":[{"claim_id":"CLM-1"}]}' })
+      onEvent({
+        type: "tool_result",
+        toolUseId: "tu2",
+        result: '{"claims":[{"claim_id":"CLM-1"}]}',
+      })
       onEvent({ type: "text", content: "Abrí el reclamo CLM-1." })
     })
     await user.click(within(card).getByRole("button", { name: "Sí" }))
 
-    expect(invoke).toHaveBeenLastCalledWith("Sí", expect.any(String), "token", expect.any(Function), {
-      confirmations: [{ interruptId: "int-1", approved: true }],
-    })
+    expect(invoke).toHaveBeenLastCalledWith(
+      "Sí",
+      expect.any(String),
+      "token",
+      expect.any(Function),
+      {
+        confirmations: [{ interruptId: "int-1", approved: true }],
+      }
+    )
     expect(await screen.findByText("Abrí el reclamo CLM-1.")).toBeInTheDocument()
     expect(within(card).queryByRole("button")).toBeNull()
     await waitFor(() => expect(composer()).toBeEnabled())
   })
 
-  it("asks to block the card by its last 4 digits, runs the biometric check on Yes, then the block", async () => {
-    paused("gateway_block-target___block_credit_card", "tu7", "int-3", { card_last4: "4497", reason: "lost" })
-    const user = await ask("perdí mi tarjeta")
+  it(
+    "asks to block the card by its last 4 digits, runs the biometric check on Yes, then the block",
+    async () => {
+      paused("gateway_block-target___block_credit_card", "tu7", "int-3", {
+        card_last4: "4497",
+        reason: "lost",
+      })
+      const user = await ask("perdí mi tarjeta")
 
-    const card = await screen.findByRole("group", { name: "¿Bloqueamos tu tarjeta •••• 4497?" })
-    expect(composer()).toBeDisabled()
+      const card = await screen.findByRole("group", { name: "¿Bloqueamos tu tarjeta •••• 4497?" })
+      expect(composer()).toBeDisabled()
 
-    invoke.mockImplementationOnce(async (_m: string, _s: string, _t: string, onEvent: OnEvent) => {
-      onEvent({ type: "tool_result", toolUseId: "tu7", result: '{"card_last4":"4497","status":"BLOCKED"}' })
-      onEvent({ type: "text", content: "Listo: tu tarjeta 4497 quedó bloqueada." })
-    })
-    await user.click(within(card).getByRole("button", { name: "Sí" }))
+      invoke.mockImplementationOnce(
+        async (_m: string, _s: string, _t: string, onEvent: OnEvent) => {
+          onEvent({
+            type: "tool_result",
+            toolUseId: "tu7",
+            result: '{"card_last4":"4497","status":"BLOCKED"}',
+          })
+          onEvent({ type: "text", content: "Listo: tu tarjeta 4497 quedó bloqueada." })
+        }
+      )
+      await user.click(within(card).getByRole("button", { name: "Sí" }))
 
-    // Nothing reaches the agent until the check passes
-    expect(within(card).getByRole("status")).toHaveTextContent("Verificando tu identidad")
-    expect(invoke).toHaveBeenCalledTimes(1)
+      // Nothing reaches the agent until the check passes
+      expect(within(card).getByRole("status")).toHaveTextContent("Verificando tu identidad")
+      expect(invoke).toHaveBeenCalledTimes(1)
 
-    expect(await screen.findByText("Bloqueando la tarjeta", {}, { timeout: SCAN_MS + 1500 })).toBeInTheDocument()
-    expect(invoke).toHaveBeenLastCalledWith("Sí", expect.any(String), "token", expect.any(Function), {
-      confirmations: [{ interruptId: "int-3", approved: true }],
-    })
-    expect(await screen.findByText("Listo: tu tarjeta 4497 quedó bloqueada.")).toBeInTheDocument()
-    expect(within(card).getByText("Identidad verificada")).toBeInTheDocument()
-    // The check answers on the card: no "Sí" bubble in the thread
-    expect(screen.queryByText("Sí")).toBeNull()
-  }, SCAN_MS + 5000)
+      expect(
+        await screen.findByText("Bloqueando la tarjeta", {}, { timeout: SCAN_MS + 1500 })
+      ).toBeInTheDocument()
+      expect(invoke).toHaveBeenLastCalledWith(
+        "Sí",
+        expect.any(String),
+        "token",
+        expect.any(Function),
+        {
+          confirmations: [{ interruptId: "int-3", approved: true }],
+        }
+      )
+      expect(await screen.findByText("Listo: tu tarjeta 4497 quedó bloqueada.")).toBeInTheDocument()
+      expect(within(card).getByText("Identidad verificada")).toBeInTheDocument()
+      // The check answers on the card: no "Sí" bubble in the thread
+      expect(screen.queryByText("Sí")).toBeNull()
+    },
+    SCAN_MS + 5000
+  )
 
-  it("sends approved false when the customer cancels the biometric check", async () => {
-    paused("gateway_block-target___block_credit_card", "tu7", "int-3", { card_last4: "4497", reason: "lost" })
-    const user = await ask("perdí mi tarjeta")
+  it(
+    "sends approved false when the customer cancels the biometric check",
+    async () => {
+      paused("gateway_block-target___block_credit_card", "tu7", "int-3", {
+        card_last4: "4497",
+        reason: "lost",
+      })
+      const user = await ask("perdí mi tarjeta")
 
-    const card = await screen.findByRole("group", { name: "¿Bloqueamos tu tarjeta •••• 4497?" })
-    invoke.mockImplementationOnce(async () => {})
-    await user.click(within(card).getByRole("button", { name: "Sí" }))
-    await user.click(within(card).getByRole("button", { name: "Cancelar" }))
+      const card = await screen.findByRole("group", { name: "¿Bloqueamos tu tarjeta •••• 4497?" })
+      invoke.mockImplementationOnce(async () => {})
+      await user.click(within(card).getByRole("button", { name: "Sí" }))
+      await user.click(within(card).getByRole("button", { name: "Cancelar" }))
 
-    expect(invoke).toHaveBeenLastCalledWith("No", expect.any(String), "token", expect.any(Function), {
-      confirmations: [{ interruptId: "int-3", approved: false }],
-    })
-    expect(within(card).getByText("No se pudo verificar")).toBeInTheDocument()
-    expect(screen.queryByText("No")).toBeNull()
-    // The cancelled check never approves later
-    await new Promise(r => setTimeout(r, SCAN_MS + 200))
-    expect(invoke).toHaveBeenCalledTimes(2)
-  }, SCAN_MS + 5000)
+      expect(invoke).toHaveBeenLastCalledWith(
+        "No",
+        expect.any(String),
+        "token",
+        expect.any(Function),
+        {
+          confirmations: [{ interruptId: "int-3", approved: false }],
+        }
+      )
+      expect(within(card).getByText("No se pudo verificar")).toBeInTheDocument()
+      expect(screen.queryByText("No")).toBeNull()
+      // The cancelled check never approves later
+      await new Promise(r => setTimeout(r, SCAN_MS + 200))
+      expect(invoke).toHaveBeenCalledTimes(2)
+    },
+    SCAN_MS + 5000
+  )
 
   it("sends approved false on No", async () => {
     paused(CLAIM, "tu2", "int-1", { transaction_ids: ["TRX-1"], claim_type: "fraud" })
@@ -143,9 +194,15 @@ describe("confirmation card (agent ConfirmationHook)", () => {
     invoke.mockImplementationOnce(async () => {})
     await user.click(await screen.findByRole("button", { name: "No" }))
 
-    expect(invoke).toHaveBeenLastCalledWith("No", expect.any(String), "token", expect.any(Function), {
-      confirmations: [{ interruptId: "int-1", approved: false }],
-    })
+    expect(invoke).toHaveBeenLastCalledWith(
+      "No",
+      expect.any(String),
+      "token",
+      expect.any(Function),
+      {
+        confirmations: [{ interruptId: "int-1", approved: false }],
+      }
+    )
   })
 
   it("on Yes to a hand-off, the resumed result brings the ticket and the split to the desk", async () => {
@@ -158,7 +215,9 @@ describe("confirmation card (agent ConfirmationHook)", () => {
     })
     await user.click(await screen.findByRole("button", { name: "Sí" }))
 
-    expect(await screen.findByRole("region", { name: "Escritorio del agente" }, { timeout: 2000 })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("region", { name: "Escritorio del agente" }, { timeout: 2000 })
+    ).toBeInTheDocument()
   })
 })
 
@@ -173,7 +232,13 @@ describe("retry", () => {
     await user.click(await screen.findByRole("button", { name: /Reintentar/ }))
 
     expect(invoke).toHaveBeenCalledTimes(2)
-    expect(invoke).toHaveBeenLastCalledWith("hola", expect.any(String), "token", expect.any(Function), {})
+    expect(invoke).toHaveBeenLastCalledWith(
+      "hola",
+      expect.any(String),
+      "token",
+      expect.any(Function),
+      {}
+    )
     expect(await screen.findByText("Hola Carlos")).toBeInTheDocument()
     expect(screen.getAllByText("hola")).toHaveLength(1)
     expect(screen.queryByRole("alert")).toBeNull()

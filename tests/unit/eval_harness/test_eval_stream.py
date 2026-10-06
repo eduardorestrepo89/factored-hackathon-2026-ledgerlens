@@ -4,8 +4,15 @@ import json
 
 from evals import stream
 
-CALL = {"toolUseId": "t1", "name": "gateway_block-credit-card-target___block_credit_card",
-        "input": {"customer_id": "CLI-X", "card_last4": "4497", "reason": "suspected_fraud"}}
+CALL = {
+    "toolUseId": "t1",
+    "name": "gateway_block-credit-card-target___block_credit_card",
+    "input": {
+        "customer_id": "CLI-X",
+        "card_last4": "4497",
+        "reason": "suspected_fraud",
+    },
+}
 
 
 def assistant(*blocks):
@@ -13,13 +20,31 @@ def assistant(*blocks):
 
 
 def result(tool_use_id, status, text):
-    return {"message": {"role": "user", "content": [
-        {"toolResult": {"toolUseId": tool_use_id, "status": status, "content": [{"text": text}]}}
-    ]}}
+    return {
+        "message": {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": tool_use_id,
+                        "status": status,
+                        "content": [{"text": text}],
+                    }
+                }
+            ],
+        }
+    }
 
 
 def test_parse_sse_skips_comments_blanks_and_bad_json():
-    lines = [": keep-alive", "", 'data: {"data": "Ho"}', b'data: {"data": "la"}', "data: {oops", 'data: "just text"']
+    lines = [
+        ": keep-alive",
+        "",
+        'data: {"data": "Ho"}',
+        b'data: {"data": "la"}',
+        "data: {oops",
+        'data: "just text"',
+    ]
 
     events = list(stream.parse_sse(lines))
 
@@ -35,7 +60,9 @@ def test_tool_body_unwraps_the_lambda_envelope_once():
     inner = json.dumps({"decline": {"contradicts_card_state": True}})
     outer = json.dumps({"content": [{"type": "text", "text": inner}]})
 
-    assert stream.parse_tool_body([{"text": outer}]) == {"decline": {"contradicts_card_state": True}}
+    assert stream.parse_tool_body([{"text": outer}]) == {
+        "decline": {"contradicts_card_state": True}
+    }
 
 
 def test_tool_body_keeps_plain_text_raw():
@@ -52,8 +79,14 @@ def test_digest_collects_text_calls_results_confirmations_and_usage():
         {"event": {"metadata": {"usage": {"inputTokens": 100, "outputTokens": 7}}}},
         {"event": {"messageStop": {"stopReason": "tool_use"}}},
         assistant({"text": "Puedo bloquear la tarjeta 4497."}, {"toolUse": CALL}),
-        {"confirmation": {"id": "i1", "tool": "block_credit_card", "toolUseId": "t1",
-                          "details": {"card_last4": "4497", "reason": "suspected_fraud"}}},
+        {
+            "confirmation": {
+                "id": "i1",
+                "tool": "block_credit_card",
+                "toolUseId": "t1",
+                "details": {"card_last4": "4497", "reason": "suspected_fraud"},
+            }
+        },
         {"event": {"metadata": {"usage": {"inputTokens": 50, "outputTokens": 3}}}},
         {"event_loop_throttled_delay": 2},
     ]
@@ -61,8 +94,14 @@ def test_digest_collects_text_calls_results_confirmations_and_usage():
     d = stream.digest(events)
 
     assert d["text"] == "Puedo bloquear la tarjeta 4497."
-    assert d["tool_calls"] == [{"id": "t1", "name": "block_credit_card", "full_name": CALL["name"],
-                                "input": CALL["input"]}]
+    assert d["tool_calls"] == [
+        {
+            "id": "t1",
+            "name": "block_credit_card",
+            "full_name": CALL["name"],
+            "input": CALL["input"],
+        }
+    ]
     assert d["confirmations"][0]["id"] == "i1"
     assert d["usage"] == {"input": 150, "output": 10}
     assert d["stop_reasons"] == ["tool_use"]
@@ -71,13 +110,20 @@ def test_digest_collects_text_calls_results_confirmations_and_usage():
 
 
 def test_digest_reads_tool_results_and_errors():
-    events = [result("t1", "error", "Not done: the customer chose No."),
-              {"status": "error", "error": "eval override rejected: bad model"},
-              {"_unparsed": "data: {"}]
+    events = [
+        result("t1", "error", "Not done: the customer chose No."),
+        {"status": "error", "error": "eval override rejected: bad model"},
+        {"_unparsed": "data: {"},
+    ]
 
     d = stream.digest(events)
 
-    assert d["tool_results"] == [{"id": "t1", "status": "error",
-                                  "body": {"raw": "Not done: the customer chose No."}}]
+    assert d["tool_results"] == [
+        {
+            "id": "t1",
+            "status": "error",
+            "body": {"raw": "Not done: the customer chose No."},
+        }
+    ]
     assert d["error"] == "eval override rejected: bad model"
     assert d["unparsed"] == 1

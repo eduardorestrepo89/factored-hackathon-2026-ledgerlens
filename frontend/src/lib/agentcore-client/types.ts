@@ -17,7 +17,13 @@ export type StreamEvent =
   | { type: "result"; stopReason: string }
   | { type: "lifecycle"; event: string }
   // A claim or hand-off paused for the customer's Yes/No (agent tools/confirmation_hook.py)
-  | { type: "confirmation"; id: string; tool: string; toolUseId: string; details: Record<string, unknown> }
+  | {
+      type: "confirmation"
+      id: string
+      tool: string
+      toolUseId: string
+      details: Record<string, unknown>
+    }
 
 /** Callback invoked with each stream event */
 export type StreamCallback = (event: StreamEvent) => void

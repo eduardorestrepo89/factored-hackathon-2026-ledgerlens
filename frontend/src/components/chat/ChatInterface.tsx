@@ -16,7 +16,14 @@ import { AgentCoreClient } from "@/lib/agentcore-client"
 import { submitFeedback } from "@/services/feedbackService"
 import { useAuth } from "react-oidc-context"
 import { useDefaultTool, useToolRenderer } from "@/hooks/useToolRenderer"
-import { findHandOff, HAND_OFF_DELAY_MS, HAND_OFF_TOOL, phaseOf, queueFor, type HandOff } from "@/lib/handoff"
+import {
+  findHandOff,
+  HAND_OFF_DELAY_MS,
+  HAND_OFF_TOOL,
+  phaseOf,
+  queueFor,
+  type HandOff,
+} from "@/lib/handoff"
 import { useI18n } from "@/lib/i18n"
 import { HandOffTicket } from "./HandOffTicket"
 import { LensMark } from "./ChatHeader"
@@ -112,7 +119,9 @@ export default function ChatInterface() {
             confirm: {
               ...s.confirm,
               answer:
-                s.confirm.id === answer?.confirm.id ? (answer.check ?? (answer.approved ? "yes" : "no")) : "typed",
+                s.confirm.id === answer?.confirm.id
+                  ? (answer.check ?? (answer.approved ? "yes" : "no"))
+                  : "typed",
             },
           }
     setMessages(prev => [
@@ -178,79 +187,89 @@ export default function ChatInterface() {
 
       // User identity is extracted server-side from the validated JWT token,
       // not passed as a parameter — prevents impersonation via prompt injection.
-      const extra = answer ? { confirmations: [{ interruptId: answer.confirm.id, approved: answer.approved }] } : {}
-      await client.invoke(userMessage, sessionId, accessToken, event => {
-        switch (event.type) {
-          case "confirmation": {
-            // The paused tool call becomes a Yes/No card
-            const i = segments.findIndex(s => s.type === "tool" && s.toolCall.toolUseId === event.toolUseId)
-            if (i >= 0) segments.splice(i, 1)
-            toolCallMap.delete(event.toolUseId)
-            const { id, tool, toolUseId, details } = event
-            segments.push({ type: "confirm", confirm: { id, tool, toolUseId, details } })
-            updateMessage()
-            break
-          }
-          case "text": {
-            // If text arrives after a tool segment, mark all pending tools as complete
-            const prev = segments[segments.length - 1]
-            if (prev && prev.type === "tool") {
-              for (const tc of toolCallMap.values()) {
-                if (tc.status === "streaming" || tc.status === "executing") {
-                  tc.status = "complete"
+      const extra = answer
+        ? { confirmations: [{ interruptId: answer.confirm.id, approved: answer.approved }] }
+        : {}
+      await client.invoke(
+        userMessage,
+        sessionId,
+        accessToken,
+        event => {
+          switch (event.type) {
+            case "confirmation": {
+              // The paused tool call becomes a Yes/No card
+              const i = segments.findIndex(
+                s => s.type === "tool" && s.toolCall.toolUseId === event.toolUseId
+              )
+              if (i >= 0) segments.splice(i, 1)
+              toolCallMap.delete(event.toolUseId)
+              const { id, tool, toolUseId, details } = event
+              segments.push({ type: "confirm", confirm: { id, tool, toolUseId, details } })
+              updateMessage()
+              break
+            }
+            case "text": {
+              // If text arrives after a tool segment, mark all pending tools as complete
+              const prev = segments[segments.length - 1]
+              if (prev && prev.type === "tool") {
+                for (const tc of toolCallMap.values()) {
+                  if (tc.status === "streaming" || tc.status === "executing") {
+                    tc.status = "complete"
+                  }
                 }
               }
-            }
-            // Append to last text segment, or create new one
-            const last = segments[segments.length - 1]
-            if (last && last.type === "text") {
-              last.content += event.content
-            } else {
-              segments.push({ type: "text", content: event.content })
-            }
-            updateMessage()
-            break
-          }
-          case "tool_use_start": {
-            const tc: ToolCall = {
-              toolUseId: event.toolUseId,
-              name: event.name,
-              input: "",
-              status: "streaming",
-            }
-            toolCallMap.set(event.toolUseId, tc)
-            segments.push({ type: "tool", toolCall: tc })
-            updateMessage()
-            break
-          }
-          case "tool_use_delta": {
-            const tc = toolCallMap.get(event.toolUseId)
-            if (tc) {
-              tc.input += event.input
-            }
-            updateMessage()
-            break
-          }
-          case "tool_result": {
-            const tc = toolCallMap.get(event.toolUseId)
-            if (tc) {
-              tc.result = event.result
-              tc.status = "complete"
-            }
-            updateMessage()
-            break
-          }
-          case "message": {
-            if (event.role === "assistant") {
-              for (const tc of toolCallMap.values()) {
-                if (tc.status === "streaming") tc.status = "executing"
+              // Append to last text segment, or create new one
+              const last = segments[segments.length - 1]
+              if (last && last.type === "text") {
+                last.content += event.content
+              } else {
+                segments.push({ type: "text", content: event.content })
               }
               updateMessage()
+              break
             }
-            break
+            case "tool_use_start": {
+              const tc: ToolCall = {
+                toolUseId: event.toolUseId,
+                name: event.name,
+                input: "",
+                status: "streaming",
+              }
+              toolCallMap.set(event.toolUseId, tc)
+              segments.push({ type: "tool", toolCall: tc })
+              updateMessage()
+              break
+            }
+            case "tool_use_delta": {
+              const tc = toolCallMap.get(event.toolUseId)
+              if (tc) {
+                tc.input += event.input
+              }
+              updateMessage()
+              break
+            }
+            case "tool_result": {
+              const tc = toolCallMap.get(event.toolUseId)
+              if (tc) {
+                tc.result = event.result
+                tc.status = "complete"
+              }
+              updateMessage()
+              break
+            }
+            case "message": {
+              if (event.role === "assistant") {
+                for (const tc of toolCallMap.values()) {
+                  if (tc.status === "streaming") tc.status = "executing"
+                }
+                updateMessage()
+              }
+              break
+            }
           }
-        }
-      }, extra)
+        },
+        extra
+      )
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
       setError(t("responseFailed", { error: errorMessage }))
@@ -366,7 +385,9 @@ export default function ChatInterface() {
   // A Yes/No card is open (the agent paused a call): the customer answers with its buttons,
   // so the composer waits
   const confirming =
-    !isLoading && !handOff && messages.some(m => m.segments?.some(s => s.type === "confirm" && !s.confirm.answer))
+    !isLoading &&
+    !handOff &&
+    messages.some(m => m.segments?.some(s => s.type === "confirm" && !s.confirm.answer))
 
   return (
     <div className="flex h-screen w-full flex-col bg-page">
@@ -408,7 +429,9 @@ export default function ChatInterface() {
                     LATAM Bank
                   </span>
                   <span className="rounded-full bg-human-bg px-2.5 py-0.5 text-xs font-medium text-human">
-                    {phase === "joined" ? t("lauraTag") : t("inQueue", { queue: queueFor(handOff.reason, lang) })}
+                    {phase === "joined"
+                      ? t("lauraTag")
+                      : t("inQueue", { queue: queueFor(handOff.reason, lang) })}
                   </span>
                 </div>
                 <div className="min-h-0 flex-1">
@@ -418,7 +441,13 @@ export default function ChatInterface() {
                     onFeedbackSubmit={handleFeedbackSubmit}
                   />
                 </div>
-                <ChatInput input={input} setInput={setInput} handleSubmit={handleSubmit} isLoading={isLoading} className="p-2 sm:p-2" />
+                <ChatInput
+                  input={input}
+                  setInput={setInput}
+                  handleSubmit={handleSubmit}
+                  isLoading={isLoading}
+                  className="p-2 sm:p-2"
+                />
               </div>
             </div>
           </section>
@@ -449,7 +478,11 @@ export default function ChatInterface() {
               isLoading={isLoading}
               className="mt-8 p-0 sm:p-0"
             />
-            <div role="group" aria-label={t("starters")} className="mt-5 divide-y overflow-hidden rounded-3xl border bg-card">
+            <div
+              role="group"
+              aria-label={t("starters")}
+              className="mt-5 divide-y overflow-hidden rounded-3xl border bg-card"
+            >
               {STARTERS.map(({ key, hint, Icon }) => (
                 <button
                   key={key}
@@ -477,7 +510,12 @@ export default function ChatInterface() {
             <div className="max-w-3xl mx-auto w-full h-full">
               {/* Only the customer's live chat answers Yes/No cards */}
               <ConfirmContext.Provider
-                value={isLoading ? null : (confirm, approved, label, check) => sendMessage(label, { confirm, approved, check })}
+                value={
+                  isLoading
+                    ? null
+                    : (confirm, approved, label, check) =>
+                        sendMessage(label, { confirm, approved, check })
+                }
               >
                 <ChatMessages
                   messages={messages}
@@ -498,7 +536,11 @@ export default function ChatInterface() {
                 isLoading={isLoading}
                 disabled={confirming}
                 placeholder={
-                  confirming ? t("confirmPlaceholder") : handOffPending ? t("connectingToPerson") : undefined
+                  confirming
+                    ? t("confirmPlaceholder")
+                    : handOffPending
+                      ? t("connectingToPerson")
+                      : undefined
                 }
               />
             </div>

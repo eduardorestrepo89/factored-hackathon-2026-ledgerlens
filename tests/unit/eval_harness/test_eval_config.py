@@ -15,7 +15,9 @@ def test_model_slug_keeps_only_letters_digits_and_dashes():
 
 
 def test_session_cost_uses_per_million_prices():
-    assert config.session_cost("deepseek.v3.2", 1_000_000, 1_000_000) == pytest.approx(2.47)
+    assert config.session_cost("deepseek.v3.2", 1_000_000, 1_000_000) == pytest.approx(
+        2.47
+    )
 
 
 def test_every_priced_model_has_a_token_estimate():

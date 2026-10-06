@@ -120,8 +120,10 @@ const es = {
   queueGeneral: "Servicio general",
   helloNamed: "Hola {name}, soy Laura, de {queue}.",
   hello: "Hola, soy Laura, de {queue}.",
-  haveCase: "Ya tengo tu caso {id} y todo lo que hablaste con el asistente, así que no necesitas repetir nada.",
-  "next.FRAUD_CONFIRMED": "Voy a revisar si hubo otros intentos con tus tarjetas y te cuento por aquí mismo.",
+  haveCase:
+    "Ya tengo tu caso {id} y todo lo que hablaste con el asistente, así que no necesitas repetir nada.",
+  "next.FRAUD_CONFIRMED":
+    "Voy a revisar si hubo otros intentos con tus tarjetas y te cuento por aquí mismo.",
   "next.CUSTOMER_REQUEST": "Cuéntame en qué te puedo ayudar y lo revisamos juntos.",
   "next.UNRESOLVED": "Voy a revisar tu caso con más detalle y te confirmo por aquí mismo.",
   "next.OUT_OF_SCOPE": "Esa solicitud la reviso yo. Dame un momento para validar tus datos.",
@@ -239,8 +241,10 @@ const pt: Record<Key, string> = {
   queueGeneral: "Atendimento geral",
   helloNamed: "Olá {name}, sou a Laura, de {queue}.",
   hello: "Olá, sou a Laura, de {queue}.",
-  haveCase: "Já tenho seu caso {id} e tudo o que você conversou com o assistente, então não precisa repetir nada.",
-  "next.FRAUD_CONFIRMED": "Vou verificar se houve outras tentativas com seus cartões e te conto por aqui mesmo.",
+  haveCase:
+    "Já tenho seu caso {id} e tudo o que você conversou com o assistente, então não precisa repetir nada.",
+  "next.FRAUD_CONFIRMED":
+    "Vou verificar se houve outras tentativas com seus cartões e te conto por aqui mesmo.",
   "next.CUSTOMER_REQUEST": "Me conte como posso ajudar e vamos ver isso juntos.",
   "next.UNRESOLVED": "Vou analisar seu caso com mais detalhe e te confirmo por aqui mesmo.",
   "next.OUT_OF_SCOPE": "Essa solicitação fica comigo. Me dê um momento para validar seus dados.",
@@ -356,8 +360,10 @@ const en: Record<Key, string> = {
   queueGeneral: "General service",
   helloNamed: "Hi {name}, I'm Laura from {queue}.",
   hello: "Hi, I'm Laura from {queue}.",
-  haveCase: "I already have your case {id} and everything you discussed with the assistant, so you don't need to repeat anything.",
-  "next.FRAUD_CONFIRMED": "I'll check whether there were other attempts on your cards and update you right here.",
+  haveCase:
+    "I already have your case {id} and everything you discussed with the assistant, so you don't need to repeat anything.",
+  "next.FRAUD_CONFIRMED":
+    "I'll check whether there were other attempts on your cards and update you right here.",
   "next.CUSTOMER_REQUEST": "Tell me how I can help and we'll sort it out together.",
   "next.UNRESOLVED": "I'll look into your case in more detail and confirm right here.",
   "next.OUT_OF_SCOPE": "I'll handle that request myself. Give me a moment to verify your details.",
@@ -410,5 +416,9 @@ export function LanguageProvider({ children }: PropsWithChildren) {
 
 export function useI18n() {
   const { lang, setLang } = useContext(LangContext)
-  return { lang, setLang, t: (key: Key, vars?: Record<string, string>) => translate(lang, key, vars) }
+  return {
+    lang,
+    setLang,
+    t: (key: Key, vars?: Record<string, string>) => translate(lang, key, vars),
+  }
 }

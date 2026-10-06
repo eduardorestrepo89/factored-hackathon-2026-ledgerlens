@@ -14,13 +14,25 @@ from evals import config, graders
 
 HARNESS_CHECKS = ("unexpected_confirmation", "missing_confirmation")
 ENUMS = {
-    "human_agent_hand_off": {"reason": {"FRAUD_CONFIRMED", "CUSTOMER_REQUEST", "UNRESOLVED", "OUT_OF_SCOPE"},
-                             "priority": {"high", "normal"}},
-    "block_credit_card": {"reason": {"suspected_fraud", "lost", "stolen", "customer_request"}},
+    "human_agent_hand_off": {
+        "reason": {"FRAUD_CONFIRMED", "CUSTOMER_REQUEST", "UNRESOLVED", "OUT_OF_SCOPE"},
+        "priority": {"high", "normal"},
+    },
+    "block_credit_card": {
+        "reason": {"suspected_fraud", "lost", "stolen", "customer_request"}
+    },
     "open_claim": {"claim_type": {"fraud", "dispute"}},
 }
-ARRAY_FIELDS = {"human_agent_hand_off": ("related_ids",), "open_claim": ("transaction_ids",)}
-DEFECT_TYPES = ("bare_tool_name", "array_sent_as_string", "enum_outside_spec", "null_argument")
+ARRAY_FIELDS = {
+    "human_agent_hand_off": ("related_ids",),
+    "open_claim": ("transaction_ids",),
+}
+DEFECT_TYPES = (
+    "bare_tool_name",
+    "array_sent_as_string",
+    "enum_outside_spec",
+    "null_argument",
+)
 CAUSES = ("reproposal_after_no", "retry_after_unknown_tool", "unrequested")
 UNSAFE_TYPES = tuple(graders.UNSAFE)
 
@@ -41,24 +53,37 @@ def load_items(run_dirs: list[Path], cases_by_id: dict) -> list[dict]:
     """One item per (case, model, prompt, run); a later record of the same key wins."""
     latest, aws = {}, {}
     for run_dir in run_dirs:
-        for path, sink in ((run_dir / "aws_eval.jsonl", "aws"), (run_dir / "sessions.jsonl", "sessions")):
+        for path, sink in (
+            (run_dir / "aws_eval.jsonl", "aws"),
+            (run_dir / "sessions.jsonl", "sessions"),
+        ):
             if not path.exists():
                 continue
             for line in path.read_text(encoding="utf-8").splitlines():
                 record = json.loads(line)
                 if sink == "aws":
                     if not record.get("error"):
-                        aws[record["session_id"]] = {r["evaluatorId"]: {"value": r.get("value"),
-                                                                        "errorCode": r.get("errorCode")}
-                                                     for r in record["results"]}
+                        aws[record["session_id"]] = {
+                            r["evaluatorId"]: {
+                                "value": r.get("value"),
+                                "errorCode": r.get("errorCode"),
+                            }
+                            for r in record["results"]
+                        }
                 else:
                     k = record["key"]
                     latest[(k["case"], k["model"], k["prompt"], k["run"])] = record
     items = []
     for _, session in sorted(latest.items()):
         case = cases_by_id[session["case_id"]]
-        items.append({"session": session, "case": case, "grade": graders.grade(session, case),
-                      "aws": aws.get(session["session_id"], {})})
+        items.append(
+            {
+                "session": session,
+                "case": case,
+                "grade": graders.grade(session, case),
+                "aws": aws.get(session["session_id"], {}),
+            }
+        )
     return items
 
 
@@ -86,7 +111,11 @@ def _proposals(session: dict, case: dict):
         declined |= {a["tool"] for a in r["answers"] if a["answer"] == "no"}
         names.update({c["id"]: c["name"] for c in r["tool_calls"]})
         names.update({a["toolUseId"]: a["tool"] for a in r["answers"]})
-        unknown |= {names.get(res["id"]) for res in r["tool_results"] if "Unknown tool" in _raw(res)}
+        unknown |= {
+            names.get(res["id"])
+            for res in r["tool_results"]
+            if "Unknown tool" in _raw(res)
+        }
         for c in r["confirmations"]:
             names[c.get("toolUseId")] = c.get("tool")
             if queue and queue[0] == c.get("tool"):
@@ -121,11 +150,18 @@ def _config_families(items: list[dict]) -> dict:
             checks[name]["failures"] += name in failing
             checks[name]["first"] += i["grade"]["first_failure"] == name
         by_eval[i["case"]["evaluation"]].append(i["grade"]["passed"])
-    f["check_failures"] = {k: {**v, "rate": _pct(v["failures"], v["sessions"])} for k, v in sorted(checks.items())}
-    f["pass_rate_by_evaluation"] = {k: _pct(sum(v), len(v)) for k, v in sorted(by_eval.items())}
+    f["check_failures"] = {
+        k: {**v, "rate": _pct(v["failures"], v["sessions"])}
+        for k, v in sorted(checks.items())
+    }
+    f["pass_rate_by_evaluation"] = {
+        k: _pct(sum(v), len(v)) for k, v in sorted(by_eval.items())
+    }
 
     # tool quality
-    calls = [c for i in graded for r in i["session"]["requests"] for c in r["tool_calls"]]
+    calls = [
+        c for i in graded for r in i["session"]["requests"] for c in r["tool_calls"]
+    ]
     defects = {t: 0 for t in DEFECT_TYPES}
     defective = 0
     for c in calls:
@@ -135,8 +171,15 @@ def _config_families(items: list[dict]) -> dict:
             defects[t] += 1
     f["tool_calls"], f["tool_call_defects"] = len(calls), defects
     f["tool_call_validity"] = _pct(len(calls) - defective, len(calls))
-    results = [res for i in graded for r in i["session"]["requests"] for res in r["tool_results"]]
-    executed = [res for res in results if not _raw(res).startswith('{"raw": "Not done:')]
+    results = [
+        res
+        for i in graded
+        for r in i["session"]["requests"]
+        for res in r["tool_results"]
+    ]
+    executed = [
+        res for res in results if not _raw(res).startswith('{"raw": "Not done:')
+    ]
     errors = {"unknown_tool": 0, "tool_error": 0, "other": 0}
     for res in executed:
         if "Unknown tool" in _raw(res):
@@ -160,8 +203,12 @@ def _config_families(items: list[dict]) -> dict:
     traj = [i for i in graded if i["case"]["expected_tools"]]
     matched = 0
     for i in traj:
-        made = iter(c["name"] for r in i["session"]["requests"] for c in r["tool_calls"])
-        matched += all(any(m == _bare(t) for m in made) for t in i["case"]["expected_tools"])
+        made = iter(
+            c["name"] for r in i["session"]["requests"] for c in r["tool_calls"]
+        )
+        matched += all(
+            any(m == _bare(t) for m in made) for t in i["case"]["expected_tools"]
+        )
     f["local_trajectory_match"] = _pct(matched, len(traj))
 
     # confirmation quality
@@ -175,26 +222,43 @@ def _config_families(items: list[dict]) -> dict:
             if cause:
                 causes[cause] += 1
                 session_causes.append(cause)
-        if any(a["answer"] == "no" for r in i["session"]["requests"] for a in r["answers"]):
+        if any(
+            a["answer"] == "no" for r in i["session"]["requests"] for a in r["answers"]
+        ):
             sessions_with_no += 1
             sessions_reproposing += "reproposal_after_no" in session_causes
-    expected = sum(1 for i in graded for q in i["case"]["confirmations"] if not q.get("optional"))
+    expected = sum(
+        1 for i in graded for q in i["case"]["confirmations"] if not q.get("optional")
+    )
     missing = sum(len(i["session"]["missing_confirmations"]) for i in graded)
     f["proposals"], f["unexpected_by_cause"] = proposals, causes
     f["proposal_precision"] = _pct(proposals - sum(causes.values()), proposals)
     f["proposal_recall"] = _pct(expected - missing, expected)
     f["reproposal_after_no_rate"] = _pct(sessions_reproposing, sessions_with_no)
-    handoffs = [(c, _gold_handoff_reason(i["case"])) for i in graded for r in i["session"]["requests"]
-                for c in r["confirmations"] if c.get("tool") == graders.HANDOFF]
+    handoffs = [
+        (c, _gold_handoff_reason(i["case"]))
+        for i in graded
+        for r in i["session"]["requests"]
+        for c in r["confirmations"]
+        if c.get("tool") == graders.HANDOFF
+    ]
     with_gold = [(c, gold) for c, gold in handoffs if gold]
-    f["handoff_reason_accuracy"] = _pct(sum((c.get("details") or {}).get("reason") == g for c, g in with_gold),
-                                        len(with_gold))
-    f["handoff_reason_invalid"] = sum((c.get("details") or {}).get("reason") not in ENUMS[graders.HANDOFF]["reason"]
-                                      for c, _ in handoffs)
+    f["handoff_reason_accuracy"] = _pct(
+        sum((c.get("details") or {}).get("reason") == g for c, g in with_gold),
+        len(with_gold),
+    )
+    f["handoff_reason_invalid"] = sum(
+        (c.get("details") or {}).get("reason") not in ENUMS[graders.HANDOFF]["reason"]
+        for c, _ in handoffs
+    )
     yes = unknown_after_yes = 0
     typed = typed_executed = 0
     for i in graded:
-        res_by_id = {res["id"]: res for r in i["session"]["requests"] for res in r["tool_results"]}
+        res_by_id = {
+            res["id"]: res
+            for r in i["session"]["requests"]
+            for res in r["tool_results"]
+        }
         for r in i["session"]["requests"]:
             for a in r["answers"]:
                 res = res_by_id.get(a["toolUseId"])
@@ -219,21 +283,47 @@ def _config_families(items: list[dict]) -> dict:
         for evaluator, r in i["aws"].items():
             aws[evaluator]["applicable"] += 1
             aws[evaluator]["scored"] += r.get("value") is not None
-            aws[evaluator]["span_parse_errors"] += r.get("errorCode") == "SpanEventParsingException"
-    f["aws"] = {k: {**v, "scored_share": _pct(v["scored"], v["applicable"])} for k, v in sorted(aws.items())}
+            aws[evaluator]["span_parse_errors"] += (
+                r.get("errorCode") == "SpanEventParsingException"
+            )
+    f["aws"] = {
+        k: {**v, "scored_share": _pct(v["scored"], v["applicable"])}
+        for k, v in sorted(aws.items())
+    }
     f["harness_retries"] = sum(i["session"].get("attempt") == 2 for i in graded)
 
     # efficiency
-    f["request_latencies"] = {"customer": [r["latency_s"] for i in graded for r in i["session"]["requests"]
-                                           if r["kind"] == "say"],
-                              "button": [r["latency_s"] for i in graded for r in i["session"]["requests"]
-                                         if r["kind"] != "say"]}
-    f["session_latencies"] = [sum(r["latency_s"] for r in i["session"]["requests"]) for i in graded]
-    tokens = [(sum(r["usage"]["input"] for r in i["session"]["requests"]),
-               sum(r["usage"]["output"] for r in i["session"]["requests"]), i["session"]["key"]["model"])
-              for i in graded]
-    f["tokens_in_per_session"] = sum(t[0] for t in tokens) / len(tokens) if tokens else None
-    f["tokens_out_per_session"] = sum(t[1] for t in tokens) / len(tokens) if tokens else None
+    f["request_latencies"] = {
+        "customer": [
+            r["latency_s"]
+            for i in graded
+            for r in i["session"]["requests"]
+            if r["kind"] == "say"
+        ],
+        "button": [
+            r["latency_s"]
+            for i in graded
+            for r in i["session"]["requests"]
+            if r["kind"] != "say"
+        ],
+    }
+    f["session_latencies"] = [
+        sum(r["latency_s"] for r in i["session"]["requests"]) for i in graded
+    ]
+    tokens = [
+        (
+            sum(r["usage"]["input"] for r in i["session"]["requests"]),
+            sum(r["usage"]["output"] for r in i["session"]["requests"]),
+            i["session"]["key"]["model"],
+        )
+        for i in graded
+    ]
+    f["tokens_in_per_session"] = (
+        sum(t[0] for t in tokens) / len(tokens) if tokens else None
+    )
+    f["tokens_out_per_session"] = (
+        sum(t[1] for t in tokens) / len(tokens) if tokens else None
+    )
     cost = sum(config.session_cost(m, a, b) for a, b, m in tokens if m in config.PRICES)
     passing = sum(i["grade"]["passed"] for i in graded)
     passk = sum(all(v) for v in runs.values())
@@ -241,15 +331,27 @@ def _config_families(items: list[dict]) -> dict:
     f["cost_per_passing_trial"] = cost / passing if passing else None
     f["cost_per_passk_case"] = cost / passk if passk else None
     f["requests"] = sum(len(i["session"]["requests"]) for i in graded)
-    f["guardrail_interventions"] = sum("guardrail_intervened" in r["stop_reasons"]
-                                       for i in graded for r in i["session"]["requests"])
+    f["guardrail_interventions"] = sum(
+        "guardrail_intervened" in r["stop_reasons"]
+        for i in graded
+        for r in i["session"]["requests"]
+    )
 
     # safety
-    f["unsafe_hits"] = {t: sum(t in i["grade"]["unsafe"] for i in graded) for t in UNSAFE_TYPES}
-    replies = sum(1 for i in graded for r in i["session"]["requests"] if r["text"].strip())
+    f["unsafe_hits"] = {
+        t: sum(t in i["grade"]["unsafe"] for i in graded) for t in UNSAFE_TYPES
+    }
+    replies = sum(
+        1 for i in graded for r in i["session"]["requests"] if r["text"].strip()
+    )
     f["unsafe_opportunities"] = {
-        "write_without_yes": sum(1 for i in graded for r in i["session"]["requests"] for c in r["confirmations"]
-                                 if c.get("tool") in graders.WRITE_TOOLS),
+        "write_without_yes": sum(
+            1
+            for i in graded
+            for r in i["session"]["requests"]
+            for c in r["confirmations"]
+            if c.get("tool") in graders.WRITE_TOOLS
+        ),
         "foreign_customer_id": sum(1 for c in calls if "customer_id" in c["input"]),
         "privacy_leak": replies,
         "pan_echo": replies,

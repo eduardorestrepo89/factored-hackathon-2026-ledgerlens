@@ -18,10 +18,18 @@ interface AgentDeskProps {
 }
 
 const LABEL = "text-xs font-medium text-muted-foreground"
-const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+const time = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 
 /** The human agent's side of the split: the case, the customer's live thread and a composer. */
-export function AgentDesk({ handOff, phase, messages, customerName, sessionId, onSend }: AgentDeskProps) {
+export function AgentDesk({
+  handOff,
+  phase,
+  messages,
+  customerName,
+  sessionId,
+  onSend,
+}: AgentDeskProps) {
   const { lang, t } = useI18n()
   const [draft, setDraft] = useState("")
   // Focus the composer without scrolling the desk: the case card's top must stay in view
@@ -43,7 +51,10 @@ export function AgentDesk({ handOff, phase, messages, customerName, sessionId, o
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border bg-card">
         <header className="flex items-center justify-between gap-3 border-b px-5 py-3">
           <div className="flex items-center gap-3">
-            <span aria-hidden className="grid h-10 w-10 place-items-center rounded-full bg-mango text-lg font-bold text-[#161a33]">
+            <span
+              aria-hidden
+              className="grid h-10 w-10 place-items-center rounded-full bg-mango text-lg font-bold text-[#161a33]"
+            >
               L
             </span>
             <div className="leading-tight">
@@ -56,7 +67,9 @@ export function AgentDesk({ handOff, phase, messages, customerName, sessionId, o
               joined ? "bg-ok/10 text-ok" : "bg-human-bg text-human"
             }`}
           >
-            <span className={`h-2 w-2 rounded-full ${joined ? "bg-ok" : "animate-pulse bg-mango"}`} />
+            <span
+              className={`h-2 w-2 rounded-full ${joined ? "bg-ok" : "animate-pulse bg-mango"}`}
+            />
             {joined ? t("inConversation") : t("connectingDesk")}
           </span>
         </header>
@@ -70,7 +83,9 @@ export function AgentDesk({ handOff, phase, messages, customerName, sessionId, o
               <span className="flex items-center gap-2">
                 <span className="display whitespace-nowrap text-2xl">{handOff.hand_off_id}</span>
                 {!joined && (
-                  <span className="rounded-full bg-mango px-2 py-0.5 text-xs font-bold text-[#161a33]">{t("newBadge")}</span>
+                  <span className="rounded-full bg-mango px-2 py-0.5 text-xs font-bold text-[#161a33]">
+                    {t("newBadge")}
+                  </span>
                 )}
               </span>
               <PriorityPill priority={handOff.priority} />
@@ -79,7 +94,10 @@ export function AgentDesk({ handOff, phase, messages, customerName, sessionId, o
               <div>
                 <h3 className="display text-4xl">{customerName || handOff.customer_id}</h3>
                 <p className="mt-1.5 text-sm text-muted-foreground">
-                  {t("queueLine", { queue: queueFor(handOff.reason, lang), reason: reasonLabel(handOff.reason, lang) })}
+                  {t("queueLine", {
+                    queue: queueFor(handOff.reason, lang),
+                    reason: reasonLabel(handOff.reason, lang),
+                  })}
                 </p>
               </div>
               <dl className="grid grid-cols-2 gap-3 text-sm">
@@ -120,18 +138,29 @@ export function AgentDesk({ handOff, phase, messages, customerName, sessionId, o
               </span>
             </div>
             <div className="min-h-[240px] flex-1 overflow-hidden rounded-3xl bg-page">
-              <ChatMessages messages={messages} sessionId={sessionId} onFeedbackSubmit={async () => {}} hideFeedback />
+              <ChatMessages
+                messages={messages}
+                sessionId={sessionId}
+                onFeedbackSubmit={async () => {}}
+                hideFeedback
+              />
             </div>
 
             <h4 className={`${LABEL} px-1`}>{t("suggestedReplies")}</h4>
             {suggestedReplies(handOff, customerName, lang).map(reply =>
               sent.has(reply) ? (
-                <p key={reply} className="flex items-start gap-2 rounded-2xl bg-page px-4 py-3 text-sm text-muted-foreground">
+                <p
+                  key={reply}
+                  className="flex items-start gap-2 rounded-2xl bg-page px-4 py-3 text-sm text-muted-foreground"
+                >
                   <Check className="mt-0.5 h-4 w-4 flex-none text-ok" />
                   {reply}
                 </p>
               ) : (
-                <div key={reply} className="flex items-start justify-between gap-3 rounded-2xl border border-mango/60 px-4 py-3 text-sm">
+                <div
+                  key={reply}
+                  className="flex items-start justify-between gap-3 rounded-2xl border border-mango/60 px-4 py-3 text-sm"
+                >
                   <span>{reply}</span>
                   <Button
                     type="button"
@@ -157,12 +186,18 @@ export function AgentDesk({ handOff, phase, messages, customerName, sessionId, o
                   rows={2}
                   className="min-h-[44px] resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent"
                 />
-                <Button type="submit" disabled={!draft.trim()} className="rounded-full bg-mango text-[#161a33] hover:bg-mango/90">
+                <Button
+                  type="submit"
+                  disabled={!draft.trim()}
+                  className="rounded-full bg-mango text-[#161a33] hover:bg-mango/90"
+                >
                   <Send className="h-4 w-4" />
                   {t("send")}
                 </Button>
               </div>
-              {!joined && <p className="px-2 text-xs text-muted-foreground">{t("firstMessageHint")}</p>}
+              {!joined && (
+                <p className="px-2 text-xs text-muted-foreground">{t("firstMessageHint")}</p>
+              )}
             </form>
           </div>
         </div>

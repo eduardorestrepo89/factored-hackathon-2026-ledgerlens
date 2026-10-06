@@ -75,7 +75,14 @@ function LensSlab() {
       ref={ref}
       aria-hidden
       onPointerMove={move}
-      style={{ "--x": "50cqw", "--y": "48cqh", "--r": "clamp(64px, 9vw, 128px)", containerType: "size" } as CSSProperties}
+      style={
+        {
+          "--x": "50cqw",
+          "--y": "48cqh",
+          "--r": "clamp(64px, 9vw, 128px)",
+          containerType: "size",
+        } as CSSProperties
+      }
       className="relative h-full overflow-hidden rounded-[32px] bg-card"
     >
       <Stripes />
@@ -122,7 +129,10 @@ function Steps() {
     <ol className="grid gap-5 sm:grid-cols-3 sm:gap-3">
       {STEPS.map(({ n, title, body, human }) => (
         <li key={n} className="flex flex-col gap-2">
-          <span aria-hidden className={`hidden h-1 rounded-full sm:block ${human ? "bg-mango" : "bg-ai"}`} />
+          <span
+            aria-hidden
+            className={`hidden h-1 rounded-full sm:block ${human ? "bg-mango" : "bg-ai"}`}
+          />
           <span className="flex items-center gap-2 sm:mt-2">
             <span
               className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold ${
@@ -172,8 +182,12 @@ export function SignInScreen({ onSignIn }: { onSignIn: () => void }) {
         </div>
 
         <div className="max-w-2xl">
-          <h1 className="display text-balance text-[clamp(3.25rem,7vw,7.5rem)] font-light">{t("signInTitle")}</h1>
-          <p className="mt-6 max-w-[46ch] text-lg leading-relaxed text-muted-foreground">{t("signInBody")}</p>
+          <h1 className="display text-balance text-[clamp(3.25rem,7vw,7.5rem)] font-light">
+            {t("signInTitle")}
+          </h1>
+          <p className="mt-6 max-w-[46ch] text-lg leading-relaxed text-muted-foreground">
+            {t("signInBody")}
+          </p>
           <Button onClick={onSignIn} className="mt-10 h-12 rounded-full px-8 text-base">
             {t("signIn")}
           </Button>

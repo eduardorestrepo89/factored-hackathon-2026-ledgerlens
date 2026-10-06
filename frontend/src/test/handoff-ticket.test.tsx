@@ -32,7 +32,15 @@ describe("HandOffTicket", () => {
   })
 
   it("falls back to the plain tool row for an error result", () => {
-    render(<HandOffTicket name={NAME} args="{}" status="complete" result='{"error":"down"}' tagged={false} />)
+    render(
+      <HandOffTicket
+        name={NAME}
+        args="{}"
+        status="complete"
+        result='{"error":"down"}'
+        tagged={false}
+      />
+    )
 
     expect(screen.queryByText(/Caso/)).toBeNull()
     expect(screen.getByText("human_agent_hand_off")).toBeInTheDocument()

@@ -96,8 +96,10 @@ function lensGeometry(radius = LENS_R, sag = 0.2, steps = 32) {
   // Bottom to top: LatheGeometry winds faces from the profile's order, and this order gives
   // outward normals, which is what makes the transmission magnify instead of shrink
   const profile: THREE.Vector2[] = []
-  for (let i = 0; i <= steps; i++) profile.push(new THREE.Vector2((radius * i) / steps, -height((radius * i) / steps)))
-  for (let i = steps; i >= 0; i--) profile.push(new THREE.Vector2((radius * i) / steps, height((radius * i) / steps)))
+  for (let i = 0; i <= steps; i++)
+    profile.push(new THREE.Vector2((radius * i) / steps, -height((radius * i) / steps)))
+  for (let i = steps; i >= 0; i--)
+    profile.push(new THREE.Vector2((radius * i) / steps, height((radius * i) / steps)))
   const geometry = new THREE.LatheGeometry(profile, 96)
   geometry.rotateX(Math.PI / 2)
   return geometry
@@ -109,7 +111,8 @@ function useFit() {
   return Math.min(1, (viewport.width * 0.8) / CARD_W, (viewport.height * 0.78) / CARD_H)
 }
 
-const damp = (from: number, to: number, rate: number, dt: number) => from + (to - from) * (1 - Math.exp(-rate * dt))
+const damp = (from: number, to: number, rate: number, dt: number) =>
+  from + (to - from) * (1 - Math.exp(-rate * dt))
 
 function Card({ pointer, still }: { pointer: Pointer; still: boolean }) {
   const texture = useCardTexture()
@@ -126,14 +129,28 @@ function Card({ pointer, still }: { pointer: Pointer; still: boolean }) {
       {texture && (
         <mesh>
           <planeGeometry args={[CARD_W, CARD_H]} />
-          <meshPhysicalMaterial map={texture} transparent roughness={0.45} clearcoat={1} clearcoatRoughness={0.15} />
+          <meshPhysicalMaterial
+            map={texture}
+            transparent
+            roughness={0.45}
+            clearcoat={1}
+            clearcoatRoughness={0.15}
+          />
         </mesh>
       )}
     </group>
   )
 }
 
-function Lens({ pointer, still, background }: { pointer: Pointer; still: boolean; background: string }) {
+function Lens({
+  pointer,
+  still,
+  background,
+}: {
+  pointer: Pointer
+  still: boolean
+  background: string
+}) {
   const ref = useRef<THREE.Group>(null!)
   const geometry = useMemo(() => lensGeometry(), [])
   const { viewport } = useThree()
@@ -180,7 +197,8 @@ function Lens({ pointer, still, background }: { pointer: Pointer; still: boolean
 
 /** The page's surface color, kept in step with the theme toggle. */
 function useCardColor() {
-  const read = () => getComputedStyle(document.documentElement).getPropertyValue("--card").trim() || "#ffffff"
+  const read = () =>
+    getComputedStyle(document.documentElement).getPropertyValue("--card").trim() || "#ffffff"
   const [color, setColor] = useState(read)
   useEffect(() => {
     const observer = new MutationObserver(() => setColor(read()))

@@ -13,14 +13,31 @@ from evals import runner
 
 KEY = {"case": "E1a", "model": "openai.gpt-oss-120b-1:0", "prompt": "v10", "run": 3}
 PAYLOAD = {"model_id": "deepseek.v3.2", "prompt_name": "v10", "system_prompt": "P"}
-BLOCK = {"id": "i1", "tool": "block_credit_card", "toolUseId": "t1", "details": {"card_last4": "4497"}}
-HANDOFF = {"id": "i2", "tool": "human_agent_hand_off", "toolUseId": "t2", "details": {"reason": "UNRESOLVED"}}
+BLOCK = {
+    "id": "i1",
+    "tool": "block_credit_card",
+    "toolUseId": "t1",
+    "details": {"card_last4": "4497"},
+}
+HANDOFF = {
+    "id": "i2",
+    "tool": "human_agent_hand_off",
+    "toolUseId": "t2",
+    "details": {"reason": "UNRESOLVED"},
+}
 
 
 def case(**over):
-    base = {"id": "E1a", "persona": "P07", "customer_id": "CLI-EX6BOAOEFZHQ",
-            "turns": ["hola", "no lo hice"], "confirmations": [{"tool": "block_credit_card", "answer": "no"}],
-            "checks": [{"check": "no_write_result"}], "expected_tools": [], "assertions": ["a"]}
+    base = {
+        "id": "E1a",
+        "persona": "P07",
+        "customer_id": "CLI-EX6BOAOEFZHQ",
+        "turns": ["hola", "no lo hice"],
+        "confirmations": [{"tool": "block_credit_card", "answer": "no"}],
+        "checks": [{"check": "no_write_result"}],
+        "expected_tools": [],
+        "assertions": ["a"],
+    }
     return {**base, **over}
 
 
@@ -49,45 +66,77 @@ def test_session_ids_fit_the_runtime_header_rule():
 
 
 def test_a_no_click_is_sent_with_the_eval_payload_on_every_request():
-    send = FakeSend(text("¿Lo reconoces?"), text("Puedo bloquearla.") + [{"confirmation": BLOCK}],
-                    text("No la bloqueé."))
+    send = FakeSend(
+        text("¿Lo reconoces?"),
+        text("Puedo bloquearla.") + [{"confirmation": BLOCK}],
+        text("No la bloqueé."),
+    )
 
     session = runner.run_session(case(), KEY, PAYLOAD, send)
 
     assert [r["kind"] for r in session["requests"]] == ["say", "say", "click"]
     assert send.bodies[2]["confirmations"] == [{"interruptId": "i1", "approved": False}]
     assert send.bodies[2]["prompt"] == runner.BUTTON_PROMPT
-    assert all(b["eval"] == PAYLOAD and b["runtimeSessionId"] == session["session_id"] for b in send.bodies)
+    assert all(
+        b["eval"] == PAYLOAD and b["runtimeSessionId"] == session["session_id"]
+        for b in send.bodies
+    )
     assert session["requests"][2]["answers"][0]["answer"] == "no"
     assert session["missing_confirmations"] == [] and session["harness_error"] is None
 
 
 def test_a_typed_answer_covers_every_pending_confirmation():
-    typed = case(turns=["perdí la tarjeta"],
-                 confirmations=[{"tool": "block_credit_card", "answer": {"type": "Sí, bloquéala"}},
-                                {"tool": "human_agent_hand_off", "answer": "no"}])
-    send = FakeSend(text("Elige") + [{"confirmation": BLOCK}, {"confirmation": HANDOFF}], text("Ok"))
+    typed = case(
+        turns=["perdí la tarjeta"],
+        confirmations=[
+            {"tool": "block_credit_card", "answer": {"type": "Sí, bloquéala"}},
+            {"tool": "human_agent_hand_off", "answer": "no"},
+        ],
+    )
+    send = FakeSend(
+        text("Elige") + [{"confirmation": BLOCK}, {"confirmation": HANDOFF}], text("Ok")
+    )
 
     session = runner.run_session(typed, KEY, PAYLOAD, send)
 
-    assert "confirmations" not in send.bodies[1] and send.bodies[1]["prompt"] == "Sí, bloquéala"
-    assert [a["answer"] for a in session["requests"][1]["answers"]] == ["typed", "typed"]
+    assert (
+        "confirmations" not in send.bodies[1]
+        and send.bodies[1]["prompt"] == "Sí, bloquéala"
+    )
+    assert [a["answer"] for a in session["requests"][1]["answers"]] == [
+        "typed",
+        "typed",
+    ]
 
 
 def test_an_unexpected_confirmation_is_declined_and_recorded():
-    send = FakeSend(text("Te paso con alguien") + [{"confirmation": HANDOFF}], text("Ok"))
+    send = FakeSend(
+        text("Te paso con alguien") + [{"confirmation": HANDOFF}], text("Ok")
+    )
 
-    session = runner.run_session(case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, send)
+    session = runner.run_session(
+        case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, send
+    )
 
     assert session["unexpected_confirmations"] == ["human_agent_hand_off"]
     assert send.bodies[1]["confirmations"] == [{"interruptId": "i2", "approved": False}]
 
 
 def test_a_missing_confirmation_is_recorded_unless_optional():
-    required = runner.run_session(case(turns=["hola"]), KEY, PAYLOAD, FakeSend(text("Hola")))
+    required = runner.run_session(
+        case(turns=["hola"]), KEY, PAYLOAD, FakeSend(text("Hola"))
+    )
     optional = runner.run_session(
-        case(turns=["hola"], confirmations=[{"tool": "block_credit_card", "answer": "no", "optional": True}]),
-        KEY, PAYLOAD, FakeSend(text("Hola")))
+        case(
+            turns=["hola"],
+            confirmations=[
+                {"tool": "block_credit_card", "answer": "no", "optional": True}
+            ],
+        ),
+        KEY,
+        PAYLOAD,
+        FakeSend(text("Hola")),
+    )
 
     assert required["missing_confirmations"] == ["block_credit_card"]
     assert optional["missing_confirmations"] == []
@@ -105,7 +154,9 @@ def test_an_error_event_stops_the_session_as_a_harness_error():
 def test_endless_confirmations_are_a_harness_error():
     send = FakeSend(*[text("x") + [{"confirmation": HANDOFF}]] * 10)
 
-    session = runner.run_session(case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, send)
+    session = runner.run_session(
+        case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, send
+    )
 
     assert "confirmation rounds" in session["harness_error"]
 
@@ -119,7 +170,9 @@ def test_a_failed_attempt_is_retried_once_with_a_new_session_id():
             raise httpx.ConnectError("boom")
         return text("ok"), 0.1
 
-    session = runner.run_with_retry(case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, flaky)
+    session = runner.run_with_retry(
+        case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, flaky
+    )
 
     assert session["harness_error"] is None and session["attempt"] == 2
     assert calls[0] != calls[1]
@@ -134,7 +187,9 @@ def test_an_override_rejection_is_not_retried():
 
 
 def token(exp):
-    return jwt.encode({"sub": "s", "exp": exp}, "test-signing-key-of-32-bytes-ok!", algorithm="HS256")
+    return jwt.encode(
+        {"sub": "s", "exp": exp}, "test-signing-key-of-32-bytes-ok!", algorithm="HS256"
+    )
 
 
 class FakeCognito:
@@ -154,7 +209,10 @@ def test_logins_reuse_a_fresh_token():
     logins.token("P07")
 
     assert len(cognito.calls) == 1
-    assert cognito.calls[0]["AuthParameters"] == {"USERNAME": "eval-p07@ledgerlens.example", "PASSWORD": "pw"}
+    assert cognito.calls[0]["AuthParameters"] == {
+        "USERNAME": "eval-p07@ledgerlens.example",
+        "PASSWORD": "pw",
+    }
 
 
 def test_logins_refresh_a_token_close_to_expiry():
@@ -175,7 +233,10 @@ def test_make_send_posts_to_the_runtime_and_parses_sse():
     def handler(request):
         seen["host"], seen["path"] = request.url.host, request.url.raw_path.decode()
         seen["headers"], seen["body"] = request.headers, json.loads(request.content)
-        return httpx.Response(200, content=b': ping\n\ndata: {"data": "x"}\n\ndata: {"status": "error", "error": "e"}\n\n')
+        return httpx.Response(
+            200,
+            content=b': ping\n\ndata: {"data": "x"}\n\ndata: {"status": "error", "error": "e"}\n\n',
+        )
 
     class StaticLogins:
         def token(self, persona):
@@ -183,11 +244,15 @@ def test_make_send_posts_to_the_runtime_and_parses_sse():
 
     arn = "arn:aws:bedrock-agentcore:us-east-1:111:runtime/LedgerLens-abc"
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
-        events, latency = runner.make_send(http, arn, StaticLogins())("P07", "sid-1", {"prompt": "hola"})
+        events, latency = runner.make_send(http, arn, StaticLogins())(
+            "P07", "sid-1", {"prompt": "hola"}
+        )
 
     assert seen["host"] == "bedrock-agentcore.us-east-1.amazonaws.com"
-    assert seen["path"] == ("/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A111%3Aruntime%2F"
-                            "LedgerLens-abc/invocations?qualifier=DEFAULT")
+    assert seen["path"] == (
+        "/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A111%3Aruntime%2F"
+        "LedgerLens-abc/invocations?qualifier=DEFAULT"
+    )
     assert seen["body"] == {"prompt": "hola"}
     assert seen["headers"]["Authorization"] == "Bearer TOKEN"
     assert seen["headers"]["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] == "sid-1"
@@ -204,11 +269,32 @@ class FakeLambda:
         return {"Payload": io.BytesIO(json.dumps(outer).encode())}
 
 
-@pytest.mark.parametrize("body, problem", [
-    ({"cards": [{"card_last4": "4497", "product_status": "Active"}], "open_cases": []}, None),
-    ({"cards": [{"card_last4": "4497", "product_status": "Blocked"}], "open_cases": []}, "Blocked"),
-    ({"cards": [{"card_last4": "4497", "product_status": "Active"}], "open_cases": [{"x": 1}]}, "open case"),
-])
+@pytest.mark.parametrize(
+    "body, problem",
+    [
+        (
+            {
+                "cards": [{"card_last4": "4497", "product_status": "Active"}],
+                "open_cases": [],
+            },
+            None,
+        ),
+        (
+            {
+                "cards": [{"card_last4": "4497", "product_status": "Blocked"}],
+                "open_cases": [],
+            },
+            "Blocked",
+        ),
+        (
+            {
+                "cards": [{"card_last4": "4497", "product_status": "Active"}],
+                "open_cases": [{"x": 1}],
+            },
+            "open case",
+        ),
+    ],
+)
 def test_precheck_p07(body, problem):
     fake = FakeLambda(body)
 
@@ -216,7 +302,10 @@ def test_precheck_p07(body, problem):
 
     assert (result is None) if problem is None else (problem in result)
     context = json.loads(base64.b64decode(fake.kwargs["ClientContext"]))
-    assert context["custom"]["bedrockAgentCoreToolName"] == "get-session-context-target___get_session_context"
+    assert (
+        context["custom"]["bedrockAgentCoreToolName"]
+        == "get-session-context-target___get_session_context"
+    )
     assert json.loads(fake.kwargs["Payload"]) == {"customer_id": "CLI-EX6BOAOEFZHQ"}
 
 
@@ -224,8 +313,13 @@ def test_matrix_and_done_keys(tmp_path):
     cases = [case(id="A"), case(id="B")]
     jobs = runner.matrix(cases, ["m1", "m2"], ["v10"], 3)
     path = tmp_path / "sessions.jsonl"
-    path.write_text(json.dumps({"key": jobs[0][1], "harness_error": None}) + "\n"
-                    + json.dumps({"key": jobs[1][1], "harness_error": "HTTP 503"}) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps({"key": jobs[0][1], "harness_error": None})
+        + "\n"
+        + json.dumps({"key": jobs[1][1], "harness_error": "HTTP 503"})
+        + "\n",
+        encoding="utf-8",
+    )
 
     assert len(jobs) == 12
     assert runner.done_keys(path) == {runner.key_id(jobs[0][1])}
@@ -243,7 +337,12 @@ def test_any_error_during_a_session_is_a_harness_error_not_a_crash():
     def broken(session_id, body):
         raise RuntimeError("NotAuthorizedException: Incorrect username or password")
 
-    session = runner.run_with_retry(case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, broken)
+    session = runner.run_with_retry(
+        case(turns=["hola"], confirmations=[]), KEY, PAYLOAD, broken
+    )
 
-    assert session["harness_error"] == "RuntimeError: NotAuthorizedException: Incorrect username or password"
+    assert (
+        session["harness_error"]
+        == "RuntimeError: NotAuthorizedException: Incorrect username or password"
+    )
     assert session["attempt"] == 2

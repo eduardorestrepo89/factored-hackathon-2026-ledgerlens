@@ -22,33 +22,54 @@ const RESULT = {
 const PREFIXED = "human-agent-hand-off-target___human_agent_hand_off"
 const AT = "2026-10-03T08:18:00.000Z"
 
-const tool = (result: string | undefined, status: ToolCallStatus = "complete", name = PREFIXED): MessageSegment => ({
+const tool = (
+  result: string | undefined,
+  status: ToolCallStatus = "complete",
+  name = PREFIXED
+): MessageSegment => ({
   type: "tool",
   toolCall: { toolUseId: "t1", name, input: "{}", result, status },
 })
 const text = (content: string): MessageSegment => ({ type: "text", content })
-const assistant = (...segments: MessageSegment[]): Message => ({ role: "assistant", content: "", timestamp: AT, segments })
+const assistant = (...segments: MessageSegment[]): Message => ({
+  role: "assistant",
+  content: "",
+  timestamp: AT,
+  segments,
+})
 const user = (content: string): Message => ({ role: "user", content, timestamp: AT })
 const human = (content: string): Message => ({ role: "human", content, timestamp: AT })
-const handOff = (over: Partial<HandOff> = {}): HandOff => ({ ...RESULT, goodbye: "", at: AT, ...over })
+const handOff = (over: Partial<HandOff> = {}): HandOff => ({
+  ...RESULT,
+  goodbye: "",
+  at: AT,
+  ...over,
+})
 
 describe("findHandOff", () => {
   it("returns the result, the goodbye after the tool and the message time", () => {
     const found = findHandOff([
       user("quiero hablar con una persona"),
-      assistant(text("Te paso con una persona."), tool(JSON.stringify(RESULT)), text(" Una persona sigue contigo aquí.")),
+      assistant(
+        text("Te paso con una persona."),
+        tool(JSON.stringify(RESULT)),
+        text(" Una persona sigue contigo aquí.")
+      ),
     ])
     expect(found).toEqual({ ...RESULT, goodbye: "Una persona sigue contigo aquí.", at: AT })
   })
 
   it("matches the bare tool name too", () => {
-    expect(findHandOff([assistant(tool(JSON.stringify(RESULT), "complete", "human_agent_hand_off"))])?.hand_off_id).toBe(
-      "HO-7Q3KX2MA"
-    )
+    expect(
+      findHandOff([assistant(tool(JSON.stringify(RESULT), "complete", "human_agent_hand_off"))])
+        ?.hand_off_id
+    ).toBe("HO-7Q3KX2MA")
   })
 
   it("falls back to the text before the tool when the goodbye came first", () => {
-    const found = findHandOff([assistant(text("Una persona sigue contigo aquí."), tool(JSON.stringify(RESULT)))])
+    const found = findHandOff([
+      assistant(text("Una persona sigue contigo aquí."), tool(JSON.stringify(RESULT))),
+    ])
     expect(found?.goodbye).toBe("Una persona sigue contigo aquí.")
   })
 
@@ -66,7 +87,13 @@ describe("findHandOff", () => {
   })
 
   it("ignores other tools", () => {
-    expect(findHandOff([assistant(tool(JSON.stringify(RESULT), "complete", "list-credit-cards-target___list_credit_cards"))])).toBeNull()
+    expect(
+      findHandOff([
+        assistant(
+          tool(JSON.stringify(RESULT), "complete", "list-credit-cards-target___list_credit_cards")
+        ),
+      ])
+    ).toBeNull()
   })
 
   it("looks only at the last message", () => {
@@ -75,7 +102,9 @@ describe("findHandOff", () => {
 
   it("takes the first valid call when the tool ran twice", () => {
     const second = { ...RESULT, hand_off_id: "HO-SECOND22" }
-    const found = findHandOff([assistant(tool(JSON.stringify(RESULT)), tool(JSON.stringify(second)), text("Chao."))])
+    const found = findHandOff([
+      assistant(tool(JSON.stringify(RESULT)), tool(JSON.stringify(second)), text("Chao.")),
+    ])
     expect(found?.hand_off_id).toBe("HO-7Q3KX2MA")
   })
 })
@@ -87,7 +116,9 @@ describe("parseHandOffResult", () => {
   })
 
   it("ignores an envelope around an error", () => {
-    const envelope = JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ error: "down" }) }] })
+    const envelope = JSON.stringify({
+      content: [{ type: "text", text: JSON.stringify({ error: "down" }) }],
+    })
     expect(parseHandOffResult(envelope)).toBeNull()
   })
 

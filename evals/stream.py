@@ -43,7 +43,11 @@ def parse_tool_body(content) -> object:
         body = json.loads(text)
     except json.JSONDecodeError:
         return {"raw": text}
-    if isinstance(body, dict) and isinstance(body.get("content"), list) and body["content"]:
+    if (
+        isinstance(body, dict)
+        and isinstance(body.get("content"), list)
+        and body["content"]
+    ):
         inner = body["content"][0]
         if isinstance(inner, dict) and isinstance(inner.get("text"), str):
             try:
@@ -98,19 +102,25 @@ def digest(events: Iterable[dict]) -> dict:
                     texts.append(block["text"])
                 use = block.get("toolUse")
                 if isinstance(use, dict):
-                    out["tool_calls"].append({
-                        "id": use.get("toolUseId"),
-                        "name": bare_tool_name(use.get("name", "")),
-                        "full_name": use.get("name"),
-                        "input": use["input"] if isinstance(use.get("input"), dict) else {},
-                    })
+                    out["tool_calls"].append(
+                        {
+                            "id": use.get("toolUseId"),
+                            "name": bare_tool_name(use.get("name", "")),
+                            "full_name": use.get("name"),
+                            "input": use["input"]
+                            if isinstance(use.get("input"), dict)
+                            else {},
+                        }
+                    )
             elif message.get("role") == "user":
                 res = block.get("toolResult")
                 if isinstance(res, dict):
-                    out["tool_results"].append({
-                        "id": res.get("toolUseId"),
-                        "status": res.get("status"),
-                        "body": parse_tool_body(res.get("content")),
-                    })
+                    out["tool_results"].append(
+                        {
+                            "id": res.get("toolUseId"),
+                            "status": res.get("status"),
+                            "body": parse_tool_body(res.get("content")),
+                        }
+                    )
     out["text"] = "\n".join(t for t in texts if t.strip())
     return out
