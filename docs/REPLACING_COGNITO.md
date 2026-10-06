@@ -1,6 +1,6 @@
 # Replacing Cognito: Identity Provider Swap & Gateway Interceptors Guide
 
-This document explains how to replace Amazon Cognito with another Identity Provider (IdP) in the FAST AgentCore architecture, and how to use Gateway Interceptors as an alternative or complement to Cedar Policy for access control.
+This document explains how to replace Amazon Cognito with another Identity Provider (IdP) in LedgerLens, and how to use Gateway Interceptors as an alternative or complement to Cedar Policy for access control. None of this is implemented; LedgerLens runs on Cognito and Cedar.
 
 ---
 
@@ -8,13 +8,17 @@ This document explains how to replace Amazon Cognito with another Identity Provi
 
 ### Current Architecture Summary
 
-The FAST demo uses Amazon Cognito as the Identity Provider with the following flow:
+LedgerLens uses Amazon Cognito as the Identity Provider with the following flow:
 
 ```
-User JWT → Runtime (validates user) → Runtime gets M2M token from Cognito → Pre-Token Lambda injects user claims into M2M token → Gateway authorizer validates M2M token → Cedar Policy Engine evaluates user claims → allows/denies tool access → Target Lambda receives tool input only
+User JWT → Runtime (validates user) → Runtime gets M2M token from Cognito, passing the user's sub as aws_client_metadata → Pre-Token Lambda maps sub → customer_id and injects it into the M2M token → Gateway authorizer validates M2M token → Cedar Policy Engine compares the customer_id claim with the tool's customer_id input → allows/denies tool access → Target Lambda receives tool input only
 ```
+
+The details are in [IDENTITY_POLICY.md](IDENTITY_POLICY.md) and [RUNTIME_GATEWAY_AUTH.md](RUNTIME_GATEWAY_AUTH.md).
 
 **This document addresses two questions:** how the Gateway identifies the user for access control enforcement, and how to achieve this with a different IdP.
+
+> **The one requirement any swap must keep:** the token the Gateway sees must carry a non-empty `customer_id` claim (a string, named exactly that) for the signed-in user. Cedar statement 1 permits tools only when that claim is present, and the agent reads the same claim (`extract_customer_id_from_token()` in `agent/utils/auth.py`) to fill `customer_id` on every tool call. Without it, the Gateway allows no tool calls. The only way around this is to move access control out of Cedar, as Approach B does.
 
 ### Two Approaches
 
@@ -34,7 +38,7 @@ User JWT → Runtime (validates user) → Runtime gets M2M token from Cognito �
 The architecture remains the same as the current Cognito flow. Cognito-specific components are replaced with equivalents from the new IdP:
 
 ```
-User JWT → Runtime (validates user via new IdP's OIDC) → Runtime gets M2M token from new IdP's token endpoint → IdP's token enrichment hook injects user claims (replaces Pre-Token Lambda) → Gateway authorizer validates M2M token (via new IdP's OIDC discovery URL) → Cedar Policy Engine evaluates user claims → allows/denies (UNCHANGED) → Target Lambda receives tool input only (UNCHANGED)
+User JWT → Runtime (validates user via new IdP's OIDC) → Runtime gets M2M token from new IdP's token endpoint → IdP's token enrichment hook injects the customer_id claim (replaces Pre-Token Lambda) → Gateway authorizer validates M2M token (via new IdP's OIDC discovery URL) → Cedar Policy Engine checks customer_id → allows/denies (UNCHANGED) → Target Lambda receives tool input only (UNCHANGED)
 ```
 
 **Key insight:** The AgentCore Gateway's CUSTOM_JWT authorizer is **IdP-agnostic**. The official AWS documentation states:
@@ -48,10 +52,12 @@ Only a valid OIDC discovery URL is needed, and the Gateway will validate tokens 
 | Component | Current (Cognito) | New (Third-Party IdP) |
 |-----------|---|---|
 | Gateway authorizer discovery URL | `https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/openid-configuration` | `https://{your-idp}/.well-known/openid-configuration` |
-| Token endpoint | `POST https://{cognito_domain}/oauth2/token` | IdP's token endpoint (e.g., `https://{okta_domain}/oauth2/v1/token`) |
-| Identity propagation to token enrichment | `aws_client_metadata: {"verified_user_id": "..."}` (Cognito-specific) | IdP-specific mechanism (see below) |
+| Token endpoint | `POST https://{cognito_provider}/oauth2/token`, built by `get_gateway_access_token()` in `agent/utils/auth.py` | IdP's token endpoint (e.g., `https://{okta_domain}/oauth2/v1/token`); rewrite the token call |
+| Identity propagation to token enrichment | `aws_client_metadata: {"verified_user_id": "<sub>"}` (Cognito-specific) | IdP-specific mechanism (see below) |
 | Token enrichment mechanism | Pre-Token Lambda (V3, Cognito trigger) | IdP's native hook (see below) |
-| Cedar Policy | **Unchanged** — still reads `principal.getTag("department")` etc. | **Unchanged** |
+| User → customer mapping | `USER_CUSTOMER_IDS_MAP` in the Pre-Token Lambda, keyed by Cognito `sub` | The hook's own lookup, keyed by the new IdP's user ID; it must emit `customer_id` |
+| Cedar Policy | **Unchanged** — reads `principal.getTag("customer_id")` | **Unchanged**, as long as the claim keeps that name |
+| Agent hooks | **Unchanged** — `CustomerIdHook` uses the token's `customer_id` | **Unchanged**, as long as the claim keeps that name |
 | Target Lambda | **Unchanged** — receives tool input only | **Unchanged** |
 
 ### IdP-Specific Token Enrichment Mechanisms
@@ -72,6 +78,10 @@ No. Tokens live in the HTTP transport layer managed by the Python agent code and
 **Q: What if the IdP doesn't support injecting arbitrary claims into M2M tokens?**
 
 Use Approach B (Gateway Interceptors) described in the next section.
+
+**Q: Which files change?**
+
+See [section 8](#8-replacing-cognito-for-the-machine-token) for the CDK and agent changes, file by file.
 
 ---
 
@@ -109,19 +119,30 @@ User JWT → Runtime (validates user JWT via any IdP's OIDC)
 
 **Runtime code:**
 
+A sketch based on the current `create_gateway_mcp_client()` in `agent/ledgerlens/tools/gateway.py`. `get_plain_m2m_token()` doesn't exist: it stands for a client credentials call to the new IdP, without user metadata.
+
 ```python
-# In the agent code (runs in AgentCore Runtime)
-user_id = extract_user_id_from_context(context)  # from validated user JWT
-m2m_token = await get_m2m_token()  # plain M2M, no user claims
+from mcp.client.streamable_http import streamablehttp_client
+from strands.tools.mcp import MCPClient
+from utils.auth import extract_user_id_from_context
+
+# In invocations() (runs in AgentCore Runtime)
+user_id = extract_user_id_from_context(context)  # sub from the validated user JWT
+m2m_token = get_plain_m2m_token()                # plain M2M, no user claims
 
 mcp_client = MCPClient(
-    gateway_url=GATEWAY_URL,
-    headers={
-        "Authorization": f"Bearer {m2m_token}",  # machine trust
-        "X-User-Id": user_id,                     # user identity (plain string)
-    }
+    lambda: streamablehttp_client(
+        url=gateway_url,
+        headers={
+            "Authorization": f"Bearer {m2m_token}",  # machine trust
+            "X-User-Id": user_id,                     # user identity (plain string)
+        },
+    ),
+    prefix="gateway",
 )
 ```
+
+In LedgerLens the agent also needs the user's `customer_id` for its prompt and `CustomerIdHook`. Today it reads it from the enriched token; with plain tokens it needs another source, such as the same lookup the interceptor uses.
 
 **Interceptor reads it:**
 
@@ -175,16 +196,21 @@ User JWT → Runtime (validates user JWT via any IdP's OIDC)
 **Runtime code:**
 
 ```python
-# In the agent code (runs in AgentCore Runtime)
-user_jwt = get_user_jwt_from_request(context)  # the original user JWT (already validated by Runtime's authorizer)
-m2m_token = await get_m2m_token()  # plain M2M, no user claims
+# In invocations() (runs in AgentCore Runtime)
+# The original user JWT, already validated by the Runtime's authorizer.
+# The Authorization header is allowlisted, as extract_claims_from_context() relies on.
+user_jwt = context.request_headers["Authorization"].removeprefix("Bearer ")
+m2m_token = get_plain_m2m_token()  # hypothetical: plain M2M, no user claims
 
 mcp_client = MCPClient(
-    gateway_url=GATEWAY_URL,
-    headers={
-        "Authorization": f"Bearer {m2m_token}",    # machine trust
-        "X-User-Token": user_jwt,                   # full user JWT (verifiable)
-    }
+    lambda: streamablehttp_client(
+        url=gateway_url,
+        headers={
+            "Authorization": f"Bearer {m2m_token}",  # machine trust
+            "X-User-Token": user_jwt,                 # full user JWT (verifiable)
+        },
+    ),
+    prefix="gateway",
 )
 ```
 
@@ -283,6 +309,13 @@ def lambda_handler(event, context):
 - **User identity** (in `X-User-Id` or `X-User-Token` header) → tells the interceptor WHO the request is for → used for access control decisions
 
 The interceptor replaces BOTH the Pre-Token Lambda AND the Cedar Policy Engine's role in checking user identity. The Gateway authorizer still validates the M2M token (to ensure the call is legitimate), but the access control decision moves from Cedar Policy to the Interceptor Lambda.
+
+For LedgerLens, that means the request interceptor must do what the three Cedar statements do today:
+- look up the user's customer;
+- reject a call whose `customer_id` argument is a different customer;
+- reject `block_credit_card` and `open_claim` unless `customer_confirmed` is `true`.
+
+If Cedar stays attached as well, it needs the `customer_id` claim, which plain tokens don't have, so drop or rewrite the policy.
 
 > **Note:** In both options, the LLM never has access to either token or header. They exist only in the HTTP transport layer managed by the agent's Python code and MCP client library. The LLM only interacts with tool schemas and tool results.
 
@@ -419,25 +452,29 @@ def filter_tools_by_scope(tools, allowed_scopes):
 
 ### 3d. CDK Configuration
 
+The project already uses the stable L2 constructs from `aws-cdk-lib/aws-bedrockagentcore` (imported as `agentcore` in `infra-cdk/lib/backend-construct.ts`). Interceptors are part of the same module, so no alpha package is needed:
+
 ```typescript
-import { LambdaInterceptor } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore"
 
 // Request interceptor — fires BEFORE target
-const requestInterceptor = LambdaInterceptor.forRequest(requestInterceptorLambda, {
-  passRequestHeaders: true  // Required: enables reading custom headers (X-User-Id, etc.)
-});
+const requestInterceptor = agentcore.LambdaInterceptor.forRequest(requestInterceptorLambda, {
+  passRequestHeaders: true, // Required: enables reading custom headers (X-User-Id, etc.)
+})
 
 // Response interceptor — fires AFTER target responds
-const responseInterceptor = LambdaInterceptor.forResponse(responseInterceptorLambda, {
-  passRequestHeaders: true  // Required: enables reading headers in the response payload
-});
+const responseInterceptor = agentcore.LambdaInterceptor.forResponse(responseInterceptorLambda, {
+  passRequestHeaders: true, // Required: enables reading headers in the response payload
+})
 
-// Attach to Gateway
-const gateway = new Gateway(this, 'MyGateway', {
-  // ... other config
-  interceptors: [requestInterceptor, responseInterceptor],
-});
+// In createAgentCoreGateway(), add to the existing Gateway props
+const gateway = new agentcore.Gateway(this, "AgentCoreGateway", {
+  // ... the current config
+  interceptorConfigurations: [requestInterceptor, responseInterceptor],
+})
 ```
+
+A Gateway can have at most one request interceptor and one response interceptor.
 
 **Important:** `passRequestHeaders: true` is required. By default, headers are NOT forwarded to interceptors for security reasons (headers may contain sensitive credentials). This must be explicitly opted in.
 
@@ -487,13 +524,17 @@ They work in sequence:
 **Q: Can interceptors and Cedar Policy coexist?**
 
 Yes. They serve complementary purposes:
-- **Cedar Policy** handles static, declarative rules (e.g., "finance department can access financial tools")
+- **Cedar Policy** handles static, declarative rules (e.g., "a login may only touch its own customer's data")
 - **Interceptors** handle dynamic cases (e.g., permissions from a database that change at runtime)
 
 When both are active, the evaluation order is:
 1. Gateway authorizer validates the token
-2. Cedar Policy Engine evaluates (if configured)
-3. Interceptors fire (request before target, response after target)
+2. Request interceptor fires
+3. Cedar Policy Engine evaluates the request **as the request interceptor left it** (if configured)
+4. Target runs
+5. Response interceptor fires
+
+The request interceptor runs before Cedar, so it can enrich the request that Cedar then evaluates ([AWS blog: Secure AI agents with Policy and Lambda interceptors](https://aws.amazon.com/blogs/machine-learning/secure-ai-agents-with-policy-and-lambda-interceptors-in-amazon-bedrock-agentcore-gateway/)).
 
 A request must pass ALL checks to succeed.
 
@@ -516,15 +557,17 @@ A request must pass ALL checks to succeed.
 
 ### Guidance
 
-- **Use Cedar Policy when:** Access rules are based on user attributes (department, role) that don't change frequently, and simple, auditable, declarative policies are preferred without writing code.
+- **Use Cedar Policy when:** Access rules are based on claims the token can carry (LedgerLens: `customer_id`) and on the tool input, and simple, auditable, declarative policies are preferred without writing code.
 - **Use Interceptors when:** Permissions are dynamic (stored in a DB), external services need to be called for authorization decisions, schema translation or PII redaction is needed, or the IdP doesn't support token enrichment.
-- **Use both when:** Cedar handles the base rules (e.g., "only finance can access financial tools"), and interceptors handle edge cases (e.g., "but not during maintenance windows" or "only for specific tenants").
+- **Use both when:** Cedar handles the base rules (e.g., "a login only touches its own customer"), and interceptors handle edge cases (e.g., "but not during maintenance windows" or "only for specific tenants").
 
 ---
 
 ## 5. Using Cognito User Groups with Cedar Policy
 
 For teams staying with Cognito who want to leverage native Cognito groups instead of hardcoded mappings.
+
+LedgerLens already has one group, `evaluators`. The agent reads it from the **user's** JWT (`cognito:groups`, in `agent/ledgerlens/tools/eval_override.py`) to let evaluation logins switch the model, not from the machine token. Groups suit role-like rules ("support agents may use the read tools"). They don't replace the `sub` → `customer_id` mapping: a group per customer doesn't scale.
 
 ### 5a. What Are Cognito User Groups?
 
@@ -594,7 +637,7 @@ User Auth Token (has groups):     M2M Token (NO groups):
 
 The Pre-Token Lambda can call the Cognito `AdminListGroupsForUser` API to fetch the user's actual group memberships and inject them as custom claims in the M2M token.
 
-This replaces the hardcoded demo mapping (UUID-to-group map) with real, dynamic group-based logic.
+This replaces the placeholder `USER_ROLE_MAP` (sub-to-department/role map) with real, dynamic group-based logic. Keep the `customer_id` lookup: Cedar still needs it.
 
 ```python
 import boto3
@@ -625,8 +668,8 @@ def lambda_handler(event, context):
     # --- REPLACES UUID-BASED USER_ROLE_MAP ---
     # Fetch user's ACTUAL Cognito groups.
     # Note: verified_user_id is the Cognito sub (UUID). AdminListGroupsForUser
-    # requires the Cognito username (which is the email in FAST). Resolve the
-    # UUID to username via ListUsers first, then call AdminListGroupsForUser.
+    # requires the Cognito username. Resolve the UUID to the username via
+    # ListUsers first, then call AdminListGroupsForUser.
     user_groups = get_user_groups(verified_user_id)
     
     # Determine department and role from groups
@@ -638,6 +681,7 @@ def lambda_handler(event, context):
         "accessTokenGeneration": {
             "claimsToAddOrOverride": {
                 "user_id": verified_user_id,
+                "customer_id": _lookup_customer_id(verified_user_id),  # unchanged; Cedar needs it
                 "department": department,
                 "role": role,
                 "user_groups": ",".join(user_groups),  # e.g., "finance,admin"
@@ -652,8 +696,10 @@ def get_user_groups(user_id):
     """Fetch user's Cognito groups via Admin API.
 
     Note: AdminListGroupsForUser requires the Cognito username, not the sub.
-    In FAST, the username is the user's email. The sub (UUID) must be resolved
-    to the username via ListUsers before calling AdminListGroupsForUser.
+    The sub (UUID) must be resolved to the username via ListUsers before
+    calling AdminListGroupsForUser. The Lambda's role needs
+    cognito-idp:ListUsers and cognito-idp:AdminListGroupsForUser, which the
+    current pre-token Lambda doesn't have.
     """
     try:
         # Resolve UUID to username (AdminListGroupsForUser requires username)
@@ -773,21 +819,22 @@ This approach keeps complex group logic in the Lambda, while Cedar policies rema
 
 ## 6. Evolution Paths
 
-A summary of the three paths from the current demo architecture:
+A summary of the three paths from the current LedgerLens architecture:
 
 ```
-Current Demo (Cognito + hardcoded user mapping in Pre-Token Lambda)
+Current (Cognito + hard-coded sub → customer_id map in the Pre-Token Lambda)
     │
-    ├── Path 1: Keep Cognito, use real groups
-    │   ├── Replace hardcoded mapping with AdminListGroupsForUser
+    ├── Path 1: Keep Cognito, use real groups for role-like rules
+    │   ├── Replace the placeholder USER_ROLE_MAP with AdminListGroupsForUser
+    │   ├── Keep the customer_id lookup
     │   ├── Cedar Policy checks group-based claims
     │   └── See: Section 5
     │
     ├── Path 2: Swap IdP that supports token enrichment
     │   ├── Replace Cognito with Okta/Auth0/Entra
-    │   ├── Use IdP's native token hook (replaces Pre-Token Lambda)
+    │   ├── Use IdP's native token hook (replaces Pre-Token Lambda); it must emit customer_id
     │   ├── Cedar Policy remains unchanged
-    │   └── See: Section 2
+    │   └── See: Sections 2 and 8
     │
     └── Path 3: Swap to any IdP + Gateway Interceptors
         ├── No token enrichment needed
@@ -807,10 +854,12 @@ Yes. The Gateway's CUSTOM_JWT authorizer works with any OAuth 2.0 / OIDC-complia
 **Q2: What's the minimum change to swap IdPs?**
 
 If the new IdP supports token enrichment:
-1. Change the Gateway authorizer's discovery URL
-2. Change the Runtime's token endpoint call
-3. Replace the Pre-Token Lambda with the IdP's native token hook
-4. Everything else (Cedar Policy, targets) stays the same
+1. Change the Gateway authorizer's discovery URL and allowed client
+2. Rewrite the Runtime's token call (`get_gateway_access_token()` in `agent/utils/auth.py`)
+3. Replace the Pre-Token Lambda with the IdP's native token hook, mapping the user to a `customer_id` claim
+4. Everything else (Cedar Policy, agent hooks, targets) stays the same
+
+[Section 8](#8-replacing-cognito-for-the-machine-token) lists the files.
 
 **Q3: Do interceptors replace Cedar Policy?**
 
@@ -822,15 +871,16 @@ Either can be used alone, or both together for defense-in-depth.
 
 **Q4: How to choose between Approach A and B?**
 
-- **Choose Approach A** if the IdP supports token enrichment and access rules are relatively static (based on user attributes like department/role)
+- **Choose Approach A** if the IdP supports token enrichment and access rules are relatively static (based on user attributes like the linked customer)
 - **Choose Approach B** if the IdP doesn't support token enrichment, OR if dynamic permissions, schema translation, PII redaction, or multi-tenant isolation is needed
 
 **Q5: Can both Cedar Policy and interceptors be used together?**
 
 Yes. When both are active:
 1. Gateway authorizer validates the token first
-2. Cedar Policy Engine evaluates next (if configured)
-3. Interceptors fire (request before target, response after target)
+2. Request interceptor fires
+3. Cedar Policy Engine evaluates the request as the interceptor left it (if configured)
+4. Target runs, then the response interceptor fires
 
 A request must pass ALL checks. This provides defense-in-depth.
 
@@ -843,6 +893,130 @@ Not directly in M2M tokens. The `cognito:groups` claim only appears in user auth
 Yes, because:
 1. The Gateway authorizer validates the M2M token first (proving the caller is a legitimate Runtime)
 2. The custom header (`X-User-Id`) is only readable by the interceptor Lambda (with `passRequestHeaders: true`)
-3. The LLM do not have access to HTTP headers — they exist only in the transport layer
+3. The LLM does not have access to HTTP headers — they exist only in the transport layer
 
 The security boundary is enforced at the Gateway level. If someone tries to call the Gateway directly (without a valid M2M token), the authorizer rejects them before the interceptor even fires.
+
+---
+
+## 8. Replacing Cognito for the machine token
+
+This section lists, file by file, what changes when the Runtime → Gateway machine token comes from another IdP. It was moved here from [RUNTIME_GATEWAY_AUTH.md](RUNTIME_GATEWAY_AUTH.md), which describes the current Cognito flow step by step. It follows Approach A: the new IdP enriches the token, and Cedar stays.
+
+### 8a. Scope
+
+Three things use Cognito for the machine token today:
+1. **The Gateway's JWT authorizer:** it trusts the user pool's discovery URL and accepts only the machine client.
+2. **The agent's token call:** `get_gateway_access_token()` in `agent/utils/auth.py` calls Cognito's `/oauth2/token`.
+3. **The token enrichment:** the V3 pre-token Lambda adds `customer_id`.
+
+A fourth piece is deployed but unused: the OAuth2 credential provider `ledgerlens-bank-assistant-runtime-gateway-auth`, for the commented-out `@requires_access_token` path (see [IDENTITY_POLICY.md](IDENTITY_POLICY.md#approach-2-commented-out-requires_access_token)).
+
+### 8b. What the new IdP must support
+
+- OAuth 2.0 client credentials grant (`grant_type=client_credentials`)
+- OIDC discovery (`.well-known/openid-configuration`), for JWKS-based JWT validation
+- A confidential client with a client secret
+- Configurable scopes on the client
+- A way to tell the token hook who the signed-in user is, and to add a `customer_id` claim to the machine token. Without it, use Approach B.
+
+Most enterprise IdPs support the first four natively; check the fifth in your IdP's documentation (section 2 lists the usual hooks).
+
+**AgentCore Identity vendors** (relevant only to the OAuth2 credential provider):
+1. **Built-in providers**, configured and maintained by AWS: Amazon Cognito, Auth0 by Okta, Atlassian, CyberArk, Dropbox, Facebook, FusionAuth, GitHub, Google, HubSpot, LinkedIn, Microsoft, Notion, Okta, OneLogin, Ping Identity, Reddit, Salesforce, Slack, Spotify, Twitch, X, Yandex, Zoom.
+2. **`CustomOauth2`**, which this stack uses: any OIDC-compliant IdP with a discovery endpoint.
+
+The stack uses `CustomOauth2` even for Cognito: the built-in `AmazonCognito` vendor is aimed at user-delegated (Authorization Code) flows, while this is a client credentials flow. It also keeps the provider IdP-portable: only the discovery URL and client credentials change.
+
+### 8c. CDK changes
+
+**1. `createMachineAuthentication()` in `infra-cdk/lib/backend-construct.ts`: full replacement.**
+
+It is Cognito-specific: it creates the `UserPoolResourceServer`, the machine `UserPoolClient` and the `MachineClientSecret`. For another IdP, you create the client in the IdP's own console or tooling. The replacement must produce:
+- **`client_id`:** used by the Gateway authorizer (`allowedClients`), the agent, and the credential provider (`ClientId`).
+- **`client_secret`:** stored in Secrets Manager at `/<stack>/machine_client_secret`, with the same `secretsmanager.Secret` pattern. `auth.py` and `test-gateway.py` read that exact name.
+- **Discovery URL:** used by the Gateway authorizer and the credential provider (`DiscoveryUrl`).
+
+Keep the SSM names too. `createCognitoSSMParameters()` writes `machine_client_id`, and `cognito_provider` as the host the agent posts to (`https://<cognito_provider>/oauth2/token`). Renaming them isn't cosmetic: `auth.py` and `test-gateway.py` read them by name. Either store the new IdP's token host under `cognito_provider`, or change both files.
+
+**2. `createAgentCoreGateway()`: discovery URL, allowed client, IAM.**
+
+Change A, the discovery URL:
+
+```typescript
+// Current (Cognito):
+const cognitoIssuer = `https://cognito-idp.${this.region}.amazonaws.com/${this.userPool.userPoolId}`
+const cognitoDiscoveryUrl = `${cognitoIssuer}/.well-known/openid-configuration`
+
+// Any OIDC-compliant IdP:
+const discoveryUrl = "<idp-issuer-url>/.well-known/openid-configuration"
+```
+
+Change B, the authorizer (L2):
+
+```typescript
+authorizerConfiguration: agentcore.GatewayAuthorizer.usingCustomJwt({
+  discoveryUrl: discoveryUrl,                 // replaces cognitoDiscoveryUrl
+  allowedClients: ["<new-idp-client-id>"],    // replaces this.machineClient.userPoolClientId
+}),
+```
+
+If the new IdP's tokens don't identify the client the way Cognito's do, `CustomJwtConfiguration` also accepts `allowedAudience` and `allowedScopes`.
+
+Change C, remove the Cognito-specific grants from `GatewayRole`: `cognito-idp:DescribeUserPoolClient` and `cognito-idp:InitiateAuth`. Other IdPs are reached through their public OIDC and JWKS endpoints, which need no AWS IAM permission.
+
+**3. The pre-token Lambda: replaced by the IdP's hook.**
+
+`cognito-construct.ts` creates it and `infra-cdk/lambdas/pretoken-v3/index.py` holds the mapping. The IdP's hook must do the same job: take the signed-in user and emit `customer_id` (a string, `""` when there is no customer). `USER_CUSTOMER_IDS_MAP` is keyed by Cognito `sub` values, so the mapping has to be rebuilt with the new IdP's user IDs.
+
+**4. The OAuth2 credential provider: values only, or remove it.**
+
+The `oauth2-provider` Lambda is already IdP-agnostic: it calls `create_oauth2_credential_provider` with `credentialProviderVendor="CustomOauth2"` and a discovery URL. Only the custom resource's properties change:
+
+```typescript
+const runtimeCredentialProvider = new cdk.CustomResource(this, "RuntimeCredentialProvider", {
+  serviceToken: oauth2Provider.serviceToken,
+  properties: {
+    ProviderName: providerName,
+    ClientSecretArn: this.machineClientSecret.secretArn, // same pattern, new IdP secret
+    DiscoveryUrl: discoveryUrl,                          // new IdP discovery URL
+    ClientId: "<new-idp-client-id>",                     // new IdP client_id
+  },
+})
+```
+
+To use a built-in vendor instead, change `credentialProviderVendor` in `handle_create` and `handle_update`. Since the live path doesn't use this provider, removing it (with the runtime role's Token Vault grants) is also an option.
+
+**5. `createAgentCoreRuntime()`: no change for the machine token.** `STACK_NAME` stays; `GATEWAY_CREDENTIAL_PROVIDER_NAME` matters only for the unused provider.
+
+### 8d. Agent and script changes
+
+- **`get_gateway_access_token()`** in `agent/utils/auth.py` is Cognito-specific. It builds the token URL from `cognito_provider`, sends Basic auth, asks for the scopes `<stack>-gateway/read` and `/write`, and passes the user as `aws_client_metadata`. Rewrite it for the new IdP's token endpoint and its way of passing the user.
+- **`extract_customer_id_from_token()`** stays, as long as the claim is a top-level string named `customer_id`.
+- **`create_gateway_mcp_client()`, `CustomerIdHook`, `ConfirmationHook`:** no change.
+- **`test-scripts/test-gateway.py`** copies the Cognito token call; update it the same way.
+
+### 8e. User sign-in (Client → Runtime)
+
+The user's sign-in is a separate flow, but LedgerLens ties the two together through the user's ID. If users also move to the new IdP:
+- **Runtime authorizer:** `RuntimeAuthorizerConfiguration.usingJWT(<discovery URL>, [<web client ID>])` in `createAgentCoreRuntime()`.
+- **Frontend config:** `scripts/deploy-frontend.py` writes `authority` and `client_id` into `aws-exports.json` from the Cognito stack outputs.
+- **Agent:** `extract_user_id_from_context()` reads the `sub` claim, and the evaluation override reads `cognito:groups`.
+- **Mapping:** the user IDs that key the `customer_id` mapping change.
+
+### 8f. Summary: what changes vs. what doesn't
+
+**Changes:**
+- `createMachineAuthentication()`: full replacement; must produce `client_id`, `client_secret` and a discovery URL.
+- Gateway authorizer: discovery URL and allowed client.
+- `GatewayRole`: drop `cognito-idp:DescribeUserPoolClient` and `cognito-idp:InitiateAuth`.
+- Pre-token Lambda: replaced by the IdP's hook, which must emit `customer_id`.
+- `agent/utils/auth.py` (`get_gateway_access_token()`) and `test-scripts/test-gateway.py`.
+- SSM and Secrets Manager names: keep them, or update every reader.
+- OAuth2 credential provider properties, or remove it.
+
+**No change:**
+- `gateway/policies/policy.cedar`, as long as the claim stays `customer_id`.
+- `create_gateway_mcp_client()`, `CustomerIdHook`, `ConfirmationHook`.
+- The tool Lambdas: they receive tool input only.
+- The `oauth2-provider` Lambda code.

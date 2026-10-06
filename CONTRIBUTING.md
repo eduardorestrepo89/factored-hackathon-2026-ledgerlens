@@ -1,158 +1,66 @@
-Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0
+# Contributing to LedgerLens
 
-# Contributing to the Fullstack AgentCore Solution Template (FAST)
+How the team works on this repo: [eduardorestrepo89/ledgerlens-bank-assistant](https://github.com/eduardorestrepo89/ledgerlens-bank-assistant).
 
-Thank you for your interest in contributing to the Fullstack AgentCore Solution Template (FAST)! This document provides guidelines and instructions for contributing to this project.
+## Setup
 
-## Table of Contents
+You need git, Python 3.11+, Node.js 20.19+ or 22.12+ and npm, and the AWS CLI v2 with the `ledgerlens` profile for anything that touches AWS. Docker is needed only for a local CDK deploy; the team deploys through CodeBuild instead. On Windows, run the bash commands and `make` from Git Bash.
 
-- [Contributing to the Fullstack AgentCore Solution Template (FAST)](#contributing-to-the-fullstack-agentcore-solution-template-fast)
-  - [Table of Contents](#table-of-contents)
-- [Code of Conduct](#code-of-conduct)
-  - [Use of AI Coding Assistants by Developers (Q CLI, Cline, Kiro, etc)](#use-of-ai-coding-assistants-by-developers-q-cli-cline-kiro-etc)
-- [FAST Tenets](#fast-tenets)
-- [Integrated Feature, or Documentation?](#integrated-feature-or-documentation)
-- [Getting Started](#getting-started)
-  - [Development Environment Setup](#development-environment-setup)
-  - [Project Structure](#project-structure)
-- [Development Workflow](#development-workflow)
-  - [Branching Strategy](#branching-strategy)
-  - [Making Changes](#making-changes)
-  - [Testing Your Changes](#testing-your-changes)
-- [Pull Request Process](#pull-request-process)
-- [Coding Standards](#coding-standards)
-- [Documentation](#documentation)
-- [Reporting Bugs/Feature Requests](#reporting-bugsfeature-requests)
+Setup steps: [docs/installation.md](docs/installation.md). Folder layout: [docs/structure.md](docs/structure.md).
 
-# Code of Conduct
+## Branches and pull requests
 
-This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct) (even though this code is not open sourced).
-For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or contact
-opensource-codeofconduct@amazon.com with any additional questions or comments.
+`stage` is the team's integration branch. `main` still tracks the upstream FAST template, so don't open pull requests into it.
 
-## Use of AI Coding Assistants by Developers (Q CLI, Cline, Kiro, etc)
-Use of AI coding assistants is encouraged when developing the core FAST code base. However, **the developer leveraging AI should be able to explain every line of code that AI wrote, without the help of AI**. So, use it slowly, and understand what is doing before hitting "`y`".
+1. Branch from `origin/stage`, named `feat/<name>` for new behavior or `fix/<name>` for a fix:
 
-Note, the above guideline applies to FAST core _developers_ who are _contributing_ to the FAST code base. FAST is designed for its _users_ to use AI coding assistants to build a full stack application with FAST as a starting point. _Users_ can hold themselves to whatever standards they prefer.
-
-# FAST Tenets
-Contributions must comply with the five core tenets of the FAST solution:
-1. **Simplicity, simplicity, simplicity**: The starter pack should be just that, a starter pack. It should be bare bones and without any frills, to keep it as easy to adopt as possible. Developers, who are often scientists and not SDEs, should start with the starter pack to handle most of the undifferentiated heavy lifting components of building a full stack application then add onto it, not start with a bloated package and have to remove unnecessary features.
-2. **Adoptability though Documentation**: The starter pack should be extremely well documented. While non-core features may not exist in the code base, approaches for implementing them should appear in markdown files in the repository. Users of FAST should instruct their coding assistants to prioritize following this documentation above all else. 
-3. **Vibe Friendly**: The starter pack should have READMEs and guides demonstrating how to use adapt it according to best practices with vibe coding. It should have opinions on recommended MCP servers and workflows for development. It should show developers that they don’t need to understand any React to modify the frontend.
-4. **Opinionated Language and Framework**: Python for the backend as it is the language everyone (including LLMs) is most comfortable with. React for the frontend to keep it as close to production grade as possible. CDK for the infrastructure as code for the modularity.
-5. **Single threaded owner**: The starter pack should always have a single-threaded owner/team who maintains it and decides which features are important enough to add into code vs into documentation files (see Tenets #1 and #2).
-
-# Integrated Feature, or Documentation?
-FAST is a _documentation heavy solution_. Rather than supporting all possible configurations of agentic applications and requirements out-of-the-box, FAST will support basic starting points for common applications and will have extensive documentation (markdown files) describing how to build on the baseline with best practices so developers can use coding assistants to build exactly what they need.
-
-In this vein, "contributing" to the FAST code base will often be in form of a single, well-authored markdown file which may or may not even contain code snippets. **It is recommended that developers research best practices, implement their desired feature, and submit a pull request for review.** It is possible that instead of accepting the pull request, the contributor to be asked to convert their contribution into a markdown document instead. That doesn't mean the effort coding up the PR was a waste! It instead means that the effort will serve future FAST users more effectively if it is condensed into a documentation file containing code snippets. This is the manifestation of enforcing Tenets #1 and #2 above.
-
-# Getting Started
-This section describes how _FAST contributors_ should get started. If you are a _FAST user_ (a scientist or engineer leveraging FAST to build a fullstack agentic solution for a customer engagement) please see the top level repository README instead.
-
-## Development Environment Setup
-
-1. **Prerequisites**:
-   - Bash shell (Linux, MacOS)
-   - AWS CLI
-   - AWS SAM CLI
-   - Python 3.11 or later
-   - Docker
-
-2. **Fork and Clone the Repository**:
-   TODO
-
-3. **Install Dependencies and test local build**:
-   See the [Deployment Guide](docs/DEPLOYMENT.md) for prerequisites and setup instructions.
-   
-   For frontend-specific development, see [Frontend README](frontend/README.md).
-   
-   For infrastructure development, see [Infrastructure README](infra-cdk/README.md).
-
-## Project Structure
-
-Familiarize yourself with the project structure:
-
-- `agent/`: The LedgerLens agent (`agent/ledgerlens/`) and shared agent utilities (`agent/utils/`) deployed into AgentCore
-- `docs/`: Documentation files
-- `frontend/`: Web UI components (React)
-- `gateway/`: Shared utilities and tools for AgentCore Gateway integration
-- `infra-cdk/`: Infrastructure as Code (CDK)
-- `scripts/`: Utility scripts for development, testing, and deployment
-- `tests/`: Unit and integration tests
-
-# Development Workflow
-
-
-## Branching Strategy
-
-1. Create a branch from `main` for your work:
    ```bash
-   git checkout -b feature/your-feature-name
+   git fetch origin
+   git switch -c feat/<name> origin/stage
    ```
-   
-   Use prefixes like `feature/`, `fix/`, `docs/` to indicate the type of change.
 
-## Making Changes
+2. Commit in small steps. Each message says what changed and why; the history uses `type(scope): subject`, for example `fix(prompt): v10 after the persona eval` or `feat(frontend): biometric check before a card block goes to the agent`. Put the reason in the body when the subject can't carry it.
+3. Run the checks below, then open a pull request into `stage`. Say what changed, why, and how you tested it.
 
-1. Make your changes in the appropriate files
-2. Keep changes focused on a single issue or feature
-3. Write/update tests as necessary
-4. Ensure code passes linting rules:
-   - For Python code: `ruff` is configured for this project
-   - For UI code: ESLint is configured in `frontend/.eslintrc`
+## Checks before a pull request
 
-## Testing Your Changes
+The lint and security workflows in `.github/workflows` run only on pushes and pull requests to `main`. A pull request into `stage` gets no CI, so run the checks yourself.
 
-1. **Local Testing**:
-   ```bash
-   # Run linting and formatting checks
-   make all
-   
-   # For frontend-specific testing
-   cd frontend
-   npm run lint
-   cd ..
-   ```
-   
-   For comprehensive testing procedures, see [Scripts README](scripts/README.md).
+**Lint:**
+- `make lint` fixes what it can: `ruff check --fix`, `ruff format`, ESLint with `--fix` and Prettier with `--write` on `frontend/src`.
+- `make lint-cicd` only checks, as CI does, and fails on the first problem.
+- ESLint's config is `frontend/eslint.config.mjs`. Ruff's is `ruff.toml`, which takes precedence over the `[tool.ruff]` table in `pyproject.toml` and leaves `agent/` out. Prettier's is `.prettierrc`.
+- `make all` fails: it depends on a `test` target that the Makefile doesn't define yet. Run the tests directly.
 
-2. **Integration Testing**:
-   TODO
+**Tests:**
+- Python: `python -m pip install pytest -r agent/ledgerlens/requirements.txt -r data_load/requirements.txt`, then `python -m pytest tests/unit`. Don't use `requirements-dev.txt`: its `aws-cdk-lib` and `constructs` pins conflict, so pip can't install it.
+- Frontend: `cd frontend && npm run build && npm test` (Vitest). `build.test.ts` checks `frontend/build`, so build first.
+- Infrastructure: `cd infra-cdk && npm test` (Jest).
 
-# Pull Request Process
+Details and what each suite covers: [docs/testing.md](docs/testing.md).
 
-1. **Update Documentation**: Ensure all documentation affected by your changes is updated
-2. **Run Tests**: Verify that your changes pass all tests
-3. **Create a Pull Request**: Submit a PR to the `main` branch on [GitHub](https://github.com/awslabs/fullstack-solution-template-for-agentcore) with a clear description of:
-   - What the changes do
-   - Why the changes are needed
-   - Any relevant context or considerations
-4. **Address Review Feedback**: Be responsive to review comments and make requested changes
-5. **Merge**: Once approved, your contribution will be merged
+## Changing the system prompt
 
-# Coding Standards
+The prompt is `BASE_SYSTEM_PROMPT` in `agent/ledgerlens/tools/system_prompt.py`. On any change:
+1. Bump `PROMPT_VERSION`.
+2. Add the new version's hash to `PINNED_PROMPT_HASHES` in `tests/unit/test_system_prompt.py`. The test pins each released version, so an unversioned edit fails it.
+3. Add `evals/prompts/<version>.md` with the same text. `tests/unit/eval_harness/test_eval_cases.py` checks that the file named by `PROMPT_VERSION` matches the released prompt.
 
-- **Python**: Follow PEP 8 style guidelines
-- **JavaScript/TypeScript**: Follow the ESLint configuration in the project
-- **Documentation**: Update relevant documentation for any changes to functionality
-- **Commit Messages**: Write clear, descriptive commit messages
-- **Versioning**: Follow semantic versioning principles
+## Running evaluations
 
-# Documentation
+The harness in `evals/` drives the deployed agent, so every run costs money.
+- Run with `--dry-run` first: it prints the job list and a cost estimate.
+- Always pass `--max-cost`. It stops new sessions once the estimate passes the limit (the default is $15).
+- Follow the rules in [evals/README.md](evals/README.md): no case may click Yes on `block_credit_card` or `open_claim`, and nobody edits the pre-token Lambda's `USER_CUSTOMER_IDS_MAP` during a run.
 
-- Update `README.md` when adding significant features
-- Add detailed documentation to `/docs` for new patterns or major features
-- Include code comments for complex logic or non-obvious implementations
-- Update configuration examples if you modify the configuration structure
+## Deploying
 
-# Reporting Bugs/Feature Requests
+Which command each kind of change needs is in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), under Updating. Always set `AWS_PROFILE=ledgerlens`: the default profile points to a different account.
 
-We welcome you to use the [GitHub issue tracker](https://github.com/awslabs/fullstack-solution-template-for-agentcore/issues) to report bugs or suggest features for the FAST solution.
+## Secrets
 
+Never commit credentials. The organizer's S3 keys go into Secrets Manager from a file outside the repo. The evaluation logins' passwords live in `evals/.env`, which is gitignored. `frontend/public/aws-exports.json` is generated by `scripts/deploy-frontend.py` and also gitignored.
 
----
+## Documentation
 
-Thank you for contributing to the Fullstack AgentCore Solution Template (FAST)!
+Update the docs your change affects in the same pull request: [README.md](README.md), the guides in `docs/`, and the component READMEs (`frontend/`, `agent/ledgerlens/`, `evals/`). `docs/superpowers/specs/` and `docs/superpowers/plans/` are dated records; add a new one for a new design instead of rewriting an old one.

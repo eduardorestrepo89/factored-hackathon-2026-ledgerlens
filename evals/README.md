@@ -7,6 +7,8 @@ Evaluations, and traced in AgentCore Observability. Design:
 
 ## Setup (once)
 
+The commands below use the Windows venv path `evals/.venv/Scripts/python`; on Linux and macOS it is `evals/.venv/bin/python`. The harness picks the `ledgerlens` AWS profile and `us-east-1` itself (`evals/config.py`); only `aws_eval` lets an `AWS_PROFILE` you already set win.
+
 ```bash
 python -m venv evals/.venv
 evals/.venv/Scripts/python -m pip install -r evals/requirements.txt
@@ -16,7 +18,14 @@ evals/.venv/Scripts/python -m evals.eval_users create --apply    # creates them;
 evals/.venv/Scripts/python -m evals.eval_users add-to-group --apply
 ```
 
-Observability: CloudWatch Transaction Search must be on, plus Gateway tracing (console).
+`create --apply` also writes the logins' subs into `USER_CUSTOMER_IDS_MAP` in
+`infra-cdk/lib/cognito-construct.ts`, so each login gets its persona's `customer_id`. That edit
+takes effect only after you commit it and redeploy the main stack
+(`AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant`). A
+redeploy resets the pre-token Lambda's map to the committed file, so an uncommitted map is lost.
+
+Observability: CloudWatch Transaction Search must be on, plus Gateway tracing (console). See
+`docs/OBSERVABILITY.md`.
 
 ## Run
 
@@ -32,8 +41,16 @@ AWS_PROFILE=ledgerlens $PY -m evals.aws_eval evals/results/baseline-v10
 $PY -m evals.report evals/results/baseline-v10 --out evals/results/report
 ```
 
-- **Interrupted run:** rerun with `--resume`.
+- **Interrupted run:** rerun with `--resume`. It skips the sessions already recorded without a
+  harness error. Without `--resume`, the runner refuses an `--out` folder that already has
+  `sessions.jsonl`.
 - **Cost:** `--max-cost` (default $15) stops new sessions once the estimate passes it.
+- **Subset:** `--cases E4a E5c` runs only those case ids.
+- **Parallel sessions:** `--concurrency` (default 4) is how many sessions run at once.
+- **P07 precheck:** before a run that includes persona P07, the runner calls the
+  `ledgerlens-get-session-context` Lambda directly. It stops unless P07's card 4497 is Active
+  with no open case. The P07 cases expect the agent to propose blocking that card, so a card or
+  case left changed by earlier testing would break them. `--skip-precheck` skips the check.
 
 ## Files
 
@@ -102,7 +119,8 @@ the `LedgerLens-Evaluation` dashboard:
   `TrajectoryInOrderMatch`) with `errorCode: SpanEventParsingException`. Read-only sessions score
   normally. Seen on 2026-10-05 with strands-agents 1.32.0, the custom `ConfirmationHook`
   (`agent/ledgerlens/tools/confirmation_hook.py`, a `BeforeToolCallEvent.interrupt()`),
-  aws-opentelemetry-distro 0.16.0 and bedrock-agentcore 1.24.0.
+  aws-opentelemetry-distro 0.16.0, the deployed agent on bedrock-agentcore 1.4.7, and the
+  harness's `EvaluationClient` from bedrock-agentcore 1.24.0 (`evals/requirements.txt`).
 - **Likely cause:** an interrupted tool call leaves an `execute_tool` span without a result, and
   the resumed call adds a second one; the evaluators' span parser rejects that shape.
 - **Effect:** E1a, E1b, E2b, E4a and E4b are graded locally only; the dashboard header says so.

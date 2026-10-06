@@ -1,49 +1,43 @@
-# Fullstack AgentCore Solution Template - Infrastructure
+# LedgerLens infrastructure (CDK)
 
-This directory contains the AWS CDK infrastructure code for deploying the Fullstack AgentCore Solution Template.
+This folder is the AWS CDK app (TypeScript) that deploys LedgerLens. This README covers working on the CDK code. The full deploy guide (team route, frontend, data load, cleanup) is [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
+
+## Stacks
+
+The app builds two stacks (`bin/ledgerlens-cdk.ts` → `buildStacks` in `lib/ledgerlens-app.ts`):
+
+| Stack | Code | Holds |
+|---|---|---|
+| `<stack_name_base>-data` (`ledgerlens-bank-assistant-data`) | `lib/data-stack.ts`, `lib/data-construct.ts` | Aurora DSQL, its VPC endpoint, the tool IAM roles and the data load pipeline |
+| `<stack_name_base>` (`ledgerlens-bank-assistant`) | `lib/ledgerlens-main-stack.ts` | Amplify, Cognito and the backend, as three constructs in this one stack |
+
+The main stack's constructs are `AmplifyHostingConstruct`, `CognitoConstruct` and `BackendConstruct` (Runtime, Memory, Gateway, Cedar, guardrail, tool Lambdas, feedback API). They are not separate stacks.
+
+The tool Lambdas use the data stack's VPC, security group, roles and DSQL host, so the main stack depends on the data stack and deploys after it. For every resource each stack creates, see [What each stack creates](../docs/DEPLOYMENT.md#what-each-stack-creates).
 
 ## Prerequisites
 
-- Node.js 18+
-- AWS CLI configured with appropriate credentials
-- AWS CDK CLI installed: `npm install -g aws-cdk`
+- **Node.js 20+ and npm.** `aws-cdk-lib` 2.260 requires Node 20.
+- **AWS CLI** with the `ledgerlens` profile.
+- **Docker that builds `linux/arm64`.** `cdk synth`, `diff` and `deploy` bundle the Python Lambdas in Docker, and `deploy` also builds the agent image, all for ARM64. On an x86_64 machine you need ARM64 emulation (see [Prerequisites](../docs/DEPLOYMENT.md#prerequisites)). The team avoids local Docker altogether with `scripts/deploy-with-codebuild.py`.
+- **CDK CLI:** none to install. `aws-cdk` is a dev dependency, so `npx cdk` runs the pinned version.
 
-## Minimal IAM Policy for Deployment
+## Getting started
 
-The file `minimal-deploy-policy.json` contains the minimum IAM permissions required to deploy this CDK application. This policy includes 30 actions across 7 statements covering CloudFormation, S3, SSM, ECR, IAM PassRole, and Amplify.
-
-**Important:** This policy assumes CDK bootstrap has already been run in the target account. It does not include permissions for `cdk bootstrap`. To bootstrap a fresh account, you'll need additional IAM permissions (CreateRole, AttachRolePolicy, PutRolePolicy, etc.) - refer to the AWS CDK Bootstrap documentation for details.
-
-**Security Note:** Some wildcards are present for resources (e.g., `arn:aws:cloudformation:*:*:stack/*`). For production environments, replace these with your specific resource ARNs to further scope down permissions.
-
-## Getting Started
-
-All of the following commands assuming you are in the top of the `infra-cdk/` directory
-### Install Dependencies
+Run these from `infra-cdk/`.
 
 ```bash
-npm install
-```
-
-### Build TypeScript
-
-```bash
-npm run build
-```
-
-### Bootstrap CDK (First Time Only)
-
-```bash
-npx cdk bootstrap
-```
-
-### Deploy
-
-```bash
+export AWS_PROFILE=ledgerlens
+npm ci
+npx cdk bootstrap          # once per account/region
 npx cdk deploy --all
 ```
 
-`deploy_scope` in `config.yaml` decides what that deploys:
+With `deploy_scope: full` the app has two stacks, so plain `npx cdk deploy` stops and asks which stacks to use. Pass `--all` or a stack name.
+
+### What `--all` deploys
+
+`deploy_scope` in `config.yaml` decides:
 
 - `full` (default): `<stack_name_base>-data` (Aurora DSQL and its load pipeline), then
   `<stack_name_base>` (Amplify, Cognito, the agent, the Gateway and the tool Lambdas).
@@ -51,174 +45,178 @@ npx cdk deploy --all
 
 Override it for one run with `npx cdk deploy --all -c deploy_scope=data`.
 
-## Useful Commands
+### After `cdk deploy`
 
-* `npm run build`   - Compile TypeScript to JavaScript
-* `npm run watch`   - Watch for changes and compile automatically
-* `npm run test`    - Run Jest unit tests
-* `npx cdk deploy --all` - Deploy all stacks to your AWS account/region
-* `npx cdk diff`    - Compare deployed stack with current state
-* `npx cdk synth`   - Emit the synthesized CloudFormation template
-* `npx cdk destroy --all` - Remove all deployed resources
+- **The frontend is not published.** CDK creates the Amplify app and its `main` branch with nothing deployed. Run `AWS_PROFILE=ledgerlens python scripts/deploy-frontend.py` from the repo root.
+- **A new data stack has an empty database.** Set the organizer's S3 secret once, then run `AWS_PROFILE=ledgerlens make load-data` from the repo root. Both steps are in [First deployment](../docs/DEPLOYMENT.md#first-deployment).
+
+### Team route: CodeBuild
+
+`AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py [STACK ...]` runs the same `cdk bootstrap` and `cdk deploy` on an ARM CodeBuild machine, so it needs no local Node, CDK or Docker. See [scripts/README.md](../scripts/README.md).
+
+## Useful commands
+
+* `npm run build`: compile with `tsc`. Use it as a type check: `cdk` runs the `.ts` files through `ts-node` (`cdk.json`).
+* `npm run watch`: compile on every change.
+* `npm test`: run the Jest unit tests. They skip Docker bundling and need no AWS credentials.
+* `npx cdk deploy --all`: deploy both stacks, data first.
+* `npx cdk diff`: compare the deployed stacks with the code.
+* `npx cdk synth`: emit the CloudFormation templates.
+* `npx cdk destroy --all`: delete both stacks, main first. The DSQL cluster stays behind (see [Cleanup](../docs/DEPLOYMENT.md#cleanup)).
 
 ## Configuration
 
-Edit `config.yaml` to customize your deployment:
+`config.yaml` holds every setting. The core of it:
 
 ```yaml
-stack_name_base: "fullstack-agentcore-solution-template"
-
-frontend:
-  domain_name: null  # Optional: Set to your custom domain
-  certificate_arn: null  # Optional: Set to your ACM certificate ARN
+stack_name_base: ledgerlens-bank-assistant   # at most 35 characters
+deploy_scope: full                           # full or data
 
 backend:
-  pattern: "ledgerlens"  # Agent folder under agent/
+  pattern: ledgerlens                        # agent folder under agent/
+  model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+data:
+  as_of: "2026-06-17T23:59:59"               # the bank's "today" for the tools
 ```
 
-## Project Structure
+Every key and its effect is in [Configuration](../docs/DEPLOYMENT.md#configuration).
+
+`lib/utils/config-manager.ts` loads the file and fails the synth on a bad value:
+- `stack_name_base` is required and capped at 35 characters, because AgentCore runtime names derive from it.
+- `deployment_type` must be `docker` or `zip`.
+- `network_mode` must be `PUBLIC` or `VPC`.
+- `deploy_scope` must be `full` or `data`.
+
+### Cached lookups (`cdk.context.json`)
+
+The data stack uses the account's default VPC (`ec2.Vpc.fromLookup` in `data-construct.ts`) and the stack's availability zones. `cdk.context.json` caches both for account `704650059996` in `us-east-1`, so deploys there make no lookup. A deploy to another account or region looks them up again, which needs credentials that can describe the VPC, and writes new entries to `cdk.context.json`. Commit those entries.
+
+## Project structure
 
 ```
 infra-cdk/
 ├── bin/
-│   └── ledgerlens-cdk.ts         # CDK app entry point
+│   └── ledgerlens-cdk.ts            # App entry: reads config.yaml, calls buildStacks
 ├── lib/
-│   ├── ledgerlens-app.ts         # Builds the stacks for deploy_scope
-│   ├── ledgerlens-main-stack.ts  # Main stack: Amplify, Cognito, backend
-│   ├── backend-construct.ts      # AgentCore Runtime, Gateway and tool Lambdas
-│   ├── data-stack.ts             # Data stack: Aurora DSQL and its load pipeline
-│   ├── data-construct.ts
-│   └── utils/                    # Utility functions and constructs
-├── test/
-│   └── ledgerlens-cdk.test.ts    # deploy_scope tests
-├── cdk.json                 # CDK configuration
-├── config.yaml              # Application configuration
+│   ├── ledgerlens-app.ts            # Builds the stacks for deploy_scope
+│   ├── data-stack.ts                # Data stack and its outputs
+│   ├── data-construct.ts            # DSQL, VPC endpoint, tool roles, team bucket, pipeline
+│   ├── ledgerlens-main-stack.ts     # Main stack and its outputs
+│   ├── amplify-hosting-construct.ts # Amplify app, staging bucket, security headers
+│   ├── cognito-construct.ts         # User pool, clients, pre-token Lambda, USER_CUSTOMER_IDS_MAP
+│   ├── backend-construct.ts         # Runtime, Memory, Gateway, Cedar, tool Lambdas, feedback API
+│   └── utils/
+│       ├── config-manager.ts        # Loads and validates config.yaml
+│       ├── agentcore-role.ts        # The Runtime's IAM role
+│       └── agent-guardrail.ts       # The Bedrock guardrail
+├── lambdas/
+│   ├── cedar-policy/                # Custom resource: Cedar policy engine and policy
+│   ├── dsql-read-check/             # Pipeline's last stage: the tools can read the data
+│   ├── feedback/                    # Feedback API handler
+│   ├── oauth2-provider/             # Custom resource: OAuth2 credential provider
+│   ├── pretoken-v3/                 # Cognito V3 pre-token Lambda (customer_id claim)
+│   └── zip-packager/                # Packages the agent when deployment_type is zip
+├── test/                            # Jest tests (below)
+├── cdk.json                         # App command (ts-node) and CDK feature flags
+├── cdk.context.json                 # Cached default VPC and AZs of 704650059996/us-east-1
+├── config.yaml                      # Deployment settings
+├── minimal-deploy-policy.json       # Reference IAM policy for a local deploy (see below)
+├── jest.config.js
 ├── package.json
 └── tsconfig.json
 ```
 
-## Development Workflow
+The Gateway tool Lambdas aren't here: each one's code and schema live in `gateway/tools/<tool>/`, and `backend-construct.ts` builds them.
 
-1. Make changes to TypeScript files in `lib/`
-2. Run `npm run build` to compile
-3. Run `npx cdk diff` to see what will change
-4. Run `npx cdk deploy --all` to deploy changes
+### Tests
+
+| File | Covers |
+|---|---|
+| `ledgerlens-cdk.test.ts` | `deploy_scope`, stack order, the Amplify security headers |
+| `config-manager.test.ts` | `config.yaml` defaults and validation |
+| `backend-gateway.test.ts` | Runtime settings, one Gateway target per tool, the 64-character tool name limit, Cedar actions, the guardrail |
+| `policy-cedar.test.ts` | The forbids in `gateway/policies/policy.cedar` |
+| `data-construct.test.ts`, `data-stack.test.ts` | DSQL access rules, the VPC, the read check, the pipeline, the data stack's outputs |
+
+## Agent image
+
+The Runtime runs a container built from `agent/ledgerlens/Dockerfile` for `linux/arm64`, the only platform AgentCore Runtime accepts. CDK builds it as an image asset and pushes it to the bootstrap stack's `cdk-*` container assets repository. LedgerLens creates no ECR repository of its own.
+
+### Build context
+
+The build context is the repository root, so the Dockerfile can copy the shared `agent/utils/` package next to the agent code.
+
+### Keeping the context small
+
+A large build context (`node_modules/`, `.git/` and so on) makes the "transferring context" step slow and can make CDK deployments hang. The root `.dockerignore` excludes:
+- `node_modules/` directories (root, `frontend/` and `infra-cdk/`)
+- `.git/`
+- build output: `infra-cdk/cdk.out/`, `frontend/dist/`, `dist/`, `build/`, `*.egg-info/`
+- caches: `.ruff_cache/`, `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.coverage`, `htmlcov/`
+- editor folders: `.vscode/`, `.idea/`
+
+### Image contents
+
+The Dockerfile installs `agent/ledgerlens/requirements.txt` and `aws-opentelemetry-distro`, then copies only what the agent imports:
+
+- `agent/ledgerlens/ledgerlens_agent.py` (entry point)
+- `agent/ledgerlens/tools/` → `tools/`
+- `agent/utils/` → `utils/`
+
+It starts the agent under `opentelemetry-instrument`, which sends traces and logs to CloudWatch ([docs/OBSERVABILITY.md](../docs/OBSERVABILITY.md)).
+
+## Minimal IAM policy (`minimal-deploy-policy.json`)
+
+The file has 29 actions in 7 statements:
+- CloudFormation on `stack/*`;
+- S3, SSM and ECR on the CDK bootstrap resources (`cdk-*`);
+- `ecr:GetAuthorizationToken`;
+- `iam:PassRole` on `cdk-*` roles;
+- `amplify:StartDeployment`.
+
+It assumes the account is already bootstrapped. It does not cover `cdk bootstrap`, which needs IAM permissions to create roles and policies.
+
+It is **not enough** for LedgerLens as the code stands:
+- **VPC lookup.** Outside the cached account and region (see [Cached lookups](#cached-lookups-cdkcontextjson)), the default VPC and AZ lookups need the CDK lookup role or `ec2:Describe*` permissions. The policy has neither.
+- **Frontend deploy.** `scripts/deploy-frontend.py` uploads to the main stack's staging bucket, whose name CloudFormation generates (not `cdk-*`). It also calls `amplify get-job` and `amplify get-app`. The policy allows only `amplify:StartDeployment` and `cdk-*` buckets.
+
+Its resources use wildcards such as `arn:aws:cloudformation:*:*:stack/*`. Scope them to your ARNs before using it anywhere that matters. The team doesn't use this policy: it deploys with `deploy-with-codebuild.py`, whose permissions are listed in [scripts/README.md](../scripts/README.md#permissions).
+
+## Development workflow
+
+1. Change the TypeScript in `lib/`.
+2. Run `npm test`.
+3. Run `npx cdk diff` to see what will change.
+4. Run `npx cdk deploy --all`, or name one stack.
+
+Which stack to deploy after each kind of change is in [Updating](../docs/DEPLOYMENT.md#updating).
 
 For faster iteration, use watch mode:
 ```bash
 npm run watch
 ```
 
-## Deployment Details
-
-The CDK deployment creates multiple stacks with a specific deployment order:
-
-### Stack Architecture & Deployment Order
-
-1. **Cognito Stack** (CognitoStack):
-   - Cognito User Pool for user authentication (ESSENTIALS tier for V3 Pre-Token Lambda)
-   - User Pool Client for frontend OAuth flows
-   - User Pool Domain for hosted UI
-   - V3 Pre-Token Lambda for injecting user identity claims into M2M tokens
-
-2. **Backend Stack** (BackendStack):
-   - **Machine Client & Resource Server**: OAuth2 client credentials for service-to-service auth
-   - **AgentCore Gateway**: API gateway for tool integration with Lambda targets
-   - **AgentCore Runtime**: Bedrock AgentCore runtime for agent execution
-   - **Supporting Resources**: IAM roles, DynamoDB tables, API Gateway for feedback
-
-3. **Amplify Hosting Stack** (AmplifyHostingStack):
-   - Amplify app for frontend hosting
-   - Branch configuration for deployments
-   - Custom domain setup (if configured)
-
-### Component Dependencies
-
-Within the Backend Stack, components are created in this order:
-1. **Cognito Integration**: Import user pool from Cognito stack
-2. **Machine Client**: Create OAuth2 client for M2M authentication
-3. **Gateway**: Create AgentCore Gateway, Cedar Policy Engine, and Cedar Policy (depends on machine client)
-4. **Runtime**: Create AgentCore Runtime (independent of gateway)
-
-This order ensures authentication components are available before services that depend on them, while keeping the runtime deployment separate since it doesn't directly depend on the gateway.
-
-### Docker Build Configuration
-
-The agent container builds use a specific configuration to handle the repository structure efficiently:
-
-#### Build Context Strategy
-
-The Docker build context is the repository root, so the Dockerfile at `agent/ledgerlens/Dockerfile` can copy the shared `agent/utils/` package next to the agent code.
-
-#### Docker Context Optimization
-
-**Issue**: Large build contexts (including `node_modules/`, `.git/`, etc.) cause Docker builds to hang during the "transferring context" phase, especially in CDK deployments.
-
-**Solution**: `.dockerignore` file at repository root excludes:
-- `node_modules/` directories (frontend and infra)
-- `.git/` version control data  
-- Build artifacts (`cdk.out/`, `.next/`, `dist/`)
-- Cache directories (`.ruff_cache/`, `__pycache__/`)
-
-**Result**: Build context reduced from ~100MB+ to ~10MB, eliminating hang issues.
-
-#### Image Contents
-
-The Dockerfile installs `agent/ledgerlens/requirements.txt`, then copies only what the agent imports:
-
-- `agent/ledgerlens/ledgerlens_agent.py` (entry point)
-- `agent/ledgerlens/tools/` → `tools/`
-- `agent/utils/` → `utils/`
-
-### Key Resources Created
-
-1. **Backend Stack**: 
-   - Cognito User Pool integration and machine client
-   - AgentCore Gateway with Lambda tool targets
-   - AgentCore Runtime for agent execution
-   - ECR repository for agent container images
-   - CodeBuild project for container builds
-   - DynamoDB table for application data
-   - API Gateway for feedback endpoints
-   - IAM roles and policies
-
-2. **Amplify Hosting Stack**:
-   - Amplify app for frontend deployment
-   - Automatic builds from Git branches
-   - Custom domain and SSL certificate integration
-   - Environment-specific deployments
-
 ## Troubleshooting
 
-### Build Errors
+- **"Since this app includes more than a single stack":** add `--all` or a stack name.
+- **Docker errors or "exec format error":** the machine can't build ARM64. Use `deploy-with-codebuild.py`, or set up ARM64 emulation.
+- **AccessDenied, or "stack does not exist":** the command ran without `AWS_PROFILE=ledgerlens` and reached another account.
+- **A deploy fails:** check the stack's events in the CloudFormation console.
+- **TypeScript errors:** run `npm run build` to see them all.
 
-If you encounter TypeScript compilation errors:
-```bash
-npm run build
-```
+More cases: [Troubleshooting](../docs/DEPLOYMENT.md#troubleshooting).
 
-### Deployment Failures
+### Clean build
 
-Check CloudFormation events in the AWS Console for detailed error messages.
-
-### Clean Build
-
-If you need to start fresh:
 ```bash
 rm -rf node_modules cdk.out
-npm install
+npm ci
 npm run build
 ```
 
-## Testing
-
-Run unit tests:
-```bash
-npm test
-```
-
-## Learn More
+## Learn more
 
 - [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/)
 - [AWS CDK TypeScript Reference](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html)
-- [Bedrock AgentCore Documentation](https://docs.aws.amazon.com/bedrock/)
+- [Amazon Bedrock AgentCore Documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html)

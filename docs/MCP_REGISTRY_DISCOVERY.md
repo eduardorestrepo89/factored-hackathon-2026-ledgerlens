@@ -1,54 +1,36 @@
-# MCP Server Discovery from AWS Agent Registry
+# MCP server discovery from an AWS Agent Registry
 
-Discover MCP servers from an [AWS Agent Registry](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html)
-at agent runtime and **auto-connect** to them, so the registry's approved MCP
-records become live, callable tools on your FAST agent — with **no
-DynamoDB, no UI, and no per-user preferences**. This is a deliberately
-lightweight feature: enable it, point it at a registry, and the agent does the
-rest on each request.
+The agent can discover MCP servers in an [AWS Agent Registry](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry.html) and connect to them on every request. Their tools then sit next to the 9 Gateway tools. The feature needs no DynamoDB table, no UI and no per-user settings.
 
-## How it differs from Dynamic MCP Servers
+It is **off by default** (`backend.mcp_registry.enabled: false` in `infra-cdk/config.yaml`). Read [Security](#security) before turning it on: registry tools bypass the Gateway and Cedar, and they receive the customer's id.
 
-FAST has two, independent ways to add external MCP servers. Pick whichever fits;
-they do not depend on each other.
+## How it works
 
-| | **MCP Registry Discovery** (this doc) | **[Dynamic MCP Servers](MCP_SERVERS.md)** |
-|---|---|---|
-| Source of servers | An AWS Agent Registry, queried at **runtime** | A catalog you declare at **deploy time** in `config.yaml` / `tfvars` |
-| How servers connect | Direct Strands `MCPClient`s on the agent | AgentCore **Gateway targets** |
-| Per-user on/off | No (agent-wide) | Yes (DynamoDB-backed preferences + settings UI) |
-| Extra infrastructure | One IAM statement + two env vars | DynamoDB table, `mcp-prefs` Lambda, API routes, frontend dialog |
-| Best for | "Let the agent use whatever the org has published" | "Curated, per-user-toggleable set of servers" |
+On each request, `create_strands_agent()` in `agent/ledgerlens/ledgerlens_agent.py` does the following when `is_discovery_enabled()` is true:
 
-## Overview
-
-When enabled, on each request the agent:
-
-1. Lists the registry's **Approved** `recordType == "MCP"` records
-   (`list_discoverable_registry_records`, paginated).
-2. Fetches their full descriptors in one batch call
-   (`batch_get_discoverable_registry_record`) and reads each server's
-   streamable-HTTP endpoint from `mcpServer.remotes[0].url`.
-3. Builds a live Strands `MCPClient` for each **public streamable-HTTP** server
-   and adds it to the agent's tools, alongside the Gateway client and Code
-   Interpreter.
+1. `discover_registry_mcp_servers()` (`agent/ledgerlens/tools/mcp_registry.py`) opens a boto3 `agent-registry` client in `AWS_REGION` (or `AWS_DEFAULT_REGION`).
+2. It pages through `list_discoverable_registry_records` with the filter `recordType == "MCP"`. The API returns only Approved records.
+3. It fetches the full records with `batch_get_discoverable_registry_record`, 100 ids per call.
+4. It reads the endpoint from `descriptors.mcpServer`. The `data` field holds the MCP server definition, as a JSON string or an object, and the code uses `remotes[0].url` and `remotes[0].type`. A `remotes` list directly on `mcpServer` also works.
+5. It skips records with no URL, and records whose transport is something other than `streamable-http`. A record with no transport counts as `streamable-http`.
+6. `build_registry_mcp_clients()` creates one Strands `MCPClient` per server, with the prefix `registry_<slug>` and no request headers.
+7. The clients go into the agent's `tools` after the Gateway client. If `build_registry_mcp_clients()` raises, the agent logs `[MCP-REGISTRY] Registry discovery failed; continuing without registry tools` and runs with the Gateway tools only.
 
 ```
-                         ┌──────────────────────────┐
-   Agent Runtime  ──────▶│  AWS Agent Registry       │  list_discoverable_registry_records
- (ledgerlens_agent.py)        │  (agent-registry API)     │  batch_get_discoverable_registry_record
-        │                └──────────────────────────┘
-        │  build_registry_mcp_clients()  → remotes[0].url
-        ▼
-  ┌───────────────┐   streamable HTTP   ┌───────────────────┐
-  │  Strands      │────────────────────▶│ Discovered MCP     │
-  │  MCPClient(s) │                     │ Server (public)    │
-  └───────────────┘                     └───────────────────┘
+Agent runtime (ledgerlens_agent.py)
+   |  list_discoverable_registry_records, batch_get_discoverable_registry_record
+   v
+AWS Agent Registry (agent-registry API)
+   |  remotes[0].url of each approved MCP record
+   v
+Strands MCPClient per server ---- streamable HTTP, no credentials ----> MCP server
 ```
 
-## Quick Start
+There is no cache: every request lists the registry, reads the records and connects to each server again. That adds latency to every chat message.
 
-### CDK (`infra-cdk/config.yaml`)
+## Turning it on
+
+In `infra-cdk/config.yaml`:
 
 ```yaml
 backend:
@@ -57,32 +39,40 @@ backend:
     registry_id: arn:aws:agent-registry:us-east-1:123456789012:registry/my-registry
 ```
 
-Deploy with `cdk deploy`.
+Then deploy the main stack:
 
-## Configuration Reference
+```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant
+```
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `enabled` | No | `false` | Master switch. When false the feature is completely inert (no IAM, no env, no runtime calls). |
-| `registry_id` | When enabled | `""` | ARN or id of the AWS Agent Registry. A full ARN scopes the IAM grant to that registry; a bare id falls back to the account/region `registry/*` wildcard. |
+A plain `cdk deploy` fails because the app has two stacks. To deploy locally, use `cd infra-cdk && npx cdk deploy --all`. See [DEPLOYMENT.md](DEPLOYMENT.md#configuration).
 
-Validation is **fail-loud**: enabling the feature without a `registry_id` fails
-at synth time (CDK `config-manager`).
+## Configuration
 
-## Environment Variables (set by the infrastructure)
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Master switch. Only YAML `true` turns it on. |
+| `registry_id` | `""` | ARN or id of the registry. Required when `enabled` is true. |
 
-| Variable | Description |
-|----------|-------------|
-| `MCP_REGISTRY_DISCOVERY_ENABLED` | `"true"` activates discovery in the agent runtime. |
-| `MCP_REGISTRY_ID` | ARN or id of the registry to discover from. |
-| `AWS_REGION` / `AWS_DEFAULT_REGION` | Region of the registry (already set for the runtime). |
+What each value of `enabled` does:
+
+- **`false`:** the CDK adds no IAM statements and the agent makes no registry calls. The two environment variables are still set, to `"false"` and `""`.
+- **`true` with an empty `registry_id`:** `config-manager.ts` throws at CDK synth time, so the deploy fails before anything changes.
+- At runtime, the module raises `ValueError` if discovery is on without `MCP_REGISTRY_ID`. The agent catches that, logs it and goes on without registry tools.
+
+## Environment variables
+
+The CDK sets these on the runtime (`infra-cdk/lib/backend-construct.ts`):
+
+| Variable | Value |
+|----------|-------|
+| `MCP_REGISTRY_DISCOVERY_ENABLED` | `"true"` or `"false"`. Only `"true"` (any case) turns discovery on. |
+| `MCP_REGISTRY_ID` | `registry_id`, or `""` |
+| `AWS_REGION`, `AWS_DEFAULT_REGION` | The stack's region, also used for the registry |
 
 ## IAM
 
-When enabled, the agent runtime execution role gets two read-only statements.
-**The IAM action names differ from the API names**: the `BatchGetDiscoverableRegistryRecord`
-API is authorized by the permission-only action `agent-registry:GetDiscoverableRegistryRecord`
-on the **record** resource, while `List`/`Search` authorize on the **registry** resource.
+When the feature is on, the agent role gets two read-only statements. The IAM action names differ from the API names. `List`/`Search` authorize on the **registry** resource. The `BatchGetDiscoverableRegistryRecord` API is authorized by the permission-only action `agent-registry:GetDiscoverableRegistryRecord` on the **record** resource.
 
 ```json
 [
@@ -93,66 +83,67 @@ on the **record** resource, while `List`/`Search` authorize on the **registry** 
       "agent-registry:ListDiscoverableRegistryRecords",
       "agent-registry:SearchDiscoverableRegistryRecords"
     ],
-    "Resource": "arn:aws:agent-registry:<region>:<account>:registry/<registryId>"
+    "Resource": "<registry ARN>"
   },
   {
     "Sid": "AgentRegistryDiscoveryGetRecord",
     "Effect": "Allow",
     "Action": "agent-registry:GetDiscoverableRegistryRecord",
-    "Resource": "arn:aws:agent-registry:<region>:<account>:registry/<registryId>/record/*"
+    "Resource": "<registry ARN>/record/*"
   }
 ]
 ```
 
-> Common pitfall: granting `agent-registry:BatchGetDiscoverableRegistryRecord`
-> (matching the API name) is a **no-op** — that is not a real IAM action, so
-> record reads fail with `AccessDenied`. Use `GetDiscoverableRegistryRecord`.
+- With a full ARN as `registry_id`, the statements are scoped to that registry.
+- With a bare id, they fall back to `arn:aws:agent-registry:<region>:<account>:registry/*` and `registry/*/record/*`.
+- `SearchDiscoverableRegistryRecords` is granted, but the code doesn't call it.
 
-## Namespace note
+> Granting `agent-registry:BatchGetDiscoverableRegistryRecord` (the API name) does nothing. It isn't an IAM action, so record reads fail with `AccessDenied`.
 
-The data-plane discovery APIs (`ListDiscoverableRegistryRecords`,
-`BatchGetDiscoverableRegistryRecord`) live under the **`agent-registry`**
-namespace. The public-preview **`bedrock-agentcore`** namespace does **not**
-expose these APIs and is scheduled for discontinuation on **2026-09-17**. This
-feature uses `boto3.client("agent-registry")` accordingly. If you created your
-registry under the old namespace, migrate it first — see the
-[registry migration guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry-faq.html).
+## Namespace
 
-## Behavior & Limits
+The discovery APIs are under the `agent-registry` namespace, and the code uses `boto3.client("agent-registry")`. The older `bedrock-agentcore` namespace doesn't expose these APIs and was scheduled to be discontinued after 2026-09-17. A registry created under the old namespace has to be migrated first: see the [registry FAQ](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/registry-faq.html). boto3 and botocore 1.43.66 or later ship the `agent-registry` client, and `agent/ledgerlens/requirements.txt` pins that minimum.
 
-- **Only Approved records** are returned by the discovery APIs; Draft /
-  Pending / Rejected / Deprecated records are never connected.
-- **v1 connects public `streamable-http` servers only.** Records using another
-  transport, or requiring authentication, are logged and skipped. Per-server
-  OAuth is a documented follow-up (the [Dynamic MCP Servers](MCP_SERVERS.md)
-  Gateway path already supports OAUTH M2M today if you need auth now).
-- **Fail-loud on misconfiguration**: enabled + no `registry_id` raises at
-  synth/plan time.
-- **Fail-soft at runtime**: if the registry is unreachable, access is denied, or
-  an individual record is malformed, that server is skipped with a logged
-  warning and the agent keeps responding on its remaining tools.
-- **Per-request discovery**: the tool list reflects the registry's current
-  approved records on each new agent invocation.
+## Tool names
 
-## Tool Naming
+Each server gets the Strands prefix `registry_<slug>`, so its tools reach the model as `registry_<slug>_<tool_name>`. The slug is built like this:
 
-Each discovered server is connected with a Strands client prefix derived from
-its record name: `registry_<slug>`, where `<slug>` is the lowercased name with
-non-alphanumeric runs collapsed to underscores. Its tools therefore appear to
-the agent as `registry_<slug>_<tool_name>`.
+1. Each run of characters other than letters and digits becomes `_`.
+2. Leading and trailing `_` are stripped, and the result is lowercased.
+3. The slug is cut to 24 characters, then trailing `_` are stripped again. An empty slug becomes `server`.
+4. If two servers end up with the same prefix, the second gets `_2`, the third `_3`, and so on.
+
+The 24-character cap keeps the prefix short. Bedrock rejects every request when a tool name is over 64 characters. The code doesn't check the tool names themselves, so a long tool name can still push the full name past that limit.
+
+## Failure behavior
+
+- **Discovery fails soft.** If listing or batch-getting fails (registry unreachable, access denied, throttled), the agent logs a warning and runs without registry tools. A record that can't be fetched or has no usable endpoint is logged and skipped.
+- **Connecting fails hard.** Strands connects each `MCPClient` and lists its tools while it builds the `Agent`, with a 30-second startup timeout by default. That step is outside the `try` that guards discovery. If an approved server is down, slow or refuses the connection, building the agent raises, and the request ends with `{"status": "error", ...}`. One broken approved record therefore breaks every chat request until the record is removed from the registry or discovery is turned off.
+- **No credentials are sent.** Only public `streamable-http` servers are meant to be connected. The module docstring says records that advertise authentication are skipped, but the code doesn't check for that. A server that needs credentials is connected without them, and its failure is handled as in the point above.
+
+## Security
+
+Registry tools don't get the protections the Gateway tools have:
+
+- **No Gateway, no Cedar.** The agent connects to each server directly. There is no Cognito machine token, no Cedar policy and no Gateway logging on these calls.
+- **The customer's id reaches the server.** `CustomerIdHook` (`agent/ledgerlens/tools/customer_id_hook.py`) works on any tool whose input schema has a `customer_id` property, and registry tools are no exception. The hook writes the signed-in customer's real `customer_id` into the call, so a third-party server with that input receives it. For a user with no linked customer, the hook cancels the call.
+- **No Yes/No confirmation.** `ConfirmationHook` matches on the part of the tool name after the last `___`. A registry tool name has no `___` unless the server's own tool name contains one, so registry tools aren't paused for a confirmation.
+- **Tool descriptions and results come from a third party.** The model reads them. The system prompt tells the model to ignore instructions in tool results. It also lists only the card tools and says the agent can do nothing else, and it doesn't mention registry tools.
 
 ## Troubleshooting
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| No discovered tools appear | Feature disabled, or registry has no Approved MCP records | Set `enabled: true` + `registry_id`; approve records in the registry |
-| Synth fails on `registry_id` | `enabled` true but `registry_id` empty | Provide the registry ARN/id |
-| A known server isn't connected | Non-HTTP transport, auth-required, or missing `remotes[0].url` | Check the record's descriptor; v1 connects public streamable-HTTP only |
-| `AccessDeniedException` in logs | Role lacks discovery permissions or registry not readable | Confirm the `AgentRegistryDiscoveryAccess` statement covers the registry |
-| APIs return `ValidationException` for the namespace | Registry created under deprecated `bedrock-agentcore` namespace | Migrate the registry to `agent-registry` |
+| No registry tools appear | Discovery off, or no Approved MCP records | Set `enabled: true` and `registry_id`, and approve records in the registry |
+| Synth fails on `registry_id` | `enabled` is true but `registry_id` is empty | Set the registry ARN or id |
+| A known server isn't connected | Transport isn't `streamable-http`, or the record has no `remotes[0].url` | Check the record's `mcpServer` descriptor |
+| Every request fails after turning it on | An approved server can't be reached or refuses the connection | Check the runtime logs for `Failed to load tool`, then fix the server, remove the record, or turn discovery off |
+| `AccessDeniedException` in the logs | The role lacks the discovery permissions for this registry | Check the `AgentRegistryDiscoveryList` and `AgentRegistryDiscoveryGetRecord` statements and the `registry_id` they were built from |
+| `ValidationException` about the namespace | The registry is under the old `bedrock-agentcore` namespace | Migrate it to `agent-registry` |
 
 ## Files
 
-- `agent/ledgerlens/tools/mcp_registry.py` — discovery + client builder
-- `agent/ledgerlens/ledgerlens_agent.py` — wires discovered clients into the agent
-- `infra-cdk/lib/utils/config-manager.ts`, `infra-cdk/lib/backend-construct.ts`, `infra-cdk/config.yaml` — CDK config, IAM, env
+- `agent/ledgerlens/tools/mcp_registry.py`: discovery and client builder.
+- `agent/ledgerlens/ledgerlens_agent.py`: adds the clients to the agent.
+- `infra-cdk/config.yaml`, `infra-cdk/lib/utils/config-manager.ts`, `infra-cdk/lib/backend-construct.ts`: config, validation, IAM and environment variables.
+- `tests/unit/test_mcp_registry.py`: unit tests.

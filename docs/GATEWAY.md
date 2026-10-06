@@ -1,421 +1,347 @@
-# AgentCore Gateway Implementation
+# AgentCore Gateway
 
-This document describes how FAST implements AgentCore Gateway with Lambda targets to provide a scalable, production-ready tool execution architecture.
+The Gateway is how the LedgerLens agent reaches its 9 tools. It is an MCP server in front of one Lambda per tool. Before a tool runs, the Gateway checks two things: that the machine token is valid, and that the Cedar policy allows the call.
 
-## Overview
+This page covers how the Gateway is built, the contract each tool Lambda follows, and how to test and debug it. The tool list (Lambda, target, database access) is in [DEPLOYMENT.md, Gateway tools](DEPLOYMENT.md#gateway-tools), and the steps to add a tool are in [DEPLOYMENT.md, Updating](DEPLOYMENT.md#updating).
 
-FAST uses **AgentCore Gateway with Lambda Targets** to enable agents to access external tools and services. This architecture provides a clean separation between agent logic and tool implementation, allowing for independent scaling and deployment of individual tools.
+## Request path
 
-## Architecture Comparison
-
-### Standalone MCP Gateway vs Lambda Targets
-
-There are two primary approaches to implementing AgentCore Gateway:
-
-#### Standalone MCP Gateway
-- Gateway directly implements MCP (Model Context Protocol) server
-- Tools are built into the gateway infrastructure
-- Simpler setup for basic scenarios
-- Direct client → gateway communication
-
-#### Lambda Targets (FAST's Choice)
-- Gateway acts as a proxy/router to external Lambda functions
-- Each tool is implemented as a separate Lambda function
-- Client → Gateway → Lambda → Gateway → Client flow
-- Production-ready architecture with enterprise benefits
-
-### Why FAST Uses Lambda Targets
-
-We chose Lambda targets for the following production advantages:
-
-1. **Separation of Concerns**: Business logic lives in Lambda functions, not gateway infrastructure
-2. **Independent Scaling**: Each tool can scale independently based on usage patterns
-3. **Maintainability**: Update tool logic without touching gateway infrastructure
-4. **Reusability**: Same Lambda can be used by multiple gateways or other services
-5. **Language Flexibility**: Each Lambda can use different programming languages
-6. **Independent Deployment**: Deploy tool updates without gateway downtime
-7. **Cost Optimization**: Pay only for actual tool execution time
-8. **Security**: Each Lambda can have specific IAM permissions for its requirements
-
-## Implementation Details
-
-### Gateway Configuration
-
-The gateway is created using AWS CDK L1 constructs with the following configuration:
-
-- **Protocol Type**: MCP (Model Context Protocol)
-- **Authorization**: Custom JWT with Cognito integration
-- **Authentication**: Machine-to-machine client credentials flow
-- **Target Type**: AWS Lambda functions
-- **Optional Features**: Semantic search (can be enabled for tool discovery)
-
-### Lambda Target Structure
-
-Each Lambda target in FAST follows this pattern:
-
-```python
-def handler(event, context):
-    # Get tool name from context (strip target prefix)
-    delimiter = "___"
-    original_tool_name = context.client_context.custom['bedrockAgentCoreToolName']
-    tool_name = original_tool_name[original_tool_name.index(delimiter) + len(delimiter):]
-    
-    # Event contains tool arguments directly
-    arguments = event
-    
-    # Return response in expected format
-    return {
-        'content': [
-            {
-                'type': 'text',
-                'text': 'Tool response here'
-            }
-        ]
-    }
+```
+Agent (AgentCore Runtime)
+  │  POST <gateway_url>   Authorization: Bearer <machine token with customer_id>
+  ▼
+Gateway  ledgerlens-bank-assistant-gateway (MCP 2025-03-26)
+  │  1. JWT authorizer: signed by the user pool, issued to the machine client?   no → 401
+  │  2. Cedar policy engine (ENFORCE): tools/list hides denied tools,
+  │     tools/call rejects denied calls
+  ▼
+Tool Lambda  ledgerlens-<slug>   (invoked with the Gateway's IAM role)
+  │
+  ▼
+Aurora DSQL (8 tools; the hand-off tool uses no database)
 ```
 
-#### Tool Invocation Protocol Details
+## Why Lambda targets, one tool per Lambda
 
-**Critical Implementation Notes:**
+The Gateway only routes and authorizes. Each tool's code lives in its own Lambda, so:
+- each tool gets the IAM role it needs: the read tools connect to DSQL as `ll_read`, the two write tools as `ll_write`, and the hand-off tool has no database access at all;
+- each tool has its own timeout, log group and deployment package;
+- a read tool can't write, even with a bug: only `block_credit_card` and `open_claim` run with the write role.
 
-The tool name is **NOT** passed in the event body. Gateway passes it via the Lambda context object:
+A Lambda target could route several tools by name. LedgerLens doesn't: each handler serves exactly one tool and refuses any other name (see [Output](#output)).
 
-```python
-# Tool name location
-original_tool_name = context.client_context.custom['bedrockAgentCoreToolName']
+## How it is built
 
-# Arguments are in event body
-name = event.get('name', 'World')
-```
+Everything is in `createAgentCoreGateway()` in `infra-cdk/lib/backend-construct.ts`. It uses the L2 constructs from `aws-cdk-lib/aws-bedrockagentcore` (imported as `agentcore`).
 
-**Tool Name Format:**
-
-Gateway includes the target name as a prefix with three underscores as delimiter:
-```
-{target_name}___{tool_name}
-```
-
-Example: `sample_tool_target___sample_tool`
-
-**Complete Working Implementation:**
-
-```python
-import json
-import logging
-
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-def lambda_handler(event, context):
-    try:
-        # Get tool name from context
-        original_tool_name = context.client_context.custom['bedrockAgentCoreToolName']
-        logger.info(f"Received tool invocation: {original_tool_name}")
-        logger.info(f"Event: {json.dumps(event)}")
-        
-        # Strip target prefix
-        delimiter = "___"
-        if delimiter in original_tool_name:
-            tool_name = original_tool_name[original_tool_name.index(delimiter) + len(delimiter):]
-        else:
-            tool_name = original_tool_name
-        
-        # Route to appropriate tool handler
-        if tool_name == "sample_tool":
-            name = event.get('name', 'World')
-            result = f"Hello, {name}! This is a sample tool from FAST."
-            return {"result": result}
-        else:
-            raise ValueError(f"Unknown tool: {tool_name}")
-            
-    except Exception as e:
-        logger.error(f"Error in lambda_handler: {str(e)}", exc_info=True)
-        raise
-```
-
-**Multiple Tools Per Lambda:**
-
-A single Lambda can handle multiple tools by routing on the extracted tool name:
-
-```python
-if tool_name == "tool_one":
-    # Handle tool one
-    pass
-elif tool_name == "tool_two":
-    # Handle tool two
-    pass
-```
-
-This is a valid production pattern used in AWS samples.
-
-### Tool Schema Definition
-
-Tools are defined using JSON schema in the CDK stack:
-
-```json
-{
-    "name": "sample_tool",
-    "description": "A sample tool that returns a greeting",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "Name to greet"
-            }
-        },
-        "required": ["name"]
-    }
-}
-```
-
-**Supported JSON Schema Types:**
-
-When defining tool specs for Gateway, use these types:
-
-- `"integer"` - for integers (not "int")
-- `"number"` - for floats
-- `"string"` - for strings
-- `"boolean"` - for booleans
-- `"array"` - for arrays
-- `"object"` - for objects
-
-### Authentication Flow
-
-1. **Machine Client**: CDK creates a Cognito machine client with client credentials flow
-2. **Resource Server**: Defines scopes for gateway access (read/write)
-3. **JWT Authorization**: Gateway validates tokens using Cognito's OIDC discovery
-4. **SSM Parameters**: Client credentials stored securely in SSM Parameter Store
-
-## Key Components
-
-### 1. Gateway L1 Construct
-
-The gateway is created using native CloudFormation L1 constructs in `infra-cdk/lib/backend-stack.ts`:
-
-- `CfnGateway`: Creates AgentCore Gateway with MCP protocol
-- `CfnGatewayTarget`: Configures Lambda targets with tool schemas
-- JWT authorization configured via Cognito
-- Automatic lifecycle management by CloudFormation
-
-### 2. Tool Lambdas
-
-Located in `gateway/tools/<tool>/` (for example `gateway/tools/list_credit_cards/`), each with a `tool_spec.json` and a `<tool>_lambda/delivery/handler.py`:
-
-- Demonstrates proper Lambda target implementation
-- Shows how to parse AgentCore Gateway event format
-- Includes error handling and logging
-
-### 3. IAM Roles and Permissions
-
-**Gateway Role**: Allows gateway to invoke Lambda functions and access required AWS services
-
-**Custom Resource Role**: Manages gateway lifecycle operations
-
-### 4. SSM Parameter Storage
-
-Gateway configuration is stored in SSM for easy access:
-
-- `/stack-name/gateway_url`: Gateway endpoint URL
-- `/stack-name/machine_client_id`: Cognito client ID
-- `/stack-name/machine_client_secret`: Cognito client secret
-- `/stack-name/cognito_provider`: Cognito domain URL
-
-## Testing the Gateway
-
-### Direct Gateway Testing
-
-Use the provided test script to verify gateway functionality:
-
-```bash
-python3 scripts/test-gateway.py
-```
-
-This script:
-1. Authenticates using machine client credentials from SSM
-2. Lists available tools via MCP protocol
-3. Calls the sample tool with test parameters
-4. Displays responses for verification
-
-### Integration with AgentCore Runtime
-
-The gateway integrates with AgentCore Runtime through:
-
-1. **Runtime Configuration**: Runtime is configured with gateway URL via SSM
-2. **Authentication**: Runtime uses same Cognito user pool for JWT tokens
-3. **Tool Discovery**: Runtime discovers tools via gateway's `tools/list` endpoint
-4. **Tool Execution**: Runtime calls tools via gateway's `tools/call` endpoint
-
-### Integration with Agents via MCP
-
-Agents connect to the Gateway using the Model Context Protocol (MCP).
-
-#### Strands with Direct MCP Session
-
-Strands agents can use direct MCP session management for more control:
-
-```python
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-from langchain_mcp_adapters.tools import load_mcp_tools
-
-async with streamablehttp_client(
-    gateway_url,
-    headers={"Authorization": f"Bearer {access_token}"}
-) as (read, write, _):
-    async with ClientSession(read, write) as session:
-        await session.initialize()
-        tools = await load_mcp_tools(session)
-        # Use tools with agent
-```
-
-**Example:** See `agent/ledgerlens/ledgerlens_agent.py` for complete implementation.
-
-## Adding New Tools
-
-To add a new tool to the gateway:
-
-1. **Create Lambda Function**: Implement tool logic following the Lambda target pattern
-2. **Define Tool Schema**: Add JSON schema definition to CDK stack
-3. **Update Gateway Configuration**: Add new target to gateway custom resource
-4. **Deploy**: Run CDK deploy to update infrastructure
-
-### Example: Adding a Weather Tool
+### The Gateway
 
 ```typescript
-// In backend-stack.ts
-const weatherLambda = new lambda.Function(this, 'WeatherToolLambda', {
-  runtime: lambda.Runtime.PYTHON_3_13,
-  handler: 'weather_tool.handler',
-  code: lambda.Code.fromAsset(path.join(__dirname, '../../gateway/tools/get_weather')),
-});
-
-const weatherToolSchema = {
-  "name": "get_weather",
-  "description": "Get current weather for a location",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "location": {
-        "type": "string",
-        "description": "City and state, e.g. 'Seattle, WA'"
-      }
-    },
-    "required": ["location"]
-  }
-};
-```
-
-## Security Considerations
-
-### Authentication
-- Machine-to-machine authentication using Cognito client credentials
-- JWT tokens with configurable expiration
-- Scoped access using Cognito resource server
-
-### Authorization
-- Gateway validates JWT tokens on every request
-- Lambda functions inherit gateway's IAM role permissions
-- Principle of least privilege for all components
-
-### Network Security
-- Gateway endpoints use HTTPS only
-- Lambda functions run in AWS managed VPC
-- No direct internet access required for Lambda functions
-
-## Monitoring and Logging
-
-### CloudWatch Logs
-- Gateway operations logged to `/aws/bedrock-agentcore/gateway/*`
-- Lambda function logs in `/aws/lambda/function-name`
-- Custom resource operations in `/aws/lambda/gateway-custom-resource`
-
-### Metrics
-- Gateway invocation metrics via CloudWatch
-- Lambda function duration and error metrics
-- Custom metrics can be added to Lambda functions
-
-## Troubleshooting
-
-### Common Issues
-
-**"Unknown tool: None" Error**
-- Indicates Lambda function isn't parsing context correctly
-- Verify Lambda follows AgentCore Gateway input format
-- Check CloudWatch logs for detailed error information
-
-**Authentication Failures**
-- Verify Cognito client credentials in SSM
-- Check JWT token expiration
-- Ensure gateway authorization configuration is correct
-
-**Tool Not Found**
-- Verify tool schema matches Lambda implementation
-- Check gateway target configuration
-- Ensure Lambda function is deployed and accessible
-
-**Gateway returns "An internal error occurred"**
-
-- Enable debugging to see detailed error messages by updating the gateway to set `exceptionLevel: 'DEBUG'` in the CDK construct or via AWS CLI.
-
-```bash
-# Enable debugging on gateway
-aws bedrock-agentcore-control update-gateway \
-  --gateway-identifier <GATEWAY_ID> \
-  --name <GATEWAY_NAME> \
-  --role-arn <ROLE_ARN> \
-  --protocol-type MCP \
-  --authorizer-type CUSTOM_JWT \
-  --authorizer-configuration <AUTH_CONFIG> \
-  --exception-level DEBUG
-```
-
-Or update the gateway construct in CDK:
-
-```typescript
-const gateway = new bedrockagentcore.CfnGateway(this, "AgentCoreGateway", {
-  name: `${config.stack_name_base}-gateway`,
-  roleArn: gatewayRole.roleArn,
-  protocolType: "MCP",
-  exceptionLevel: "DEBUG", // Add this line for detailed error messages
-  // ... rest of configuration
+const gateway = new agentcore.Gateway(this, "AgentCoreGateway", {
+  gatewayName: `${config.stack_name_base}-gateway`,
+  role: gatewayRole,
+  protocolConfiguration: new agentcore.McpProtocolConfiguration({
+    supportedVersions: [agentcore.MCPProtocolVersion.MCP_2025_03_26],
+  }),
+  authorizerConfiguration: agentcore.GatewayAuthorizer.usingCustomJwt({
+    discoveryUrl: cognitoDiscoveryUrl,
+    allowedClients: [this.machineClient.userPoolClientId],
+  }),
+  description: "AgentCore Gateway with MCP protocol and JWT authentication",
 })
 ```
 
-### Debug Steps
+- **Authorizer.** The custom JWT authorizer fetches the user pool's signing keys from its OIDC discovery URL. `allowedClients` holds only the machine client (`ledgerlens-bank-assistant-machine-client`). A token issued to the web client, even from the same user pool, is rejected.
+- **Gateway role.** Trusted by `bedrock-agentcore.amazonaws.com`. `addLambdaTarget()` grants it `lambda:InvokeFunction` on each tool. It also has `GetPolicyEngine`, `AuthorizeAction`, `PartiallyAuthorizeActions` and `CheckAuthorizePermissions`, which the Gateway needs to evaluate Cedar. The rest of its grants: Bedrock invoke, SSM read under `/<stack>/`, `cognito-idp:DescribeUserPoolClient` and `InitiateAuth` on the user pool, and CloudWatch Logs under `/aws/bedrock-agentcore/*`.
+- **SSM.** The Gateway URL is stored at `/ledgerlens-bank-assistant/gateway_url`. The stack also outputs `GatewayId`, `GatewayUrl`, `GatewayArn`, `PolicyEngineId` and `CedarPolicyId`.
 
-1. **Check SSM Parameters**: Verify all gateway configuration parameters exist
-2. **Test Authentication**: Use test script to verify token generation
-3. **Review CloudWatch Logs**: Check gateway and Lambda function logs
-4. **Validate Tool Schema**: Ensure schema matches expected format
-5. **Test Lambda Directly**: Invoke Lambda function independently to verify logic
+### The targets
 
-## Best Practices
+The `toolTargets` array has one entry per tool. For each entry, CDK creates a `PythonFunction` and wires it as a target:
 
-### Lambda Function Development
-- Always log incoming events for debugging
-- Implement proper error handling and return meaningful error messages
-- Use environment variables for configuration
-- Keep functions focused on single tool responsibility
+```typescript
+return gateway.addLambdaTarget(`${id}Target`, {
+  gatewayTargetName: target ?? `${slug}-target`,
+  description: `LedgerLens ${tool} tool`,
+  lambdaFunction: toolFunction,
+  toolSchema: agentcore.ToolSchema.fromLocalAsset(
+    path.join(__dirname, "../../gateway/tools", tool, "tool_spec.json")
+  ),
+})
+```
 
-### Schema Design
-- Provide clear, descriptive tool and parameter descriptions
-- Use appropriate JSON schema types and constraints
-- Include examples in descriptions where helpful
-- Keep input schemas simple and focused
+- **Target name:** `<slug>-target`, where the slug is the tool name with `-` for `_`. An entry can override it (see [Tool names](#tool-names)).
+- **Schema:** read from `gateway/tools/<tool>/tool_spec.json` at deploy time.
+- **Outbound credentials:** none are set, so the Gateway calls the Lambda with its own IAM role (the L2 default).
 
-### Deployment
-- Test tools individually before gateway integration
-- Use version tags for Lambda function deployments
-- Monitor CloudWatch metrics after deployment
-- Implement gradual rollout for production changes
+Each tool Lambda:
 
-## Related Documentation
+| Setting | Value |
+|---|---|
+| Function name | `ledgerlens-<slug>` (e.g. `ledgerlens-list-credit-cards`) |
+| Code | the whole `gateway/tools/<tool>/` folder, without `__pycache__` and `.pyc` files |
+| Handler | `<tool>_lambda/delivery/handler.py`, function `handler` |
+| Runtime | Python 3.13, ARM64 |
+| Log group | `/aws/lambda/ledgerlens-bank-assistant-<slug>`, one-week retention |
 
-- [Identity Propagation & Cedar Policy Guide](IDENTITY_POLICY.md) - User-level access control for Gateway tools
-- [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md) - Cedar policy syntax, capabilities, and reference
-- [Replacing Cognito](REPLACING_COGNITO.md) - Identity provider swap and Gateway interceptors guide
-- [Runtime-Gateway Authentication](RUNTIME_GATEWAY_AUTH.md) - M2M token flow between Runtime and Gateway
-- [Deployment Guide](DEPLOYMENT.md) - How to deploy FAST infrastructure
-- [AWS AgentCore Gateway Documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore-gateway.html) - Official AWS documentation
-- [AWS Gateway Lambda Target Documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-lambda.html) - Lambda target implementation details
+Roles and network depend on what the tool touches:
+
+| Tools | Role | Network | Timeout | Environment |
+|---|---|---|---|---|
+| The 6 read tools | `data.toolsRole` (`ledgerlens-tools`, DSQL user `ll_read`) | Data stack VPC | 30 s | `DSQL_CLUSTER_ENDPOINT`, `AS_OF` |
+| `block_credit_card`, `open_claim` | `data.writeToolsRole` (`ledgerlens-write-tools`, DSQL user `ll_write`) | Data stack VPC | 30 s | `DSQL_CLUSTER_ENDPOINT`, `AS_OF` |
+| `human_agent_hand_off` | CDK's default Lambda role | Outside any VPC | 10 s | none |
+
+The DSQL tools run in the data stack's public subnets with the tools security group, but Lambdas get no public IP there. So they reach only the DSQL PrivateLink endpoint. The hand-off tool calls no AWS service, so it stays outside the VPC.
+
+### The Cedar policy
+
+A custom resource attaches a Cedar policy engine to the Gateway in `ENFORCE` mode and loads `gateway/policies/policy.cedar`. It depends on every target, because `CreatePolicy` fails for an action whose target doesn't exist yet. See [Authorization](#authorization-cedar-and-the-agent-hooks) below and the [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md).
+
+## Tool names
+
+The Gateway names each tool `<target>___<tool>`, with three underscores:
+- `<target>` is the Gateway target name from `toolTargets`.
+- `<tool>` is the `name` in the tool's `tool_spec.json`.
+
+For example: `list-credit-cards-target___list_credit_cards`. The same string is the tool's Cedar action name.
+
+The agent's MCP client adds the prefix `gateway`, so the model sees `gateway_list-credit-cards-target___list_credit_cards`. Bedrock rejects every request (not just that tool's) if any tool name is longer than 64 characters. That's why `transaction_fraud_detection` uses the target `fraud-detection-target`: with the default target, its name would be 72 characters; with the short one it is 60.
+
+`infra-cdk/test/backend-gateway.test.ts` checks the target names, the 64-character limit, and that every Cedar action matches a deployed target and its `tool_spec.json` name.
+
+## Tool Lambda contract
+
+Every handler in `gateway/tools/<tool>/<tool>_lambda/delivery/handler.py` follows the same contract. `list_credit_cards` is the reference below.
+
+### Input
+
+The Gateway passes the tool arguments directly as the Lambda `event`, a JSON object such as `{"customer_id": "CLI-..."}`. There is no envelope.
+
+The tool name is **not** in the event. It arrives in the Lambda context, with the target prefix:
+
+```python
+full_name = context.client_context.custom["bedrockAgentCoreToolName"]
+# "list-credit-cards-target___list_credit_cards"
+tool_name = full_name.rpartition("___")[2]
+# "list_credit_cards"
+```
+
+### Output
+
+| Case | Return value |
+|---|---|
+| Success | `{"content": [{"type": "text", "text": "<JSON>"}]}` |
+| Known error | `{"error": "<agent-facing message>"}` |
+| Unexpected exception | `{"error": "<generic message>"}`: raw exception text is never returned, because it could leak SQL, hosts or driver details to the model |
+| Wrong tool name | `{"error": "This function only serves the 'list_credit_cards' tool. Don't retry; offer a hand-off to a human agent."}` |
+
+The handler builds its dependencies (settings, DSQL connector, use case) once, when the module loads, so a warm Lambda reuses them.
+
+### Folder layout
+
+```
+gateway/tools/list_credit_cards/
+├── tool_spec.json                 # MCP schema, loaded by CDK
+├── requirements.txt               # the 8 DSQL tools have one; the hand-off tool doesn't
+└── list_credit_cards_lambda/
+    ├── delivery/handler.py        # Lambda entry point
+    ├── application/               # use case and ports
+    ├── domain/                    # entities and errors
+    ├── infrastructure/            # DSQL repository, query loader
+    ├── queries/postgresql/        # SQL files
+    └── utils/connectors/          # DSQL connection
+```
+
+Each folder is self-contained: `PythonFunction` bundles the folder and installs its `requirements.txt`.
+
+### Tool schema
+
+`tool_spec.json` is a JSON array with one tool:
+
+```json
+[
+  {
+    "name": "list_credit_cards",
+    "description": "Lists the customer's credit cards in every status ...",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "The authenticated customer's id from get_session_context."
+        }
+      },
+      "required": ["customer_id"]
+    }
+  }
+]
+```
+
+All 9 tools require `customer_id`. The agent's `CustomerIdHook` and Cedar both depend on it. `block_credit_card` and `open_claim` also require `customer_confirmed`, which Cedar checks.
+
+Use these JSON schema types:
+- `"integer"` for integers (not `"int"`)
+- `"number"` for floats
+- `"string"`, `"boolean"`, `"array"`, `"object"`
+
+## Authentication
+
+The Gateway accepts only tokens that Cognito issues to the machine client with the client credentials grant and the scopes `ledgerlens-bank-assistant-gateway/read` and `/write`.
+
+What a caller needs, and where it lives:
+
+| Value | Where |
+|---|---|
+| Gateway URL | SSM `/ledgerlens-bank-assistant/gateway_url` |
+| Machine client ID | SSM `/ledgerlens-bank-assistant/machine_client_id` |
+| Machine client secret | Secrets Manager `/ledgerlens-bank-assistant/machine_client_secret` (not SSM) |
+| Cognito domain for `/oauth2/token` | SSM `/ledgerlens-bank-assistant/cognito_provider` |
+
+The agent asks for one token per request and passes the signed-in user's Cognito `sub` as `aws_client_metadata`. The V3 pre-token Lambda turns that `sub` into a `customer_id` claim. See [RUNTIME_GATEWAY_AUTH.md](RUNTIME_GATEWAY_AUTH.md) for the token flow and [IDENTITY_POLICY.md](IDENTITY_POLICY.md) for the `sub` to `customer_id` mapping.
+
+## Authorization: Cedar and the agent hooks
+
+The policy engine is attached in `ENFORCE` mode, so its decisions are applied, not just logged. `gateway/policies/policy.cedar` has three statements:
+1. **Permit** the 9 tools when the token has a non-empty `customer_id`.
+2. **Forbid** any call whose `customer_id` input differs from the token's.
+3. **Forbid** `block_credit_card` and `open_claim` unless `customer_confirmed` is `true`.
+
+The agent enforces the same rules before a call leaves the runtime:
+- `CustomerIdHook` (`agent/ledgerlens/tools/customer_id_hook.py`) overwrites `customer_id` on every tool call with the token's value, whatever the model wrote. When the token's `customer_id` is blank, it cancels the call instead.
+- `ConfirmationHook` (`agent/ledgerlens/tools/confirmation_hook.py`) pauses `block_credit_card`, `open_claim` and `human_agent_hand_off` until the customer taps Yes. Only then does it set `customer_confirmed` to `true` on the first two.
+
+So in normal use Cedar never has to deny anything. It is the backstop if the agent code is wrong or bypassed. Details: [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md).
+
+## How the agent connects
+
+`create_gateway_mcp_client()` in `agent/ledgerlens/tools/gateway.py` builds a Strands `MCPClient`:
+
+```python
+def create_gateway_mcp_client(access_token: str) -> MCPClient:
+    stack_name = os.environ.get("STACK_NAME")
+    ...
+    gateway_url = get_ssm_parameter(f"/{stack_name}/gateway_url")
+
+    return MCPClient(
+        lambda: streamablehttp_client(
+            url=gateway_url,
+            headers={"Authorization": f"Bearer {access_token}"},
+        ),
+        prefix="gateway",
+    )
+```
+
+`invocations()` in `agent/ledgerlens/ledgerlens_agent.py` fetches the token once per request with `get_gateway_access_token(user_id)` and reads `customer_id` from it. The same token goes to the MCP client, so the `customer_id` the agent passes always matches the one Cedar checks. The agent is rebuilt on every invocation, and a Cognito token outlives one invocation, so a reconnection within a request never uses an expired token.
+
+The agent passes only this client as its tools (`tools = [gateway_client]`); tools from an AWS Agent Registry are added only when `mcp_registry.enabled` is true, and it is false.
+
+`gateway.py` also keeps a commented-out alternative that gets the token from the AgentCore Token Vault. That token can't carry `customer_id`, so it would break access to every tool. See [IDENTITY_POLICY.md, Two authentication approaches](IDENTITY_POLICY.md#two-authentication-approaches).
+
+## Testing the Gateway directly
+
+`test-scripts/test-gateway.py` calls the Gateway without the agent or the frontend. It acts as a Cognito user: it passes `--user-sub` as `aws_client_metadata`, the same way the agent does, so the token carries that user's `customer_id`.
+
+```bash
+pip install -r test-scripts/requirements.txt
+export AWS_PROFILE=ledgerlens
+
+python test-scripts/test-gateway.py                          # token with no user claims
+python test-scripts/test-gateway.py --user-sub <sub>         # list the tools this login can see
+python test-scripts/test-gateway.py --user-sub <sub> --customer-id <customer_id>   # also call list_credit_cards
+```
+
+The script:
+1. Reads the stack name from `infra-cdk/config.yaml`.
+2. Reads `gateway_url`, `machine_client_id` and `cognito_provider` from SSM, and the client secret from Secrets Manager.
+3. Gets a client credentials token from `https://<cognito_provider>/oauth2/token`.
+4. Calls `tools/list` and prints the tool names.
+5. With `--customer-id`, calls `list_credit_cards` only, and exits with code 1 if the call is refused or fails.
+
+What to expect:
+
+| Arguments | `customer_id` claim | Result |
+|---|---|---|
+| none | absent (no custom claims at all) | No tools listed |
+| `--user-sub` not in `USER_CUSTOMER_IDS_MAP` | blank | No tools listed |
+| `--user-sub` in the map | the mapped customer | The 9 tools listed |
+| ... `--customer-id` = that customer | same | The customer's cards |
+| ... `--customer-id` = another customer | different | Denied by Cedar statement 2 |
+
+## Adding a tool
+
+Follow [DEPLOYMENT.md, Updating](DEPLOYMENT.md#updating). In short:
+1. Add `gateway/tools/<tool>/` with `tool_spec.json` and `<tool>_lambda/delivery/handler.py`, following the [contract](#tool-lambda-contract). Make `customer_id` a required input.
+2. Add an entry to `toolTargets` in `backend-construct.ts`, with `role: readRole` or `writeRole` if it uses DSQL.
+3. Add the `<target>___<tool>` action to statements 1 and 2 in `policy.cedar`, and to statement 3 if it writes.
+4. Add the tool to `TARGETS` in `infra-cdk/test/backend-gateway.test.ts` and run `npm test` in `infra-cdk`.
+5. Deploy the main stack: `AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant`.
+
+Steps 2 and 3 go together:
+- A target that isn't in the policy is denied by Cedar and hidden from `tools/list`.
+- A policy action without a target makes `CreatePolicy` fail, and the deploy rolls back.
+
+The test in step 4 catches both before you deploy.
+
+## Logs
+
+| What | Log group |
+|---|---|
+| Tool Lambdas | `/aws/lambda/ledgerlens-bank-assistant-<slug>` |
+| Cedar custom resource | `/aws/lambda/ledgerlens-bank-assistant-cedar-policy` |
+| OAuth2 provider custom resource | `/aws/lambda/ledgerlens-bank-assistant-oauth2-provider` |
+| Pre-token Lambda (`[PRE-TOKEN]` lines) | `/aws/lambda/ledgerlens-bank-assistant-pretoken-v3` |
+| Agent (`[GATEWAY]` and `[CUSTOMER-ID]` lines) | `/aws/bedrock-agentcore/runtimes/<runtime-id>-DEFAULT` |
+
+`infra-cdk` configures no log or trace delivery for the Gateway itself. To see Cedar's allow and deny decisions, turn on tracing in the console: see [Verifying policy decisions via tracing](IDENTITY_POLICY.md#verifying-policy-decisions-via-tracing).
+
+## Troubleshooting
+
+**No tools listed, or the agent says the account isn't linked.** The login's `sub` isn't in `USER_CUSTOMER_IDS_MAP`, or a redeploy reset the map to its committed value. Check with `test-gateway.py --user-sub <sub>`, and link the login as in [DEPLOYMENT.md](DEPLOYMENT.md#5-create-logins-and-link-them-to-customers).
+
+**401 from the Gateway.** The token wasn't issued to the machine client, has expired, or comes from another user pool.
+
+**A tool returns "This function only serves the '...' tool".** The Lambda behind that target received a different tool name. Check `toolTargets` against the `name` in `tool_spec.json`.
+
+**Bedrock rejects every request.** A tool name the model sees is over 64 characters. Shorten that tool's target name.
+
+**The deploy fails at `GatewayPolicy`.** `CreatePolicy` rejected a statement. The usual causes are an action whose target doesn't exist, or a `forbid` that doesn't list its actions ("Overly Restrictive"). The error is in `/aws/lambda/ledgerlens-bank-assistant-cedar-policy`.
+
+**Tools fail with connection or "table does not exist" errors.** A data load is running, or the cluster was never loaded. See [DEPLOYMENT.md, Troubleshooting](DEPLOYMENT.md#troubleshooting).
+
+**The Gateway returns "An internal error occurred".** Set the Gateway's exception level to `DEBUG` to see detailed errors. In CDK, add one property to the `agentcore.Gateway` props and deploy:
+
+```typescript
+exceptionLevel: agentcore.GatewayExceptionLevel.DEBUG,
+```
+
+Or with the CLI. `update-gateway` replaces the whole configuration, and leaving out `--policy-engine-configuration` detaches Cedar: that is exactly how the cedar-policy Lambda detaches the engine on stack delete. Copy every field from `get-gateway` first:
+
+```bash
+aws bedrock-agentcore-control get-gateway --gateway-identifier <gateway-id>
+
+aws bedrock-agentcore-control update-gateway \
+  --gateway-identifier <gateway-id> \
+  --name ledgerlens-bank-assistant-gateway \
+  --role-arn <roleArn> \
+  --protocol-type MCP \
+  --authorizer-type CUSTOM_JWT \
+  --authorizer-configuration '<authorizerConfiguration JSON>' \
+  --policy-engine-configuration '{"arn": "<policy-engine-arn>", "mode": "ENFORCE"}' \
+  --exception-level DEBUG
+```
+
+Debug steps that usually find the problem:
+1. Run `test-gateway.py` with and without `--customer-id`, to separate auth, Cedar and Lambda failures.
+2. Read the tool Lambda's log group.
+3. Invoke the tool Lambda directly with a test event, setting `bedrockAgentCoreToolName` in the client context.
+
+## Related documentation
+
+- [Cedar Policy Guide](CEDAR_POLICY_GUIDE.md): the three statements, how they are deployed, Cedar reference
+- [Identity Propagation & Cedar Policy](IDENTITY_POLICY.md): how the user's `sub` becomes the `customer_id` claim
+- [Runtime-Gateway Authentication](RUNTIME_GATEWAY_AUTH.md): the machine token flow
+- [Replacing Cognito](REPLACING_COGNITO.md): swapping the identity provider, Gateway interceptors
+- [Deployment Guide](DEPLOYMENT.md): deploy, tool table, adding a tool
+- [AWS: AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)
+- [AWS: Lambda targets](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-lambda.html)
