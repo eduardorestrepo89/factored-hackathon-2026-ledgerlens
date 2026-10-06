@@ -1,530 +1,115 @@
-# Context Management Guide
+# Context management
 
-Practical guide for managing LLM context windows in long-running or multi-turn agent conversations within FAST.
+LedgerLens keeps the model's input small with a Strands conversation manager. `create_conversation_manager()` in `agent/ledgerlens/tools/conversation_memory.py` builds it from the `STM_*` environment variables, and the agent passes it as `conversation_manager=` (`ledgerlens_agent.py`). By default it is a sliding window of 30 messages. Summarization of older messages is optional.
 
-As agents handle longer conversations — especially those involving many tool calls, large tool results, or iterative workflows — the conversation history can grow to exceed the model's context window. Even before overflow, large contexts degrade model performance, increase latency, and balloon costs. Context management strategies address this by proactively or reactively compressing, trimming, or summarizing conversation history.
+This page describes that setup as built on strands-agents 1.32.0.
 
-This guide covers the built-in options available in Strands, when to use each, and how to implement a fully custom solution when the built-in options don't fit your use case.
+## What the model sees each turn
 
----
+- **The system prompt.** This is `BASE_SYSTEM_PROMPT`, the customer block and the `<session_context>` block. It is rebuilt on every request (`build_system_prompt`) and is never part of `agent.messages`, so the conversation manager never trims it or summarizes it. The session context itself is kept in `agent.state["session_context"]`, which is saved with the session (`tools/session_context.py`).
+- **The history.** `agent.messages` as the memory session manager restores it. It starts at the conversation manager's saved offset, with the saved summary in front when there is one.
+- **The new turn.** The customer's message, or the answer to a pending confirmation, and the tool calls and results of this turn.
+- **Long-term facts** (only when `use_long_term_memory` is on). bedrock-agentcore inserts the retrieved facts as a `<user_context>…</user_context>` text block at the start of the newest user message. See [MEMORY_INTEGRATION.md](MEMORY_INTEGRATION.md).
 
-## When Do You Need Context Management?
+## Configuration
 
-You likely need context management if your agent:
+Set these in `infra-cdk/config.yaml` under `backend`. The CDK passes them to the runtime as environment variables (`infra-cdk/lib/backend-construct.ts`). `infra-cdk/lib/utils/config-manager.ts` validates them at synth time.
 
-- Runs **multi-turn conversations** that accumulate many messages over time
-- Performs **iterative workflows** with many sequential tool calls (e.g., code generation loops, data analysis pipelines)
-- Returns **large tool results** (e.g., file contents, API responses, screenshots)
-- Runs **autonomously for extended periods** without human intervention
+| `config.yaml` key | Env var | Default | Rule |
+|-------------------|---------|---------|------|
+| `stm_window_size` | `STM_WINDOW_SIZE` | `30` | Integer from 2 to 200 |
+| `use_stm_summarization` | `USE_STM_SUMMARIZATION` | `false` | Only YAML `true` turns it on |
+| `stm_summary_ratio` | `STM_SUMMARY_RATIO` | `0.3` | Number from 0.1 to 0.8 |
+| `stm_preserve_recent_messages` | `STM_PRESERVE_RECENT_MESSAGES` | `10` | Integer, 0 or more. With summarization on, it must be less than `stm_window_size`, or every summary attempt would fail for lack of messages. `create_conversation_manager()` checks this again at runtime. |
+| `stm_summarization_model_id` | `STM_SUMMARIZATION_MODEL_ID` | `""` | String. Empty means the agent's own model. |
+| `stm_summarization_prompt` | `STM_SUMMARIZATION_PROMPT` | `""` | String. Empty means the built-in `STM_SUMMARY_PROMPT`. Use a YAML block (`|`) for several lines. |
 
-For simple single-turn or short multi-turn chat agents, the default behavior (no explicit context management) is usually sufficient, especially with the most powerful LLMs with large (200k+ token) context windows.
+The window counts messages, not turns. One question that uses a tool is about 4 to 6 messages (user, assistant `toolUse`, user `toolResult`, assistant reply, more for more tools). A change to any key needs a redeploy of the main stack (see [DEPLOYMENT.md](DEPLOYMENT.md#configuration)).
 
----
+## Sliding window (default)
 
-## Strategy Comparison
+With `use_stm_summarization: false`, the manager is `StmSlidingWindowConversationManager(window_size=STM_WINDOW_SIZE)`. That is Strands' `SlidingWindowConversationManager` with its defaults (`should_truncate_results=True`, `per_turn=False`), plus the session restore described [below](#switching-between-the-two-managers).
 
-| Strategy | Information Loss | Complexity | Best For |
-|----------|-----------------|------------|----------|
-| **Sliding Window** | High — older messages are dropped entirely | Low | Simple chat bots, short conversations, user experiences which don't require referencing older messages, or applications with long term memory built-in to handle referencing older topics |
-| **Summarization** | Low — key information is preserved in compressed form | Medium | Multi-turn assistants, iterative workflows, user experiences where pausing for several seconds when the context window overflows (to generate the summary) are acceptable. |
-| **Proactive Compression** | Low–Medium — triggers before overflow | Medium | Long-running autonomous agents, applications using weaker LLMs which struggle to return high quality results when their context window is over 50% full. |
-| **Custom Hook-Based** | Configurable — full control over what is preserved | High | Specialized long-running agents with external memory |
+How it behaves in strands-agents 1.32.0:
 
----
+- **When it runs.** Strands calls `apply_management()` once, after the request has finished streaming. It doesn't run before each model call, because `per_turn` is off. Within a turn, the model sees the history as trimmed at the end of the previous turn, plus everything from the current turn.
+- **What happens when the history is longer than the window.** `reduce_context()` first looks at the oldest message that has tool results. If any of its result texts is longer than 400 characters and not yet truncated, it cuts each such text down to its first and last 200 characters and stops there. Otherwise it drops the oldest messages down to the window size. The cut moves forward so that a `toolResult` never loses the `toolUse` before it.
+- **On context overflow.** When Bedrock reports a context overflow, Strands calls `reduce_context()` and retries the model call.
+- **Dropped messages aren't deleted.** They stay in AgentCore Memory. The manager's `removed_message_count` is saved with the session, so the next request restores only the messages after it.
 
-## Option 1: Sliding Window (Strands)
+## Summarization (optional)
 
-The simplest approach. Keeps the N most recent messages and discards older ones. Strands provides `SlidingWindowConversationManager` out of the box.
+With `use_stm_summarization: true`, the manager is `WindowedSummarizingConversationManager`, a subclass of Strands' `SummarizingConversationManager(summary_ratio, preserve_recent_messages, summarization_agent, summarization_system_prompt)`.
 
-### How It Works
+### When it summarizes
 
-- Maintains a fixed window of messages (default: 40)
-- When the window is exceeded, the oldest messages are removed
-- Preserves tool use/result pairs to avoid invalid conversation state
-- Optionally truncates large tool results (keeping first/last 200 characters)
+In strands-agents 1.32.0, `SummarizingConversationManager.apply_management()` does nothing. On its own, Strands summarizes only after a context overflow. LedgerLens overrides `apply_management()` to summarize as soon as the history passes `window_size`, at the end of a request, the same moment the sliding window would trim.
 
-### Configuration
+### What it summarizes
 
-```python
-from strands import Agent
-from strands.agent.conversation_manager import SlidingWindowConversationManager
+Each time it summarizes, `reduce_context()` (Strands' code):
 
-agent = Agent(
-    model=model,
-    tools=tools,
-    conversation_manager=SlidingWindowConversationManager(
-        window_size=40,                # Max messages to keep (default: 40)
-        should_truncate_results=True,  # Truncate large tool results (default: True)
-    ),
-)
+1. Takes the oldest `max(1, int(len(messages) * summary_ratio))` messages, capped so that the newest `preserve_recent_messages` stay.
+2. Moves the cut forward so it doesn't separate a `toolUse` from its `toolResult`.
+3. Replaces those messages with one summary message (role `user`). The summary is kept in the manager's state and saved with the session.
+
+The previous summary is always the oldest message, so it is folded into the next one.
+
+Example with the defaults (window 30, ratio 0.3, keep 10): at 31 messages, the oldest 9 become one summary, and the history drops to 23 messages (more are summarized if the cut has to move past a tool pair).
+
+### The summary prompt
+
+`STM_SUMMARY_PROMPT` is written for banking. It keeps identifiers word for word, and it skips what the system prompt already has:
+
+```text
+Summarize the conversation as concise third-person bullets.
+You MUST preserve verbatim: card last-4 digits, transaction IDs, amounts with currency,
+dates, fraud classifications, claim and complaint IDs, and any action taken or promised
+(card blocked, dispute opened, hand-off requested). Then list open questions.
+The customer profile and session context are in the system prompt; do not repeat them.
 ```
 
-### Proactive Compression
+`STM_SUMMARIZATION_PROMPT` replaces it.
 
-The sliding window manager also supports proactive compression, which triggers context reduction before the context window overflows rather than waiting for an error:
+### Which model writes the summary
 
-```python
-conversation_manager=SlidingWindowConversationManager(
-    window_size=40,
-    proactive_compression=True,  # Compress at 70% context usage (default threshold)
-)
+- **`stm_summarization_model_id` empty.** Strands calls the agent's own model directly with `model.stream()`, using the summary prompt as the system prompt and no tools. It doesn't go through the agent loop. It is the same `BedrockModel`, so the guardrail settings apply to this call too.
+- **`stm_summarization_model_id` set.** The summary comes from a separate agent, `stm_summarizer`: `BedrockModel(model_id, temperature=0)` with the summary prompt.
+  - It has no tools. Strands registers a no-op tool for the call to meet its tool-spec requirement.
+  - It has no session manager, so it can't write into the customer's session.
+  - Its callback handler is `None`, because Strands' default handler prints the summary, customer data included, to the runtime logs.
+  - It has no guardrail.
 
-# Or with a custom threshold:
-conversation_manager=SlidingWindowConversationManager(
-    window_size=40,
-    proactive_compression={"compression_threshold": 0.5},  # Compress at 50%
-)
-```
+`conversation_memory.py` passes either `summarization_agent` or `summarization_system_prompt`, never both, because Strands rejects both together.
 
-### Per-Turn Management
+### When a summary fails
 
-For agents that perform many tool operations in loops (e.g., web browsing with frequent screenshots), enable per-turn management to proactively trim before every model call:
+- **At the window limit.** `apply_management()` logs `[STM] Summarization failed; keeping the full history until next turn` and leaves the messages as they were. The request still succeeds. `reduce_context()` also puts back `removed_message_count`, which Strands raises before the summary call. Without that, the session would restore from the wrong offset.
+- **On a context overflow.** The error propagates, and the request ends with an error event.
 
-```python
-conversation_manager=SlidingWindowConversationManager(
-    window_size=40,
-    per_turn=True,   # Apply before every model call
-    # per_turn=5,    # Or apply every 5 model calls
-)
-```
+Each summary is one extra model call. A cheaper `stm_summarization_model_id` lowers that cost.
 
-### Applying to FAST Strands Pattern
+## Switching between the two managers
 
-To add sliding window management to the `agent/ledgerlens/ledgerlens_agent.py`, pass the `conversation_manager` parameter when constructing the `Agent`:
+Strands refuses to restore a saved conversation-manager state whose class name doesn't match the current manager. Without a fix, flipping `use_stm_summarization` would break every session in flight. `_restorable()` relabels a state saved by any of these three classes as the current one:
 
-```python
-from strands.agent.conversation_manager import SlidingWindowConversationManager
+- `SlidingWindowConversationManager` (Strands' default, used before the `STM_*` settings existed)
+- `StmSlidingWindowConversationManager`
+- `WindowedSummarizingConversationManager`
 
-# In create_strands_agent():
-agent = Agent(
-    model=model,
-    system_prompt=SYSTEM_PROMPT,
-    tools=tools,
-    conversation_manager=SlidingWindowConversationManager(window_size=40),
-    session_manager=session_manager,
-)
-```
+`StmSlidingWindowConversationManager.restore_from_session()` also returns the saved `summary_message`. That way, a session that was summarized earlier keeps its summary after summarization is turned off. The summary stands for the messages before the restore offset.
 
-### Pros and Cons
+## What the window never touches
 
-| Pros | Cons |
-|------|------|
-| Zero additional LLM calls | Complete loss of older context |
-| No added latency or cost | Agent "forgets" earlier conversation |
-| Simple to configure | Not suitable for long-running tasks requiring full history |
+The system prompt and the session context. The prompt is rebuilt on every request and the context is restored from `agent.state`, both outside `agent.messages`. This is why `tools/session_context.py` keeps the context there instead of in the conversation, where the window would drop it and a summary would reword it.
 
-📚 **Strands Docs**: [SlidingWindowConversationManager API](https://strandsagents.com/docs/api/python/strands.agent.conversation_manager.sliding_window_conversation_manager/)
+## Custom context management
 
----
+Strands also supports fully custom context handling, for example a `HookProvider` on `BeforeModelCallEvent` combined with a no-op conversation manager. LedgerLens doesn't use it.
 
-## Option 2: Summarizing Conversation Manager (Strands)
-
-Summarizes older messages using an LLM call instead of discarding them entirely. This preserves key information while reducing token count.
-
-### How It Works
-
-- When context overflow occurs (or proactive threshold is reached), the oldest N% of messages are summarized
-- The summary replaces the original messages as a single user message
-- Recent messages are preserved verbatim
-- A separate LLM call generates the summary
-
-### Configuration
-
-```python
-from strands import Agent
-from strands.agent.conversation_manager import SummarizingConversationManager
-
-agent = Agent(
-    model=model,
-    tools=tools,
-    conversation_manager=SummarizingConversationManager(
-        summary_ratio=0.3,               # Summarize oldest 30% of messages (default)
-        preserve_recent_messages=10,      # Always keep last 10 messages (default)
-        proactive_compression=True,       # Compress at 70% context usage
-    ),
-)
-```
-
-### Using a Separate Summarization Agent
-
-By default, the summarizing manager uses the parent agent (with its tools) to generate summaries. For more control, you can provide a dedicated summarization agent:
-
-```python
-from strands import Agent
-from strands.agent.conversation_manager import SummarizingConversationManager
-
-# Lightweight agent just for summarization — no tools needed
-summarizer = Agent(
-    model="us.anthropic.claude-sonnet-4-20250514-v1:0",
-    system_prompt="You are a conversation summarizer. Create concise bullet-point summaries.",
-)
-
-agent = Agent(
-    model=model,
-    tools=tools,
-    conversation_manager=SummarizingConversationManager(
-        summary_ratio=0.3,
-        preserve_recent_messages=10,
-        summarization_agent=summarizer,
-        proactive_compression={"compression_threshold": 0.5},
-    ),
-)
-```
-
-### Applying to FAST Strands Pattern
-
-```python
-from strands.agent.conversation_manager import SummarizingConversationManager
-
-# In create_strands_agent():
-agent = Agent(
-    model=model,
-    system_prompt=SYSTEM_PROMPT,
-    tools=tools,
-    conversation_manager=SummarizingConversationManager(
-        summary_ratio=0.3,
-        preserve_recent_messages=10,
-        proactive_compression=True,
-    ),
-    session_manager=session_manager,
-)
-```
-
-### Pros and Cons
-
-| Pros | Cons |
-|------|------|
-| Preserves key information from older context | Additional LLM call adds latency and cost |
-| Configurable compression ratio | Summary quality depends on the model |
-| Built-in, no custom code needed | May lose nuance or specific details |
-
-📚 **Strands Docs**: [SummarizingConversationManager API](https://strandsagents.com/docs/api/python/strands.agent.conversation_manager.summarizing_conversation_manager/)
-
----
-
-## Option 3: Custom Hook-Based Context Management (Strands)
-
-For advanced use cases — particularly long-running autonomous agents — the built-in managers may not provide enough control. You can implement a fully custom solution using Strands hooks.
-
-This approach is ideal when you need to:
-- Trigger summarization at a specific **percentage** of context window usage (not just on overflow)
-- **Re-inject external memory** (e.g., a log file, knowledge base, or structured state) after compression
-- Use a **raw Bedrock Converse call** for summarization (avoiding the agent loop and tool invocations)
-- Emit **custom stream events** to notify the frontend about context management activity
-- Implement **fallback strategies** when summarization fails
-
-### Architecture
-
-The pattern uses two components working together:
-
-1. **A no-op `ConversationManager`** — Disables Strands' built-in context management entirely
-2. **A `HookProvider`** — Registers on `BeforeModelCallEvent` to perform proactive context management before every LLM call
-
-### Implementation
-
-#### Step 1: Create a No-Op Conversation Manager inheriting from `strands.agent.conversation_manager.ConversationManager`
-
-```python
-from strands.agent.conversation_manager import ConversationManager
-
-
-class NoOpConversationManager(ConversationManager):
-    """Disables built-in context management.
-
-    Strands requires a ConversationManager but we handle context reduction
-    ourselves via a hook. Both methods are intentionally empty.
-    """
-
-    def apply_management(self, agent, **kwargs):
-        """No-op: context management is handled by the hook."""
-        pass
-
-    def reduce_context(self, agent, **kwargs):
-        """No-op: context management is handled by the hook."""
-        pass
-```
-
-#### Step 2: Create the Context Check Hook
-
-```python
-import logging
-import os
-
-import boto3
-from strands.hooks import HookProvider, HookRegistry, BeforeModelCallEvent
-
-logger = logging.getLogger(__name__)
-
-# Set this to your model's context window size
-CONTEXT_WINDOW_TOKENS = 200_000  # e.g., Claude Sonnet
-
-SUMMARIZATION_PROMPT = """You are a conversation summarizer. Provide a concise summary.
-
-Format Requirements:
-- Create a structured summary in bullet-point format
-- Do NOT respond conversationally
-- Include: key decisions, tool executions and results, current state, next steps
-"""
-
-
-class ContextCheckHook(HookProvider):
-    """Proactively summarize conversation when context usage exceeds threshold.
-
-    Fires on BeforeModelCallEvent. When context exceeds threshold_pct,
-    summarizes older messages via a direct Bedrock Converse call (no agent
-    loop, no tools), preserving the most recent messages verbatim.
-
-    Args:
-        threshold_pct: Percentage of context window that triggers summarization.
-        preserve_recent: Number of most recent messages to keep verbatim.
-        model_id: Model ID to use for the summarization call.
-    """
-
-    def __init__(
-        self,
-        threshold_pct: float = 50.0,
-        preserve_recent: int = 6,
-        model_id: str = "us.anthropic.claude-sonnet-4-20250514-v1:0",
-    ):
-        self.threshold_pct = threshold_pct
-        self.preserve_recent = preserve_recent
-        self._model_id = model_id
-        self._bedrock = None
-
-    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
-        """Register the before-model-call check."""
-        registry.add_callback(BeforeModelCallEvent, self._check)
-
-    def _check(self, event: BeforeModelCallEvent) -> None:
-        """Check context usage and trigger summarization if threshold exceeded."""
-        agent = event.agent
-        # Walk backward to find the last assistant message with usage metadata
-        for msg in reversed(agent.messages):
-            if msg.get("role") == "assistant":
-                usage = msg.get("metadata", {}).get("usage", {})
-                if usage:
-                    input_tokens = usage.get("inputTokens", 0)
-                    cache_tokens = usage.get("cacheReadInputTokens", 0)
-                    pct = (input_tokens + cache_tokens) / CONTEXT_WINDOW_TOKENS * 100
-                    if pct >= self.threshold_pct:
-                        logger.info("Context at %.1f%% — summarizing", pct)
-                        self._summarize_and_replace(agent)
-                return  # Only check the most recent assistant message
-
-    def _summarize_and_replace(self, agent) -> None:
-        """Summarize older messages and replace them with the summary."""
-        messages = agent.messages
-        if len(messages) <= self.preserve_recent:
-            return
-
-        # Find split point — avoid breaking tool_use/tool_result pairs
-        split = len(messages) - self.preserve_recent
-        while split > 0 and self._is_tool_result(messages[split]):
-            split -= 1
-        if split <= 0:
-            return
-
-        to_summarize = messages[:split]
-        to_keep = messages[split:]
-
-        # Convert to text-only format for the summarization call
-        converse_messages = self._to_text_only(to_summarize)
-        converse_messages.append({
-            "role": "user",
-            "content": [{"text": "Please summarize this conversation."}],
-        })
-
-        # Direct Bedrock Converse call — no agent loop, no tools
-        if not self._bedrock:
-            self._bedrock = boto3.client(
-                "bedrock-runtime",
-                region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
-            )
-
-        try:
-            response = self._bedrock.converse(
-                modelId=self._model_id,
-                system=[{"text": SUMMARIZATION_PROMPT}],
-                messages=converse_messages,
-                inferenceConfig={"maxTokens": 4096},
-            )
-            summary_text = response["output"]["message"]["content"][0]["text"]
-        except Exception as e:
-            logger.error("Summarization failed: %s — falling back to truncation", e)
-            summary_text = "(conversation history truncated due to context limits)"
-
-        # Replace agent messages in-place
-        agent.messages[:] = [
-            {"role": "user", "content": [{"text": f"## Previous Conversation Summary\n\n{summary_text}"}]},
-            {"role": "assistant", "content": [{"text": "Understood. I'll continue from where we left off."}]},
-        ] + to_keep
-
-    def _is_tool_result(self, msg: dict) -> bool:
-        """Check if a message contains a toolResult block."""
-        content = msg.get("content", [])
-        if isinstance(content, list):
-            return any(isinstance(b, dict) and "toolResult" in b for b in content)
-        return False
-
-    def _to_text_only(self, messages: list[dict]) -> list[dict]:
-        """Convert messages to text-only format (strips toolUse/toolResult blocks).
-
-        This is necessary because Bedrock Converse API doesn't allow toolUse
-        blocks without corresponding tool definitions in the request.
-        """
-        result = []
-        for msg in messages:
-            role = msg.get("role")
-            if role not in ("user", "assistant"):
-                continue
-            content = msg.get("content", [])
-            if isinstance(content, str):
-                result.append({"role": role, "content": [{"text": content}]})
-                continue
-            text_blocks = []
-            for block in content:
-                if isinstance(block, dict):
-                    if "text" in block:
-                        text_blocks.append({"text": block["text"]})
-                    elif "toolUse" in block:
-                        name = block["toolUse"].get("name", "unknown")
-                        text_blocks.append({"text": f"[Called tool: {name}]"})
-                    elif "toolResult" in block:
-                        tr_content = block["toolResult"].get("content", [])
-                        snippet = next(
-                            (c["text"][:200] for c in tr_content if isinstance(c, dict) and "text" in c),
-                            "result received",
-                        )
-                        text_blocks.append({"text": f"[Tool result: {snippet}]"})
-            if text_blocks:
-                result.append({"role": role, "content": text_blocks})
-
-        # Ensure alternating user/assistant (Bedrock requirement)
-        cleaned = []
-        for msg in result:
-            if cleaned and cleaned[-1]["role"] == msg["role"]:
-                cleaned[-1]["content"].extend(msg["content"])
-            else:
-                cleaned.append(msg)
-        if cleaned and cleaned[0]["role"] == "assistant":
-            cleaned.insert(0, {"role": "user", "content": [{"text": "(start of conversation)"}]})
-
-        return cleaned
-```
-
-#### Step 3: Wire It Into the Agent
-
-```python
-from strands import Agent
-
-agent = Agent(
-    model=model,
-    system_prompt=SYSTEM_PROMPT,
-    tools=tools,
-    hooks=[ContextCheckHook(threshold_pct=50.0, preserve_recent=6)],
-    conversation_manager=NoOpConversationManager(),
-    session_manager=session_manager,
-)
-```
-
-### Advanced: Re-Injecting External Memory After Summarization
-
-For long-running agents that maintain structured state outside the conversation (e.g., a progress log, a results file, or a knowledge base), you can re-inject that state after summarization to restore critical context that may have been compressed:
-
-```python
-def _summarize_and_replace(self, agent) -> None:
-    # ... (summarization logic as above) ...
-
-    # After replacing messages, re-inject external state
-    self._inject_external_state(agent)
-
-def _inject_external_state(self, agent) -> None:
-    """Re-inject structured external state after context compression."""
-    state_path = os.environ.get("AGENT_STATE_FILE", "")
-    if not state_path:
-        return
-    try:
-        with open(state_path) as f:
-            state_content = f.read()
-    except FileNotFoundError:
-        return
-
-    agent.messages.append({
-        "role": "user",
-        "content": [{"text": (
-            "Context was compressed. Here is the current state log — "
-            "use it to recall what has been done and the current status:\n\n"
-            + state_content
-        )}],
-    })
-```
-
-This pattern is particularly powerful for agents that:
-- Maintain a running log of actions taken and results observed
-- Need to preserve structured data (tables, configurations) across compressions
-- Operate in iterative optimization loops where history of attempts matters
-
-### Pros and Cons
-
-| Pros | Cons |
-|------|------|
-| Full control over trigger timing and compression behavior | More code to write and maintain |
-| Can integrate external memory re-injection | Must handle Bedrock API format constraints manually |
-| Proactive — fires before overflow, preserving more detail | Requires understanding of message format internals |
-| Direct Bedrock call avoids agent loop / tool invocation issues | Must handle tool_use/tool_result pair splitting |
-
----
-
-## Design Decisions and Best Practices
-
-### Choosing a Threshold
-
-- **70%** (default for built-in proactive compression) — Good for most multi-turn chat agents. Leaves headroom for the model's response.
-- **50%** — Better for long-running autonomous agents that accumulate context rapidly. Triggers earlier, preserving more detail in the summary.
-- **On overflow only** (reactive) — Simplest, but risks losing information if the overflow error discards the last request.
-
-Overall the threshold is a metric that can be quantitatively determined if you have data to test on. For example try running with a variety of thresholds and see at what threshold hallucinations start to happen and be sure to set a threshold below that. This can also be done with A/B testing and collecting user feedback signals.
-
-### Preserving Tool Pairs
-
-When trimming or splitting messages, never break a `toolUse` block from its corresponding `toolResult`. This creates an invalid conversation state that will cause API errors. Always walk backward from your split point to find a clean boundary.
-
-### Text-Only Conversion for Summarization
-
-When making a separate Bedrock Converse call for summarization, you cannot include `toolUse` or `toolResult` blocks without also providing the corresponding tool definitions. The simplest solution is to convert these blocks to text descriptions (e.g., `[Called tool: analyze_data]`, `[Tool result: 42 records processed]`).
-
-### Cost Considerations
-
-Each summarization call is an additional LLM invocation:
-- A summarization of ~50K tokens of context using Claude Sonnet costs approximately $0.15–$0.25
-- For agents that trigger summarization frequently, consider using a smaller/cheaper model for the summarization call
-- The sliding window approach has zero additional cost but loses information
-
-### Conversation Validity Rules (Bedrock Converse API)
-
-When manipulating `agent.messages` directly, ensure:
-1. Messages alternate between `user` and `assistant` roles
-2. The conversation starts with a `user` message
-3. Every `toolUse` block has a corresponding `toolResult` in the next user message
-4. No empty content blocks
-
----
-
-## Quick Reference: Which Option to Choose
-
-| Use Case | Recommended Approach |
-|----------|---------------------|
-| Simple chatbot, short conversations | Sliding Window (Option 1) |
-| Multi-turn assistant, moderate length | Summarizing Manager (Option 2) with proactive compression |
-| Long-running autonomous agent (hours) | Custom Hook (Option 3) with external memory re-injection |
-| Agent with large tool results (images, files) | Sliding Window with `per_turn=True` and truncation |
-
----
-
-## Further Reading
+## Further reading
 
 - [Strands ConversationManager API](https://strandsagents.com/docs/api/python/strands.agent.conversation_manager.conversation_manager/)
 - [Strands SlidingWindowConversationManager](https://strandsagents.com/docs/api/python/strands.agent.conversation_manager.sliding_window_conversation_manager/)
 - [Strands SummarizingConversationManager](https://strandsagents.com/docs/api/python/strands.agent.conversation_manager.summarizing_conversation_manager/)
-- [Strands Hooks API](https://strandsagents.com/docs/api/python/strands.hooks.events/)
-- [FAST Memory Integration Guide](./MEMORY_INTEGRATION.md)
+- [AgentCore Memory in LedgerLens](MEMORY_INTEGRATION.md)

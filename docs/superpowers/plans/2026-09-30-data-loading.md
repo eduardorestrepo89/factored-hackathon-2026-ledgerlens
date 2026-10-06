@@ -1,5 +1,7 @@
 # LedgerLens Data Loading Implementation Plan
 
+> **Superseded** by [2026-10-02-data-pipeline.md](2026-10-02-data-pipeline.md) on 2026-10-02. Its `bank`/`pii` schemas and `app.load_manifest` were never built: every table is in `public`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Load the organizer's static snapshot into Aurora DSQL once, at a fixed `as_of`, through a CDK-defined CodeBuild job, with lineage for every table.

@@ -1,13 +1,13 @@
 # LATAM Bank – Entity Relationship Diagram
 
-Source: `LATAM_Bank_Complete_Data_Dictionary (2).pdf` (Dataset v1.0.0, 13 tables).
+Source: `LATAM_Bank_Complete_Data_Dictionary (2).pdf` (Dataset v1.0.0, 13 tables). The tables, columns, primary keys and nullability below match `data_load/schema.sql`, the DDL the data pipeline loads into Aurora DSQL. Exact column types (`numeric(15,2)`, `varchar(30)`, `smallint`...) are in that file; the diagram uses generic types.
 
 ```mermaid
 erDiagram
     %% ======================= RELATIONSHIPS =======================
     %% branches
-    BRANCHES ||--o{ CUSTOMERS : "registers (registration_branch_id)"
-    BRANCHES ||--o{ PRODUCTS : "opens (opening_branch_id)"
+    BRANCHES |o--o{ CUSTOMERS : "registers (registration_branch_id)"
+    BRANCHES |o--o{ PRODUCTS : "opens (opening_branch_id)"
     BRANCHES |o--o{ SERVICE_AGENTS : "assigns (assigned_branch_id)"
     BRANCHES |o--o{ TRANSACTIONS : "hosts (branch_id)"
     BRANCHES |o--o{ COMPLAINTS : "relates to (related_branch_id)"
@@ -17,7 +17,7 @@ erDiagram
     CUSTOMERS ||--o{ TRANSACTIONS : "makes"
     CUSTOMERS ||--o{ CALL_CENTER_INTERACTIONS : "contacts"
     CUSTOMERS ||--o{ CALL_TRANSCRIPTS : "speaks in"
-    CUSTOMERS ||--o{ SATISFACTION_SURVEYS : "answers"
+    CUSTOMERS |o--o{ SATISFACTION_SURVEYS : "answers"
     CUSTOMERS |o--o{ DIGITAL_EVENTS : "generates"
     CUSTOMERS ||--o{ COMPLAINTS : "files"
     CUSTOMERS ||--o{ CAMPAIGN_SENDS : "receives"
@@ -38,13 +38,13 @@ erDiagram
 
     %% call center interactions
     CALL_CENTER_INTERACTIONS ||--o{ CALL_TRANSCRIPTS : "transcribed as"
-    CALL_CENTER_INTERACTIONS |o--o{ SATISFACTION_SURVEYS : "evaluated by"
+    CALL_CENTER_INTERACTIONS ||--o{ SATISFACTION_SURVEYS : "evaluated by"
     CALL_CENTER_INTERACTIONS |o--o{ COMPLAINTS : "originates (origin_interaction_id)"
 
     %% ======================= DIMENSIONS =======================
     CUSTOMERS {
         varchar customer_id PK
-        varchar document_number UK
+        varchar document_number "unique per dictionary, not enforced"
         varchar document_type
         varchar first_name
         varchar last_name
@@ -75,8 +75,8 @@ erDiagram
     PRODUCTS {
         varchar product_id PK
         varchar customer_id FK
-        varchar product_type
-        varchar product_number UK
+        varchar product_type "CHECK enum"
+        varchar product_number "unique per dictionary, not enforced"
         varchar currency
         decimal current_balance
         decimal credit_limit
@@ -84,7 +84,7 @@ erDiagram
         date opening_date
         date expiration_date
         varchar opening_branch_id FK
-        varchar product_status
+        varchar product_status "CHECK enum"
         varchar opening_channel
         boolean has_linked_app
         int days_past_due
@@ -94,7 +94,7 @@ erDiagram
 
     BRANCHES {
         varchar branch_id PK
-        varchar branch_code UK
+        varchar branch_code "unique per dictionary, not enforced"
         varchar branch_name
         varchar branch_type
         varchar address
@@ -119,7 +119,7 @@ erDiagram
 
     SERVICE_AGENTS {
         varchar agent_id PK
-        varchar employee_code UK
+        varchar employee_code "unique per dictionary, not enforced"
         varchar first_name
         varchar last_name
         varchar email
@@ -158,7 +158,7 @@ erDiagram
     TRANSACTIONS {
         varchar transaction_id PK
         timestamp transaction_date
-        date process_date "partition key"
+        date process_date "source partition key"
         varchar product_id FK
         varchar customer_id FK
         varchar transaction_type
@@ -172,8 +172,8 @@ erDiagram
         varchar merchant_category
         varchar transaction_country
         varchar transaction_city
-        varchar transaction_status
-        varchar response_code
+        varchar transaction_status "CHECK enum"
+        varchar response_code "CHECK enum"
         boolean is_fraud
         decimal fraud_score
         decimal latitude
@@ -183,7 +183,7 @@ erDiagram
     CALL_CENTER_INTERACTIONS {
         varchar interaction_id PK
         timestamp interaction_date
-        date process_date "partition key"
+        date process_date "source partition key"
         varchar customer_id FK
         varchar agent_id FK
         varchar interaction_type
@@ -207,7 +207,7 @@ erDiagram
     CALL_TRANSCRIPTS {
         varchar transcript_id PK
         varchar interaction_id FK
-        date process_date "partition key"
+        date process_date "source partition key"
         varchar customer_id FK
         varchar agent_id FK
         text full_text
@@ -228,7 +228,7 @@ erDiagram
     SATISFACTION_SURVEYS {
         varchar survey_id PK
         timestamp survey_date
-        date process_date "partition key"
+        date process_date "source partition key"
         varchar interaction_id FK
         varchar customer_id FK
         varchar agent_id FK
@@ -251,7 +251,7 @@ erDiagram
     DIGITAL_EVENTS {
         varchar event_id PK
         timestamp event_date
-        date process_date "partition key"
+        date process_date "source partition key"
         varchar customer_id FK
         varchar session_id
         varchar event_type
@@ -280,12 +280,12 @@ erDiagram
     COMPLAINTS {
         varchar complaint_id PK
         timestamp creation_date
-        date process_date "partition key"
+        date process_date "source partition key"
         varchar customer_id FK
         varchar case_type "Complaint, Claim, Request, Suggestion"
-        varchar category
+        varchar category "CHECK enum"
         varchar subcategory
-        varchar reception_channel
+        varchar reception_channel "CHECK enum"
         varchar affected_product_id FK
         varchar related_branch_id FK
         varchar origin_interaction_id FK
@@ -310,7 +310,7 @@ erDiagram
     CAMPAIGN_SENDS {
         varchar send_id PK
         timestamp send_date
-        date process_date "partition key"
+        date process_date "source partition key"
         varchar campaign_id FK
         varchar customer_id FK
         varchar send_channel
@@ -346,7 +346,25 @@ erDiagram
 
 ## Notes
 
-- **Cardinality:** `||--o{` means the FK is `NOT NULL` (each child row always has a parent). `|o--o{` means the FK is nullable (optional parent).
+- **Cardinality:** `||--o{` means the FK column is `NOT NULL` in `schema.sql` (each child row always has a parent). `|o--o{` means it is nullable (optional parent). `customers.registration_branch_id` is nullable because repair R1 sets a broken link to `NULL` when no branch can be proven.
+- **Keys:** `FK` marks the dictionary's logical links; DSQL has **no foreign key constraints** (pipeline decision D6). Instead, the transform checks all 24 links in DuckDB before the load and repairs the broken ones in place (R1–R6 in `data_load/repair.py`): an unprovable link becomes `NULL`, and no row is deleted. The run fails if a link, an ownership rule (a row's product must belong to the row's customer) or a date order still breaks. Primary keys are enforced, in DuckDB during the transform and in DSQL.
+- **Unique columns:** the dictionary marks `customers.document_number`, `products.product_number`, `branches.branch_code` and `service_agents.employee_code` as unique. `schema.sql` declares no `UNIQUE` constraint on them, so nothing enforces it.
+- **`process_date`:** the dictionary's partition key for the fact tables, which the source files are split by. DSQL has no table partitions: the tools only use `process_date` to bound their scans.
+- **`CHECK` enums** (`schema.sql`), which hold on the full data:
+
+  | Column | Values |
+  |---|---|
+  | `products.product_type` | `Cuenta Ahorro`, `Tarjeta Crédito`, `Cuenta Corriente`, `Tarjeta Débito`, `Préstamo Personal`, `Préstamo Hipotecario`, `Inversión`, `Seguro` |
+  | `products.product_status` | `Active`, `Blocked`, `Closed`, `Suspended` |
+  | `transactions.transaction_status` | `Approved`, `Declined`, `Pending`, `Reversed` |
+  | `transactions.response_code` | `00`, `05`, `14`, `51`, `54` (or null) |
+  | `complaints.category` | `Branch`, `Fees`, `Service`, `Technical`, `Transactions` |
+  | `complaints.reception_channel` | `Call Center`, `Email`, `Web`, `App`, `Branch`, `Regulator` |
+
+  The other value lists in the diagram (`segment`, `survey_type`, `case_type`) come from the dictionary and aren't constrained.
 - **`DAILY_EXCHANGE_RATES`** has no declared FK. Join it logically on `date` + `currency` (for example `transactions.currency` → `source_currency`, with `transaction_date::date` → `date`).
 - **`call_center_interactions.mentioned_products`** is a comma-separated list of `product_id`s. It's an implicit many-to-many link to `PRODUCTS`, not a real FK.
-- **Data quality (per dictionary):** about 2% duplicate rows, about 5% nulls in nullable fields, and a small percentage of orphan FKs. Don't enforce FK constraints until the data is cleaned.
+- **Data quality (per dictionary):** about 2% duplicate rows, about 5% nulls in nullable fields, and a small percentage of orphan FKs. In the loaded data the primary keys rule out duplicate ids, and the repairs above leave no broken link.
+- **What is loaded:** all 13 tables, in the `public` schema, but only a curated subset of customers: 1,500 coherent customers plus a defect cohort of 159 kept as delivered, with all their rows, and the four tables with no customer link (`branches`, `service_agents`, `marketing_campaigns`, `daily_exchange_rates`) whole. Digital events with no customer are dropped. See the [curate stage spec](superpowers/specs/2026-10-03-curate-stage-design.md).
+- **Access:** two database roles, mapped to IAM roles by the load. `ll_read` (the read tools) has `SELECT` on every table. `ll_write` (`block_credit_card`, `open_claim`) has `SELECT` on `products`, `transactions` and `complaints`, `UPDATE` on `products` and `INSERT` on `complaints`.
+- **Indexes:** besides the primary keys, three secondary indexes for the tools' queries: `transactions (customer_id, transaction_date)`, `products (customer_id)` and `complaints (customer_id, creation_date)`.
