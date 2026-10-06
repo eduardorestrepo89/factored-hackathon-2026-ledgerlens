@@ -25,7 +25,10 @@ export function IdChips({ ids }: { ids: string[] }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {ids.map(id => (
-        <span key={id} className="figures rounded-full bg-card px-2.5 py-0.5 text-xs text-foreground ring-1 ring-border">
+        <span
+          key={id}
+          className="figures rounded-full bg-card px-2.5 py-0.5 text-xs text-foreground ring-1 ring-border"
+        >
           {id}
         </span>
       ))}
@@ -52,7 +55,9 @@ export function HandOffTicket({ tagged, ...props }: ToolRenderProps & { tagged: 
       className="ticket flex w-full max-w-sm flex-col rounded-2xl bg-human-bg text-human animate-in fade-in slide-in-from-bottom-1 duration-200"
     >
       <div className="flex h-13 items-center justify-between gap-3 px-4">
-        <span className="display whitespace-nowrap text-xl">{t("caseId", { id: result.hand_off_id })}</span>
+        <span className="display whitespace-nowrap text-xl">
+          {t("caseId", { id: result.hand_off_id })}
+        </span>
         <PriorityPill priority={result.priority} />
       </div>
       <div className="flex flex-col gap-2.5 px-4 pb-4 pt-3.5 text-foreground">

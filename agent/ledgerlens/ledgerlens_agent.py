@@ -206,7 +206,9 @@ async def invocations(payload, context: RequestContext):
         # the Gateway checks with Cedar.
         access_token = get_gateway_access_token(user_id)
         customer_id = extract_customer_id_from_token(access_token)
-        agent = create_strands_agent(user_id, session_id, access_token, customer_id, settings)
+        agent = create_strands_agent(
+            user_id, session_id, access_token, customer_id, settings
+        )
         logger.info(
             "[PROMPT] version=%s model=%s session=%s",
             settings.prompt_version,

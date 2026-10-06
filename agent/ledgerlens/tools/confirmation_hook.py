@@ -34,9 +34,7 @@ CONFIRM_TOOLS = frozenset({"block_credit_card", "open_claim", "human_agent_hand_
 CONFIRMED_FLAG_TOOLS = frozenset({"block_credit_card", "open_claim"})
 INTERRUPT_PREFIX = "confirm_"
 
-DECLINED_MESSAGE = (
-    "Not done: the customer chose No. Don't call this tool again unless they ask for it."
-)
+DECLINED_MESSAGE = "Not done: the customer chose No. Don't call this tool again unless they ask for it."
 TYPED_REPLY_MESSAGE = (
     'Not done: the customer wrote instead of tapping Yes or No: "{text}". Answer that. '
     "If they still want this, call the tool again so the buttons show again."
@@ -58,15 +56,26 @@ class ConfirmationHook(HookProvider):
         tool_input = event.tool_use.get("input")
         if not isinstance(tool_input, dict):
             tool_input = {}
-        details = {k: v for k, v in tool_input.items() if k not in ("customer_id", "customer_confirmed")}
+        details = {
+            k: v
+            for k, v in tool_input.items()
+            if k not in ("customer_id", "customer_confirmed")
+        }
         response = event.interrupt(
             INTERRUPT_PREFIX + tool,
-            reason={"tool": tool, "toolUseId": event.tool_use.get("toolUseId"), "details": details},
+            reason={
+                "tool": tool,
+                "toolUseId": event.tool_use.get("toolUseId"),
+                "details": details,
+            },
         )
         if isinstance(response, dict) and response.get("approved") is True:
             logger.info("[CONFIRM] Customer approved %s", tool)
             if tool in CONFIRMED_FLAG_TOOLS:
-                event.tool_use = {**event.tool_use, "input": {**tool_input, "customer_confirmed": True}}
+                event.tool_use = {
+                    **event.tool_use,
+                    "input": {**tool_input, "customer_confirmed": True},
+                }
             return
         logger.info("[CONFIRM] Customer declined %s", tool)
         text = response.get("text") if isinstance(response, dict) else None
@@ -92,7 +101,9 @@ def resume_prompt(pending_ids: list[str], payload: dict) -> list[dict]:
     clicks = payload.get("confirmations")
     if isinstance(clicks, list):
         answers = {
-            c.get("interruptId"): c.get("approved") is True for c in clicks if isinstance(c, dict)
+            c.get("interruptId"): c.get("approved") is True
+            for c in clicks
+            if isinstance(c, dict)
         }
         responses: dict[str, dict[str, Any]] = {
             i: {"approved": answers.get(i, False)} for i in pending_ids
@@ -101,7 +112,8 @@ def resume_prompt(pending_ids: list[str], payload: dict) -> list[dict]:
         text = str(payload.get("prompt") or "")
         responses = {i: {"approved": False, "text": text} for i in pending_ids}
     return [
-        {"interruptResponse": {"interruptId": i, "response": r}} for i, r in responses.items()
+        {"interruptResponse": {"interruptId": i, "response": r}}
+        for i, r in responses.items()
     ]
 
 

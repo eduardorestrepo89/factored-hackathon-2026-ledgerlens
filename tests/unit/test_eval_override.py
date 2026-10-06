@@ -29,7 +29,9 @@ def allow(mod):
 
 
 def resolve(mod, allow, request, claims=EVALUATOR):
-    return mod.resolve_eval_settings({"prompt": "hola", "eval": request}, claims, DEFAULT, allow)
+    return mod.resolve_eval_settings(
+        {"prompt": "hola", "eval": request}, claims, DEFAULT, allow
+    )
 
 
 def test_parse_allowlist_trims_and_drops_blanks(mod):
@@ -95,7 +97,10 @@ def test_an_evaluator_may_switch_only_the_model(mod, allow):
 def test_a_prompt_at_the_size_limit_is_accepted(mod, allow):
     text = "x" * mod.MAX_PROMPT_CHARS
 
-    assert resolve(mod, allow, {"prompt_name": "big", "system_prompt": text}).base_prompt == text
+    assert (
+        resolve(mod, allow, {"prompt_name": "big", "system_prompt": text}).base_prompt
+        == text
+    )
 
 
 @pytest.mark.parametrize(

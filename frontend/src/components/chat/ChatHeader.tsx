@@ -30,9 +30,17 @@ export const LENS_HALVES = {
 }
 
 /** The brand mark. The half that doesn't own the conversation is drawn as an outline. */
-export function LensMark({ className = "h-8 w-8", phase = "connecting" }: { className?: string; phase?: Phase }) {
+export function LensMark({
+  className = "h-8 w-8",
+  phase = "connecting",
+}: {
+  className?: string
+  phase?: Phase
+}) {
   const half = (on: boolean, color: string): CSSProperties =>
-    on ? { fill: color } : { fill: "none", stroke: color, strokeWidth: 1.5, strokeLinejoin: "round" }
+    on
+      ? { fill: color }
+      : { fill: "none", stroke: color, strokeWidth: 1.5, strokeLinejoin: "round" }
   return (
     <svg aria-hidden viewBox="0 0 32 32" className={`shrink-0 ${className}`}>
       <path d={LENS_HALVES.ai} style={half(phase !== "joined", "var(--ai)")} />
@@ -51,7 +59,11 @@ function StatusTrack({ phase }: { phase: Phase }) {
         className={`h-2 w-2 rounded-full ${human ? "bg-mango" : "bg-ai"} ${phase === "connecting" ? "animate-pulse" : ""}`}
       />
       <span className={human ? "text-human" : "text-ai"}>
-        {phase === "ai" ? t("ownerAi") : phase === "connecting" ? t("connectingToPerson") : t("ownerHuman")}
+        {phase === "ai"
+          ? t("ownerAi")
+          : phase === "connecting"
+            ? t("connectingToPerson")
+            : t("ownerHuman")}
       </span>
     </p>
   )
@@ -90,7 +102,14 @@ export function ThemeToggle() {
   }
   const label = dark ? t("lightMode") : t("darkMode")
   return (
-    <Button variant="ghost" size="icon" className="shrink-0 rounded-full" onClick={toggle} aria-label={label} title={label}>
+    <Button
+      variant="ghost"
+      size="icon"
+      className="shrink-0 rounded-full"
+      onClick={toggle}
+      aria-label={label}
+      title={label}
+    >
       {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </Button>
   )
@@ -127,7 +146,13 @@ export function ChatHeader({ title, onNewChat, canStartNewChat, phase = "ai" }: 
           {isAuthenticated && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full" aria-label={t("logout")} title={t("logout")}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-full"
+                  aria-label={t("logout")}
+                  title={t("logout")}
+                >
                   <LogOut className="h-4 w-4" />
                 </Button>
               </AlertDialogTrigger>

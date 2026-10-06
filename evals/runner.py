@@ -30,7 +30,9 @@ import jwt
 from evals import config, stream
 from evals.cases import load_cases, load_prompt
 
-BUTTON_PROMPT = "[button]"  # the click request needs a non-empty prompt; the agent ignores it
+BUTTON_PROMPT = (
+    "[button]"  # the click request needs a non-empty prompt; the agent ignores it
+)
 MAX_CONFIRMATION_ROUNDS = 4
 TOKEN_REFRESH_MARGIN_S = 300
 OVERRIDE_REJECTED = "eval override rejected"
@@ -40,7 +42,9 @@ P07_CARD = "4497"
 def session_id_for(key: dict) -> str:
     """ll-<case>-<model>-<prompt>-r<run>-<hex>: 33-100 chars of [a-zA-Z0-9-_], new each call."""
     prompt = re.sub(r"[^a-zA-Z0-9]+", "-", key["prompt"])
-    prefix = f"ll-{key['case']}-{config.model_slug(key['model'])}-{prompt}-r{key['run']}-"
+    prefix = (
+        f"ll-{key['case']}-{config.model_slug(key['model'])}-{prompt}-r{key['run']}-"
+    )
     return (prefix[:68] + uuid.uuid4().hex)[:100]
 
 
@@ -68,12 +72,22 @@ def run_session(case: dict, key: dict, eval_payload: dict, send) -> dict:
     queue = list(case["confirmations"])
 
     def post(user_turn, kind, prompt, answers=(), clicks=None):
-        body = {"prompt": prompt, "runtimeSessionId": session["session_id"], "eval": eval_payload}
+        body = {
+            "prompt": prompt,
+            "runtimeSessionId": session["session_id"],
+            "eval": eval_payload,
+        }
         if clicks is not None:
             body["confirmations"] = clicks
         events, latency = send(session["session_id"], body)
-        record = {"user_turn": user_turn, "kind": kind, "input": prompt,
-                  "answers": list(answers), "latency_s": latency, **stream.digest(events)}
+        record = {
+            "user_turn": user_turn,
+            "kind": kind,
+            "input": prompt,
+            "answers": list(answers),
+            "latency_s": latency,
+            **stream.digest(events),
+        }
         session["requests"].append(record)
         return record
 
@@ -83,7 +97,9 @@ def run_session(case: dict, key: dict, eval_payload: dict, send) -> dict:
         while record["confirmations"] and not record["error"]:
             rounds += 1
             if rounds > MAX_CONFIRMATION_ROUNDS:
-                session["harness_error"] = f"more than {MAX_CONFIRMATION_ROUNDS} confirmation rounds"
+                session["harness_error"] = (
+                    f"more than {MAX_CONFIRMATION_ROUNDS} confirmation rounds"
+                )
                 return session
             answers, typed = [], None
             for pending in record["confirmations"]:
@@ -94,20 +110,31 @@ def run_session(case: dict, key: dict, eval_payload: dict, send) -> dict:
                     answer = "no"
                 if isinstance(answer, dict):
                     typed = answer["type"]
-                answers.append({"interruptId": pending.get("id"), "toolUseId": pending.get("toolUseId"),
-                                "tool": pending.get("tool"), "answer": answer})
+                answers.append(
+                    {
+                        "interruptId": pending.get("id"),
+                        "toolUseId": pending.get("toolUseId"),
+                        "tool": pending.get("tool"),
+                        "answer": answer,
+                    }
+                )
             if typed is not None:
                 # A typed reply answers every pending confirmation (confirmation_hook.resume_prompt).
                 for a in answers:
                     a["answer"] = "typed"
                 record = post(turn, "typed", typed, answers)
             else:
-                clicks = [{"interruptId": a["interruptId"], "approved": a["answer"] == "yes"} for a in answers]
+                clicks = [
+                    {"interruptId": a["interruptId"], "approved": a["answer"] == "yes"}
+                    for a in answers
+                ]
                 record = post(turn, "click", BUTTON_PROMPT, answers, clicks)
         if record["error"]:
             session["harness_error"] = record["error"]
             return session
-    session["missing_confirmations"] = [q["tool"] for q in queue if not q.get("optional")]
+    session["missing_confirmations"] = [
+        q["tool"] for q in queue if not q.get("optional")
+    ]
     return session
 
 
@@ -116,8 +143,13 @@ def run_with_retry(case: dict, key: dict, eval_payload: dict, send) -> dict:
     for attempt in (1, 2):
         try:
             session = run_session(case, key, eval_payload, send)
-        except Exception as e:  # login, HTTP or digest failure: record it, never crash the matrix
-            session = {**_new_session(case, key), "harness_error": f"{type(e).__name__}: {e}"}
+        except (
+            Exception
+        ) as e:  # login, HTTP or digest failure: record it, never crash the matrix
+            session = {
+                **_new_session(case, key),
+                "harness_error": f"{type(e).__name__}: {e}",
+            }
         session["attempt"] = attempt
         error = session["harness_error"]
         if not error or error.startswith(OVERRIDE_REJECTED):
@@ -128,22 +160,36 @@ def run_with_retry(case: dict, key: dict, eval_payload: dict, send) -> dict:
 class Logins:
     """Cognito access tokens per persona, refreshed 5 minutes before they expire."""
 
-    def __init__(self, cognito, client_id: str, passwords: dict[str, str], clock=time.time):
-        self._cognito, self._client_id, self._passwords, self._clock = cognito, client_id, passwords, clock
+    def __init__(
+        self, cognito, client_id: str, passwords: dict[str, str], clock=time.time
+    ):
+        self._cognito, self._client_id, self._passwords, self._clock = (
+            cognito,
+            client_id,
+            passwords,
+            clock,
+        )
         self._tokens: dict[str, str] = {}
         self._lock = threading.Lock()
 
     def token(self, persona: str) -> str:
         with self._lock:
             token = self._tokens.get(persona)
-            if token is None or self._expires(token) - self._clock() < TOKEN_REFRESH_MARGIN_S:
+            if (
+                token is None
+                or self._expires(token) - self._clock() < TOKEN_REFRESH_MARGIN_S
+            ):
                 result = self._cognito.initiate_auth(
                     AuthFlow="USER_PASSWORD_AUTH",
                     ClientId=self._client_id,
-                    AuthParameters={"USERNAME": config.username(persona),
-                                    "PASSWORD": self._passwords[persona]},
+                    AuthParameters={
+                        "USERNAME": config.username(persona),
+                        "PASSWORD": self._passwords[persona],
+                    },
                 )
-                token = self._tokens[persona] = result["AuthenticationResult"]["AccessToken"]
+                token = self._tokens[persona] = result["AuthenticationResult"][
+                    "AccessToken"
+                ]
             return token
 
     @staticmethod
@@ -153,13 +199,17 @@ class Logins:
 
 def make_send(http: httpx.Client, runtime_arn: str, logins: Logins):
     """send(persona, session_id, body) -> (events, latency_s) against the runtime."""
-    url = (f"https://bedrock-agentcore.{config.REGION}.amazonaws.com/runtimes/"
-           f"{quote(runtime_arn, safe='')}/invocations?qualifier=DEFAULT")
+    url = (
+        f"https://bedrock-agentcore.{config.REGION}.amazonaws.com/runtimes/"
+        f"{quote(runtime_arn, safe='')}/invocations?qualifier=DEFAULT"
+    )
 
     def send(persona: str, session_id: str, body: dict):
-        headers = {"Authorization": f"Bearer {logins.token(persona)}",
-                   "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
-                   "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {logins.token(persona)}",
+            "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
+            "Content-Type": "application/json",
+        }
         start = time.monotonic()
         with http.stream("POST", url, headers=headers, json=body) as response:
             response.raise_for_status()
@@ -171,7 +221,11 @@ def make_send(http: httpx.Client, runtime_arn: str, logins: Logins):
 
 def precheck_p07(lambda_client) -> str | None:
     """None when P07's card 4497 is Active with no open case; else what's wrong."""
-    context = {"custom": {"bedrockAgentCoreToolName": "get-session-context-target___get_session_context"}}
+    context = {
+        "custom": {
+            "bedrockAgentCoreToolName": "get-session-context-target___get_session_context"
+        }
+    }
     response = lambda_client.invoke(
         FunctionName="ledgerlens-get-session-context",
         ClientContext=base64.b64encode(json.dumps(context).encode()).decode(),
@@ -181,7 +235,9 @@ def precheck_p07(lambda_client) -> str | None:
     body = stream.parse_tool_body(outer.get("content"))
     if not isinstance(body, dict) or body.get("cards") is None:
         return f"P07 session context unreadable: {str(outer)[:200]}"
-    status = {c.get("card_last4"): c.get("product_status") for c in body["cards"]}.get(P07_CARD)
+    status = {c.get("card_last4"): c.get("product_status") for c in body["cards"]}.get(
+        P07_CARD
+    )
     if status != "Active":
         return f"P07 card {P07_CARD} is {status}, expected Active"
     if body.get("open_cases"):
@@ -205,9 +261,16 @@ class CostGuard:
         return self.spent >= self.cap
 
 
-def matrix(cases: list[dict], models: list[str], prompts: list[str], runs: int) -> list[tuple[dict, dict]]:
-    return [(c, {"case": c["id"], "model": m, "prompt": p, "run": r})
-            for p in prompts for m in models for c in cases for r in range(1, runs + 1)]
+def matrix(
+    cases: list[dict], models: list[str], prompts: list[str], runs: int
+) -> list[tuple[dict, dict]]:
+    return [
+        (c, {"case": c["id"], "model": m, "prompt": p, "run": r})
+        for p in prompts
+        for m in models
+        for c in cases
+        for r in range(1, runs + 1)
+    ]
 
 
 def done_keys(path: Path) -> set[tuple]:
@@ -228,20 +291,31 @@ def session_cost(session: dict) -> float:
     return config.session_cost(session["key"]["model"], tokens_in, tokens_out)
 
 
-def run_matrix(jobs, send, out_path: Path, guard: CostGuard, concurrency: int, prompt_texts: dict) -> list[dict]:
+def run_matrix(
+    jobs, send, out_path: Path, guard: CostGuard, concurrency: int, prompt_texts: dict
+) -> list[dict]:
     lock = threading.Lock()
 
     def job(case, key):
         if guard.exhausted:
             return None
-        payload = {"model_id": key["model"], "prompt_name": key["prompt"],
-                   "system_prompt": prompt_texts[key["prompt"]]}
-        session = run_with_retry(case, key, payload, functools.partial(send, case["persona"]))
+        payload = {
+            "model_id": key["model"],
+            "prompt_name": key["prompt"],
+            "system_prompt": prompt_texts[key["prompt"]],
+        }
+        session = run_with_retry(
+            case, key, payload, functools.partial(send, case["persona"])
+        )
         guard.add(session_cost(session))
         with lock:
             with out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(session, ensure_ascii=False) + "\n")
-            status = f"ERROR {session['harness_error']}" if session["harness_error"] else "ok"
+            status = (
+                f"ERROR {session['harness_error']}"
+                if session["harness_error"]
+                else "ok"
+            )
             print(f"{key_id(key)} {status} spent=${guard.spent:.2f}", flush=True)
         return session
 
@@ -278,8 +352,15 @@ def main(argv=None) -> int:
     if out_path.exists() and not args.resume:
         parser.error(f"{out_path} exists; pass --resume or use another --out")
     done = done_keys(out_path) if args.resume else set()
-    jobs = [(c, k) for c, k in matrix(cases, args.models, args.prompts, args.runs) if key_id(k) not in done]
-    estimate = sum(config.session_cost(k["model"], *config.ESTIMATED_TOKENS[k["model"]]) for _, k in jobs)
+    jobs = [
+        (c, k)
+        for c, k in matrix(cases, args.models, args.prompts, args.runs)
+        if key_id(k) not in done
+    ]
+    estimate = sum(
+        config.session_cost(k["model"], *config.ESTIMATED_TOKENS[k["model"]])
+        for _, k in jobs
+    )
     print(f"{len(jobs)} sessions, estimated ${estimate:.2f}, cap ${args.max_cost:.2f}")
     if args.dry_run:
         for _, k in jobs:
@@ -290,7 +371,9 @@ def main(argv=None) -> int:
     personas = sorted({c["persona"] for c, _ in jobs})
     passwords = {p: env.get(f"EVAL_PASSWORD_{p}") for p in personas}
     if not all(passwords.values()):
-        parser.error(f"evals/.env lacks passwords for {[p for p, v in passwords.items() if not v]}")
+        parser.error(
+            f"evals/.env lacks passwords for {[p for p, v in passwords.items() if not v]}"
+        )
     session = config.aws_session()
     outputs = config.stack_outputs(session)
     if not args.skip_precheck and "P07" in personas:
@@ -302,22 +385,37 @@ def main(argv=None) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     run_info = {
         "models": args.models,
-        "prompts": {n: hashlib.sha256(t.encode("utf-8")).hexdigest()[:8] for n, t in prompt_texts.items()},
+        "prompts": {
+            n: hashlib.sha256(t.encode("utf-8")).hexdigest()[:8]
+            for n, t in prompt_texts.items()
+        },
         "runs": args.runs,
         "cases": [c["id"] for c in cases],
         "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "agent_runtime_arn": outputs["RuntimeArn"],
     }
     (args.out / "run.json").write_text(json.dumps(run_info, indent=2), encoding="utf-8")
-    logins = Logins(session.client("cognito-idp"), outputs["CognitoClientId"], passwords)
+    logins = Logins(
+        session.client("cognito-idp"), outputs["CognitoClientId"], passwords
+    )
     guard = CostGuard(args.max_cost)
     with httpx.Client(timeout=httpx.Timeout(30.0, read=300.0)) as http:
-        sessions = run_matrix(jobs, make_send(http, outputs["RuntimeArn"], logins),
-                              out_path, guard, args.concurrency, prompt_texts)
+        sessions = run_matrix(
+            jobs,
+            make_send(http, outputs["RuntimeArn"], logins),
+            out_path,
+            guard,
+            args.concurrency,
+            prompt_texts,
+        )
     errors = [s for s in sessions if s["harness_error"]]
-    print(f"done: {len(sessions)} sessions, {len(errors)} harness errors, spent ${guard.spent:.2f}")
+    print(
+        f"done: {len(sessions)} sessions, {len(errors)} harness errors, spent ${guard.spent:.2f}"
+    )
     if any(s["harness_error"].startswith(OVERRIDE_REJECTED) for s in errors):
-        print("The agent rejected the eval override: check the login's group and EVAL_MODEL_IDS.")
+        print(
+            "The agent rejected the eval override: check the login's group and EVAL_MODEL_IDS."
+        )
         return 2
     return 0
 

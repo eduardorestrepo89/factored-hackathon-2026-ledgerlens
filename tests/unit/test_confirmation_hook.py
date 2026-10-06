@@ -59,7 +59,11 @@ def confirm():
     return importlib.import_module("tools.confirmation_hook")
 
 
-CLAIM_INPUT = {"customer_id": "CLI-1", "transaction_ids": ["TRX-1"], "claim_type": "fraud"}
+CLAIM_INPUT = {
+    "customer_id": "CLI-1",
+    "transaction_ids": ["TRX-1"],
+    "claim_type": "fraud",
+}
 
 
 def test_a_claim_pauses_for_the_customer_with_its_details(confirm):
@@ -73,13 +77,22 @@ def test_a_claim_pauses_for_the_customer_with_its_details(confirm):
     assert reason == {
         "tool": "open_claim",
         "toolUseId": "tool-1",
-        "details": {"transaction_ids": ["TRX-1"], "claim_type": "fraud"},  # no customer_id
+        "details": {
+            "transaction_ids": ["TRX-1"],
+            "claim_type": "fraud",
+        },  # no customer_id
     }
 
 
 def test_a_card_block_pauses_with_the_card_and_without_the_model_flag(confirm):
     event = StubBeforeToolCallEvent(
-        BLOCK, {"customer_id": "CLI-1", "card_last4": "4497", "reason": "lost", "customer_confirmed": True}
+        BLOCK,
+        {
+            "customer_id": "CLI-1",
+            "card_last4": "4497",
+            "reason": "lost",
+            "customer_confirmed": True,
+        },
     )
 
     with pytest.raises(Paused):
@@ -89,7 +102,9 @@ def test_a_card_block_pauses_with_the_card_and_without_the_model_flag(confirm):
 
 
 @pytest.mark.parametrize("model_flag", [False, None])
-def test_yes_runs_the_block_with_customer_confirmed_set_by_the_click(confirm, model_flag):
+def test_yes_runs_the_block_with_customer_confirmed_set_by_the_click(
+    confirm, model_flag
+):
     # Cedar requires customer_confirmed true; after a click it never comes from the model.
     tool_input = {"customer_id": "CLI-1", "card_last4": "4497", "reason": "lost"}
     if model_flag is not None:
@@ -103,7 +118,9 @@ def test_yes_runs_the_block_with_customer_confirmed_set_by_the_click(confirm, mo
 
 
 def test_yes_runs_a_hand_off_without_adding_a_flag_it_doesnt_take(confirm):
-    event = StubBeforeToolCallEvent(HAND_OFF, {"reason": "CUSTOMER_REQUEST"}, {"approved": True})
+    event = StubBeforeToolCallEvent(
+        HAND_OFF, {"reason": "CUSTOMER_REQUEST"}, {"approved": True}
+    )
 
     confirm.ConfirmationHook().confirm(event)
 
@@ -120,7 +137,9 @@ def test_no_cancels_the_call(confirm):
 
 
 def test_a_typed_reply_that_isnt_a_yes_reaches_the_model(confirm):
-    event = StubBeforeToolCallEvent(CLAIM, CLAIM_INPUT, {"approved": False, "text": 'y el "otro" cargo?'})
+    event = StubBeforeToolCallEvent(
+        CLAIM, CLAIM_INPUT, {"approved": False, "text": 'y el "otro" cargo?'}
+    )
 
     confirm.ConfirmationHook().confirm(event)
 
@@ -139,7 +158,10 @@ def test_other_tools_and_cancelled_calls_are_left_alone(confirm):
 
 
 def test_clicks_answer_each_confirmation_and_unanswered_ones_are_no(confirm):
-    payload = {"prompt": "Sí", "confirmations": [{"interruptId": "a", "approved": True}]}
+    payload = {
+        "prompt": "Sí",
+        "confirmations": [{"interruptId": "a", "approved": True}],
+    }
 
     responses = confirm.resume_prompt(["a", "b"], payload)
 
@@ -154,15 +176,25 @@ def test_a_typed_reply_never_approves_and_reaches_the_model(confirm, typed):
     # Only a click on Yes runs the tool, so even a typed "sí" is passed on as words.
     [response] = confirm.resume_prompt(["a"], {"prompt": typed})
 
-    assert response["interruptResponse"]["response"] == {"approved": False, "text": typed}
+    assert response["interruptResponse"]["response"] == {
+        "approved": False,
+        "text": typed,
+    }
 
 
 def test_an_interrupted_result_becomes_a_confirmation_event(confirm):
-    interrupt = types.SimpleNamespace(id="a", name="confirm_open_claim", reason={"tool": "open_claim"})
+    interrupt = types.SimpleNamespace(
+        id="a", name="confirm_open_claim", reason={"tool": "open_claim"}
+    )
     result = types.SimpleNamespace(stop_reason="interrupt", interrupts=[interrupt])
 
     assert confirm.confirmation_events({"result": result}) == [
         {"confirmation": {"id": "a", "tool": "open_claim"}}
     ]
-    assert confirm.confirmation_events({"result": types.SimpleNamespace(stop_reason="end_turn")}) == []
+    assert (
+        confirm.confirmation_events(
+            {"result": types.SimpleNamespace(stop_reason="end_turn")}
+        )
+        == []
+    )
     assert confirm.confirmation_events({"data": "hola"}) == []

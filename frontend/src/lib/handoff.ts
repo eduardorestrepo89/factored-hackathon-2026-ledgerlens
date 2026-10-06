@@ -38,7 +38,11 @@ export function parseHandOffResult(result: string | undefined): HandOffResult | 
     // The Gateway may pass the Lambda's whole {"content":[{"text": <JSON>}]} response through
     const inner = (value as { content?: { text?: unknown }[] } | null)?.content?.[0]?.text
     if (typeof inner === "string") value = JSON.parse(inner)
-    if (typeof value === "object" && value !== null && typeof (value as HandOffResult).hand_off_id === "string") {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as HandOffResult).hand_off_id === "string"
+    ) {
       const found = value as HandOffResult
       return { ...found, related_ids: Array.isArray(found.related_ids) ? found.related_ids : [] }
     }
@@ -84,7 +88,11 @@ export const queueFor = (reason: string, lang: Lang = "es"): string =>
   translate(lang, reason === "FRAUD_CONFIRMED" ? "queueFraud" : "queueGeneral")
 
 /** Two replies Laura can send as they are: a greeting that shows she has the case, then a next step. */
-export function suggestedReplies(handOff: HandOff, customerName: string, lang: Lang = "es"): [string, string] {
+export function suggestedReplies(
+  handOff: HandOff,
+  customerName: string,
+  lang: Lang = "es"
+): [string, string] {
   const name = customerName.trim().split(/\s+/)[0]
   const queue = queueFor(handOff.reason, lang)
   const hello = translate(lang, name ? "helloNamed" : "hello", { name, queue })

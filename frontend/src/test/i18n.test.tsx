@@ -5,7 +5,9 @@ import { ChatHeader } from "@/components/chat/ChatHeader"
 import { LanguageProvider } from "@/lib/i18n"
 import { reasonLabel } from "@/lib/handoff"
 
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: false, signOut: vi.fn() }) }))
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ isAuthenticated: false, signOut: vi.fn() }),
+}))
 
 afterEach(() => {
   localStorage.clear()

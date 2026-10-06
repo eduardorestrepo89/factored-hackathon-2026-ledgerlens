@@ -981,7 +981,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print()
     if final_status == "SUCCEEDED":
         log_success(f"Build finished with status: {final_status}")
-        log_info("Backend deployed. Frontend not deployed - run scripts/deploy-frontend.py when needed")
+        log_info(
+            "Backend deployed. Frontend not deployed - run scripts/deploy-frontend.py when needed"
+        )
 
         # Success: remove all build resources, leaving zero footprint.
         print()

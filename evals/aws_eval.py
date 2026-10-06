@@ -33,15 +33,28 @@ def _field(item, name):
 
 def evaluate_session(session: dict, case: dict, run, make_refs, agent_id: str) -> dict:
     """run = EvaluationClient.run; make_refs = ReferenceInputs (injected for tests)."""
-    out = {"key": session["key"], "session_id": session["session_id"], "results": [], "error": None}
+    out = {
+        "key": session["key"],
+        "session_id": session["session_id"],
+        "results": [],
+        "error": None,
+    }
     refs = {"assertions": case["assertions"]}
     if case["expected_tools"]:
         refs["expected_trajectory"] = case["expected_tools"]
     try:
-        items = run(evaluator_ids=evaluator_ids(case), agent_id=agent_id,
-                    session_id=session["session_id"], reference_inputs=make_refs(**refs))
-        out["results"] = [{name: _field(item, name) for name in _FIELDS} for item in items]
-        if not out["results"]:  # the SDK returns [] when it finds no spans; retry on a rerun
+        items = run(
+            evaluator_ids=evaluator_ids(case),
+            agent_id=agent_id,
+            session_id=session["session_id"],
+            reference_inputs=make_refs(**refs),
+        )
+        out["results"] = [
+            {name: _field(item, name) for name in _FIELDS} for item in items
+        ]
+        if not out[
+            "results"
+        ]:  # the SDK returns [] when it finds no spans; retry on a rerun
             out["error"] = NO_RESULTS
     except Exception as e:  # one failed session must not stop the rest
         out["error"] = f"{type(e).__name__}: {e}"
@@ -52,12 +65,18 @@ def evaluated_ids(path: Path) -> set[str]:
     """Session ids already scored without an error (a rerun retries the rest)."""
     if not path.exists():
         return set()
-    records = (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    records = (
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
     return {r["session_id"] for r in records if not r.get("error")}
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Score a run with AgentCore Evaluations.")
+    parser = argparse.ArgumentParser(
+        description="Score a run with AgentCore Evaluations."
+    )
     parser.add_argument("run_dir", type=Path)
     args = parser.parse_args(argv)
     os.environ.setdefault("AWS_PROFILE", config.AWS_PROFILE)
@@ -68,7 +87,9 @@ def main(argv=None) -> int:
     if wait > 0:
         print(f"waiting {wait:.0f} s for span ingestion")
         time.sleep(wait)
-    agent_id = json.loads((args.run_dir / "run.json").read_text(encoding="utf-8"))["agent_runtime_arn"].split("/")[-1]
+    agent_id = json.loads((args.run_dir / "run.json").read_text(encoding="utf-8"))[
+        "agent_runtime_arn"
+    ].split("/")[-1]
     cases = {c["id"]: c for c in load_cases()}
     out_path = args.run_dir / "aws_eval.jsonl"
     done = evaluated_ids(out_path)
@@ -78,9 +99,19 @@ def main(argv=None) -> int:
             session = json.loads(line)
             if session["harness_error"] or session["session_id"] in done:
                 continue
-            result = evaluate_session(session, cases[session["case_id"]], client.run, ReferenceInputs, agent_id)
+            result = evaluate_session(
+                session,
+                cases[session["case_id"]],
+                client.run,
+                ReferenceInputs,
+                agent_id,
+            )
             f.write(json.dumps(result, ensure_ascii=False) + "\n")
-            print(session["session_id"], result["error"] or [r["value"] for r in result["results"]], flush=True)
+            print(
+                session["session_id"],
+                result["error"] or [r["value"] for r in result["results"]],
+                flush=True,
+            )
     return 0
 
 

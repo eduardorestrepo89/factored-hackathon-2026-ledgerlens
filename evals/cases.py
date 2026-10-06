@@ -43,8 +43,10 @@ def _validate(case: object, seen: set[str]) -> dict:
         raise CaseError(f"{where}: unknown persona {persona!r}")
 
     turns = case.get("turns")
-    if not isinstance(turns, list) or not turns or not all(
-        isinstance(t, str) and t.strip() for t in turns
+    if (
+        not isinstance(turns, list)
+        or not turns
+        or not all(isinstance(t, str) and t.strip() for t in turns)
     ):
         raise CaseError(f"{where}: turns must be a non-empty list of messages")
 
@@ -54,22 +56,41 @@ def _validate(case: object, seen: set[str]) -> dict:
         if tool not in CONFIRM_TOOLS:
             raise CaseError(f"{where}: unknown confirmation tool {tool!r}")
         if isinstance(answer, bool):
-            raise CaseError(f"{where}: quote the answer ('yes'/'no'); YAML reads bare yes/no as booleans")
-        typed = isinstance(answer, dict) and set(answer) == {"type"} and isinstance(answer["type"], str) and answer["type"].strip()
+            raise CaseError(
+                f"{where}: quote the answer ('yes'/'no'); YAML reads bare yes/no as booleans"
+            )
+        typed = (
+            isinstance(answer, dict)
+            and set(answer) == {"type"}
+            and isinstance(answer["type"], str)
+            and answer["type"].strip()
+        )
         if answer not in ("yes", "no") and not typed:
             raise CaseError(f"{where}: answer must be 'yes', 'no' or {{type: <text>}}")
         if answer == "yes" and tool not in YES_ALLOWED:
-            raise CaseError(f"{where}: Yes on {tool} would write to the shared database")
+            raise CaseError(
+                f"{where}: Yes on {tool} would write to the shared database"
+            )
 
     checks = case.get("checks")
-    if not isinstance(checks, list) or not checks or not all(
-        isinstance(c, dict) and isinstance(c.get("check"), str) for c in checks
+    if (
+        not isinstance(checks, list)
+        or not checks
+        or not all(
+            isinstance(c, dict) and isinstance(c.get("check"), str) for c in checks
+        )
     ):
-        raise CaseError(f"{where}: checks must be a non-empty list of {{check: name, ...}}")
+        raise CaseError(
+            f"{where}: checks must be a non-empty list of {{check: name, ...}}"
+        )
 
     expected = case.get("expected_tools") or []
-    if not all(isinstance(t, str) and t.startswith("gateway_") and "___" in t for t in expected):
-        raise CaseError(f"{where}: expected_tools must be gateway_<target>___<tool> names")
+    if not all(
+        isinstance(t, str) and t.startswith("gateway_") and "___" in t for t in expected
+    ):
+        raise CaseError(
+            f"{where}: expected_tools must be gateway_<target>___<tool> names"
+        )
 
     assertions = case.get("assertions") or []
     if not assertions or not all(isinstance(a, str) and a.strip() for a in assertions):

@@ -38,11 +38,17 @@ export function ConfirmCard({ confirm }: { confirm: Confirmation }) {
 
   const [title, body] =
     tool === "open_claim"
-      ? [t("confirmClaimTitle"), count === 1 ? t("confirmClaimOne") : t("confirmClaimMany", { n: String(count) })]
+      ? [
+          t("confirmClaimTitle"),
+          count === 1 ? t("confirmClaimOne") : t("confirmClaimMany", { n: String(count) }),
+        ]
       : handOff
         ? [t("confirmHandOffTitle"), t("confirmHandOffBody")]
         : tool === "block_credit_card"
-          ? [t("confirmBlockTitle", { last4: String(confirm.details.card_last4 ?? "") }), t("confirmBlockBody")]
+          ? [
+              t("confirmBlockTitle", { last4: String(confirm.details.card_last4 ?? "") }),
+              t("confirmBlockBody"),
+            ]
           : [tool, ""]
 
   // While it's open the composer is locked: keyboard focus goes to the safe choice
@@ -101,14 +107,24 @@ export function ConfirmCard({ confirm }: { confirm: Confirmation }) {
             {t("confirmScanning")}
           </p>
           <p className="text-xs text-muted-foreground">{t("confirmScanHint")}</p>
-          <Button ref={no} variant="outline" className="self-end rounded-full px-5" onClick={cancel}>
+          <Button
+            ref={no}
+            variant="outline"
+            className="self-end rounded-full px-5"
+            onClick={cancel}
+          >
             {t("cancel")}
           </Button>
         </div>
       ) : (
         answer && (
           <div className="flex justify-end gap-2">
-            <Button ref={no} variant="outline" className="rounded-full px-5" onClick={() => answer(confirm, false, t("confirmNo"))}>
+            <Button
+              ref={no}
+              variant="outline"
+              className="rounded-full px-5"
+              onClick={() => answer(confirm, false, t("confirmNo"))}
+            >
               {t("confirmNo")}
             </Button>
             <Button className="rounded-full px-5" onClick={yes}>

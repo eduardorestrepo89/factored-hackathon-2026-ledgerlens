@@ -27,7 +27,9 @@ class FakeCognito:
         self.calls.append(("create", kw["Username"]))
         if kw["Username"] in self.existing:
             raise UsernameExistsException()
-        return {"User": {"Attributes": [{"Name": "sub", "Value": f"sub-{kw['Username']}"}]}}
+        return {
+            "User": {"Attributes": [{"Name": "sub", "Value": f"sub-{kw['Username']}"}]}
+        }
 
     def admin_get_user(self, **kw):
         self.calls.append(("get", kw["Username"]))
@@ -80,10 +82,16 @@ def test_judges_get_their_own_logins_and_passwords_and_no_group():
     entries = eval_users.create(cognito, "pool", env, apply=True, judges=True)
 
     assert sorted(entries.values()) == sorted(config.JUDGES.values())
-    assert len(set(config.JUDGES.values())) == len(config.JUDGES)  # one persona per judge
+    assert len(set(config.JUDGES.values())) == len(
+        config.JUDGES
+    )  # one persona per judge
     assert set(env) == {f"JUDGE_PASSWORD_{j}" for j in config.JUDGES}
-    assert {call[1] for call in cognito.calls} == {config.judge_username(j) for j in config.JUDGES}
-    assert not any(call[0] == "group" for call in cognito.calls)  # judges can't switch model or prompt
+    assert {call[1] for call in cognito.calls} == {
+        config.judge_username(j) for j in config.JUDGES
+    }
+    assert not any(
+        call[0] == "group" for call in cognito.calls
+    )  # judges can't switch model or prompt
 
 
 def test_a_dry_run_calls_nothing():

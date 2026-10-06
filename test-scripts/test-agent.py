@@ -443,9 +443,7 @@ def main():
     if args.local:
         # Determine pattern: CLI arg > config.yaml > default (only needed for local mode)
         pattern = (
-            args.pattern
-            if args.pattern
-            else stack_cfg.get("pattern", "ledgerlens")
+            args.pattern if args.pattern else stack_cfg.get("pattern", "ledgerlens")
         )
         print(f"Using pattern: {pattern}\n")
         print_section("LOCAL MODE - Auto-starting agent")

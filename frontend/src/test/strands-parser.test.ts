@@ -34,8 +34,15 @@ describe("strands parser: tool calls", () => {
 
 describe("strands parser: confirmations", () => {
   it("passes on a claim or hand-off paused for the customer's Yes/No", () => {
-    const confirmation = { id: "int-1", tool: "open_claim", toolUseId: "tooluse_2", details: { transaction_ids: ["TRX-1"] } }
+    const confirmation = {
+      id: "int-1",
+      tool: "open_claim",
+      toolUseId: "tooluse_2",
+      details: { transaction_ids: ["TRX-1"] },
+    }
 
-    expect(parseAll([`data: ${JSON.stringify({ confirmation })}`])).toEqual([{ type: "confirmation", ...confirmation }])
+    expect(parseAll([`data: ${JSON.stringify({ confirmation })}`])).toEqual([
+      { type: "confirmation", ...confirmation },
+    ])
   })
 })
