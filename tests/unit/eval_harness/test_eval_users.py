@@ -74,6 +74,18 @@ def test_write_cdk_map_fails_loudly_without_the_map(tmp_path):
         eval_users.write_cdk_map({"s": "c"}, path)
 
 
+def test_judges_get_their_own_logins_and_passwords_and_no_group():
+    cognito, env = FakeCognito(), {}
+
+    entries = eval_users.create(cognito, "pool", env, apply=True, judges=True)
+
+    assert sorted(entries.values()) == sorted(config.JUDGES.values())
+    assert len(set(config.JUDGES.values())) == len(config.JUDGES)  # one persona per judge
+    assert set(env) == {f"JUDGE_PASSWORD_{j}" for j in config.JUDGES}
+    assert {call[1] for call in cognito.calls} == {config.judge_username(j) for j in config.JUDGES}
+    assert not any(call[0] == "group" for call in cognito.calls)  # judges can't switch model or prompt
+
+
 def test_a_dry_run_calls_nothing():
     cognito = FakeCognito()
 

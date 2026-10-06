@@ -5,6 +5,7 @@
                                                    # evals/.env, writes their subs into
                                                    # infra-cdk/lib/cognito-construct.ts
   python -m evals.eval_users add-to-group --apply  # after the deploy created the group
+  python -m evals.eval_users create-judges --apply # the hackathon judges (config.JUDGES); never grouped
 
 The subs go into the committed USER_CUSTOMER_IDS_MAP so later deploys keep them.
 """
@@ -53,13 +54,19 @@ def _sub(attributes: list[dict]) -> str:
     return next(a["Value"] for a in attributes if a["Name"] == "sub")
 
 
-def create(cognito, pool_id: str, env: dict[str, str], apply: bool) -> dict[str, str]:
+def _logins(judges: bool) -> list[tuple[str, str, str]]:
+    """(username, .env key, customer_id) for the eval logins, or for the judges."""
+    if judges:
+        return [(config.judge_username(j), f"JUDGE_PASSWORD_{j}", c) for j, c in config.JUDGES.items()]
+    return [(config.username(p), f"EVAL_PASSWORD_{p}", c) for p, c in config.PERSONAS.items()]
+
+
+def create(cognito, pool_id: str, env: dict[str, str], apply: bool, judges: bool = False) -> dict[str, str]:
     """Return {sub: customer_id}; with apply, create missing users and set missing passwords."""
     entries: dict[str, str] = {}
-    for persona, customer_id in config.PERSONAS.items():
-        name = config.username(persona)
+    for name, key, customer_id in _logins(judges):
         if not apply:
-            print(f"would create {name} -> {persona} {customer_id}")
+            print(f"would create {name} -> {customer_id}")
             continue
         try:
             user = cognito.admin_create_user(
@@ -72,13 +79,12 @@ def create(cognito, pool_id: str, env: dict[str, str], apply: bool) -> dict[str,
             attributes = user["Attributes"]
         except cognito.exceptions.UsernameExistsException:
             attributes = cognito.admin_get_user(UserPoolId=pool_id, Username=name)["UserAttributes"]
-        key = f"EVAL_PASSWORD_{persona}"
         if key not in env:
             env[key] = generate_password()
             cognito.admin_set_user_password(UserPoolId=pool_id, Username=name,
                                             Password=env[key], Permanent=True)
         entries[_sub(attributes)] = customer_id
-        print(f"{name} -> {persona} {customer_id}")
+        print(f"{name} -> {customer_id}")
     return entries
 
 
@@ -92,7 +98,7 @@ def add_to_group(cognito, pool_id: str, apply: bool) -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Manage the LedgerLens evaluation logins.")
-    parser.add_argument("command", choices=["create", "add-to-group"])
+    parser.add_argument("command", choices=["create", "create-judges", "add-to-group"])
     parser.add_argument("--apply", action="store_true", help="make the changes (default: list them)")
     args = parser.parse_args(argv)
     session = config.aws_session()
@@ -102,7 +108,7 @@ def main(argv=None) -> int:
         add_to_group(cognito, pool_id, args.apply)
         return 0
     env = config.read_env()
-    entries = create(cognito, pool_id, env, args.apply)
+    entries = create(cognito, pool_id, env, args.apply, judges=args.command == "create-judges")
     if args.apply:
         config.write_env(env)
         print("USER_CUSTOMER_IDS_MAP =", write_cdk_map(entries))
