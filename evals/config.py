@@ -42,6 +42,22 @@ def username(persona: str) -> str:
     return f"eval-{persona.lower()}@{EMAIL_DOMAIN}"
 
 
+# Hackathon judges: one persona each, a different use case each (docs/evaluation/judges.md).
+# Not in the evaluators group, so they always get the production model and prompt.
+JUDGES = {
+    "J1": "CLI-EX6BOAOEFZHQ",  # P07 suspected fraud: block the card, open a claim
+    "J2": "CLI-UBR2NCZWTD4K",  # P09 records contradict: hand-off to a person
+    "J3": "CLI-50OIF5EIYSWK",  # P05 Portuguese, a charge in Brazil
+    "J4": "CLI-GG3Z1440277M",  # P08 follow-up of an open claim
+    "J5": "CLI-N4FPJIEGD917",  # P04 which card? two charges at one merchant
+}
+
+
+def judge_username(judge: str) -> str:
+    """The judge's login, e.g. judge-1@ledgerlens.example for J1."""
+    return f"judge-{judge[1:]}@{EMAIL_DOMAIN}"
+
+
 def model_slug(model_id: str) -> str:
     """A model id with only letters, digits and dashes, for session ids and file names."""
     return re.sub(r"[^a-zA-Z0-9]+", "-", model_id).strip("-")
