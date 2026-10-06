@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="arch-root" viewBox="0 0 1000 940" width="100%" role="img" aria-labelledby="arch-title arch-desc">
+<title id="arch-title">LedgerLens architecture and where the evaluation attaches</title>
+<desc id="arch-desc">The customer app and the eval harness both sign in with Amazon Cognito and call AgentCore Runtime with the access token; the Runtime checks the JWT. Every request passes the override gate (eval_override.py), which honours an eval override only for the Cognito group evaluators and an allowlisted model, and then swaps only the model and the base prompt. The Strands agent calls the Bedrock model through the Bedrock Guardrail and keeps history, session context and paused tool calls in AgentCore Memory. The Runtime gets a Gateway machine token from Cognito, where the Pre-Token Lambda adds the customer_id. Each tool call passes CustomerIdHook, which overwrites the model's customer_id with the token's, and ConfirmationHook, which pauses block_credit_card, open_claim and human_agent_hand_off until a Yes or No tap. The AgentCore Gateway checks the machine token and the Cedar policy (permit when the token has a customer_id, forbid a different customer_id, forbid a block or claim without customer_confirmed true) before it invokes one of 9 Lambda tools; 8 of them use Aurora DSQL. The Runtime sends OpenTelemetry spans tagged with session.id, model.id and prompt.version to CloudWatch Transaction Search, and Gateway tracing sends policy and tool spans to X-Ray. The harness grades the SSE stream locally, which decides pass or fail, and AgentCore Evaluations scores the same sessions from the spans, which only corroborates.</desc>
+<style>
+.arch-root .arch-box{fill:var(--surface);stroke:var(--line);stroke-width:1.25}
+.arch-root .arch-group{fill:var(--soft);stroke:var(--line);stroke-width:1.25}
+.arch-root .arch-eval{fill:var(--surface);stroke:var(--accent);stroke-width:1.75;stroke-dasharray:6 4}
+.arch-root .arch-note{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.arch-root .arch-none{fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:4 4}
+.arch-root .arch-chip{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+.arch-root .arch-badge{fill:var(--surface);stroke:var(--accent);stroke-width:1.75}
+.arch-root .arch-dot{fill:var(--ink);stroke:none}
+.arch-root .arch-ln{fill:none;stroke:var(--ink);stroke-width:1.4}
+.arch-root .arch-ln-a{fill:none;stroke:var(--accent);stroke-width:1.75}
+.arch-root .arch-ln-d{fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:5 4}
+.arch-root .arch-life{fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:3 4}
+.arch-root .arch-hd{fill:var(--ink);stroke:none}
+.arch-root .arch-hd-a{fill:var(--accent);stroke:none}
+.arch-root .arch-hd-m{fill:var(--muted);stroke:none}
+.arch-root text{font-family:var(--body);font-size:13px;fill:var(--ink);stroke:none}
+.arch-root .arch-h{font-family:var(--display);font-size:14px;font-weight:600}
+.arch-root .arch-hl{font-family:var(--display);font-size:15px;font-weight:600}
+.arch-root .arch-m{fill:var(--muted)}
+.arch-root .arch-c{font-family:var(--mono);font-size:12px}
+.arch-root .arch-a{fill:var(--accent)}
+.arch-root .arch-tp{fill:var(--pass)}
+.arch-root .arch-tf{fill:var(--fail)}
+.arch-root .arch-tw{fill:var(--warn)}
+.arch-root .arch-b{font-weight:600}
+.arch-root .arch-mid{text-anchor:middle}
+.arch-root .arch-bn{font-size:12px;font-weight:700;fill:var(--accent);text-anchor:middle}
+</style>
+<defs><marker id="arch-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arch-hd" d="M0,0 L10,5 L0,10 z"/></marker><marker id="arch-ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arch-hd-a" d="M0,0 L10,5 L0,10 z"/></marker><marker id="arch-ah-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arch-hd-m" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="arch-box" x="30" y="40" width="200" height="130" rx="8"/>
+<text x="44" y="63" class="arch-h">Amazon Cognito</text>
+<text x="44" y="82">sign-in token: sub and</text>
+<text x="44" y="101"><tspan class="arch-c">cognito:groups</tspan></text>
+<text x="44" y="124">Gateway machine token:</text>
+<text x="44" y="141">Pre-Token Lambda adds</text>
+<text x="44" y="158">customer_id from the sub</text>
+<rect class="arch-box" x="30" y="210" width="200" height="80" rx="8"/>
+<text x="44" y="233" class="arch-h">Customer app</text>
+<text x="44" y="252">chat with Yes/No buttons</text>
+<text x="44" y="271" class="arch-m">Spanish or Portuguese</text>
+<rect class="arch-eval" x="30" y="320" width="200" height="150" rx="8"/>
+<text x="44" y="343" class="arch-h">Eval harness</text>
+<text x="44" y="362"><tspan class="arch-c">evals/runner.py</tspan></text>
+<text x="44" y="384">8 logins in the group</text>
+<text x="44" y="401"><tspan class="arch-c">evaluators</tspan></text>
+<text x="44" y="418">each request adds an eval</text>
+<text x="44" y="435">override: model id, prompt</text>
+<text x="44" y="452">name and prompt text</text>
+<path class="arch-ln" d="M30,395 L16,395 L16,100 L30,100" marker-end="url(#arch-ah)"/>
+<path class="arch-ln" d="M30,250 L16,250"/>
+<circle class="arch-dot" cx="16" cy="250" r="3"/>
+<text x="24" y="194" class="arch-m">sign in</text>
+<rect class="arch-eval" x="30" y="520" width="200" height="100" rx="8"/>
+<text x="44" y="543" class="arch-h">Local verdict</text>
+<text x="44" y="562"><tspan class="arch-c">stream.py, graders.py</tspan></text>
+<text x="44" y="581">named checks on the SSE</text>
+<text x="44" y="600">digest; this decides</text>
+<path class="arch-ln-a" d="M130,470 L130,518" marker-end="url(#arch-ah-a)"/>
+<text x="138" y="499" class="arch-c arch-a">sessions.jsonl</text>
+<rect class="arch-eval" x="30" y="700" width="200" height="122" rx="8"/>
+<text x="44" y="723" class="arch-h">AgentCore Evaluations</text>
+<text x="44" y="742">GoalSuccessRate and</text>
+<text x="44" y="761">TrajectoryInOrderMatch</text>
+<text x="44" y="784" class="arch-m">sessions with a Yes/No fail</text>
+<text x="44" y="802"><tspan class="arch-c arch-m">SpanEventParsingException</tspan></text>
+<path class="arch-ln-a" d="M130,700 L130,622" marker-end="url(#arch-ah-a)"/>
+<text x="138" y="656" class="arch-a">scores, compared</text>
+<text x="138" y="672" class="arch-a">with the verdict</text>
+<rect class="arch-group" x="280" y="30" width="385" height="530" rx="10"/>
+<text x="296" y="54" class="arch-hl">AgentCore Runtime</text>
+<text x="296" y="72" class="arch-m">checks the Cognito JWT on every request</text>
+<rect class="arch-box" x="296" y="90" width="160" height="104" rx="8"/>
+<text x="308" y="112" class="arch-h">CustomerIdHook</text>
+<text x="308" y="131">overwrites the model's</text>
+<text x="308" y="150">customer_id with the</text>
+<text x="308" y="169">token's value</text>
+<rect class="arch-box" x="496" y="90" width="154" height="104" rx="8"/>
+<text x="508" y="112" class="arch-h">ConfirmationHook</text>
+<text x="508" y="131">pauses block, claim and</text>
+<text x="508" y="148">hand-off until a tap;</text>
+<text x="508" y="165">a Yes sets</text>
+<text x="508" y="182">customer_confirmed</text>
+<path class="arch-ln" d="M456,138 L494,138" marker-end="url(#arch-ah)"/>
+<path class="arch-ln" d="M230,138 L294,138" marker-end="url(#arch-ah)"/>
+<text x="255" y="131" class="arch-mid arch-m">token</text>
+<path class="arch-ln" d="M650,138 L728,138" marker-end="url(#arch-ah)"/>
+<text x="671" y="131">MCP call</text>
+<text x="671" y="155" class="arch-m">+ token</text>
+<rect class="arch-eval" x="296" y="235" width="160" height="150" rx="8"/>
+<text x="308" y="257" class="arch-h arch-a">Override gate</text>
+<text x="308" y="275"><tspan class="arch-c">eval_override.py</tspan></text>
+<text x="308" y="296">eval is used only for</text>
+<text x="308" y="313">the evaluators group</text>
+<text x="308" y="330">and an allowlisted</text>
+<text x="308" y="347">model; it swaps only the</text>
+<text x="308" y="364">model and base prompt</text>
+<rect class="arch-box" x="496" y="235" width="154" height="150" rx="8"/>
+<text x="508" y="257" class="arch-h">Strands agent</text>
+<text x="508" y="276">system prompt =</text>
+<text x="508" y="295">base prompt</text>
+<text x="508" y="314">+ customer_id block</text>
+<text x="508" y="333">+ session context</text>
+<text x="508" y="369" class="arch-m">tools: Gateway (MCP)</text>
+<path class="arch-ln" d="M456,310 L494,310" marker-end="url(#arch-ah)"/>
+<text x="476" y="303" class="arch-mid arch-m">sets</text>
+<path class="arch-ln" d="M520,235 L520,214 L376,214 L376,196" marker-end="url(#arch-ah)"/>
+<text x="528" y="229" class="arch-m">tool call</text>
+<path class="arch-ln" d="M230,262 L294,262" marker-end="url(#arch-ah)"/>
+<text x="255" y="255" class="arch-mid arch-m">POST</text>
+<text x="255" y="279" class="arch-mid arch-m">SSE</text>
+<path class="arch-ln-a" d="M230,350 L294,350" marker-end="url(#arch-ah-a)"/>
+<text x="255" y="343" class="arch-mid arch-a">+ eval</text>
+<text x="255" y="367" class="arch-mid arch-a">SSE</text>
+<rect class="arch-box" x="296" y="415" width="160" height="130" rx="8"/>
+<text x="308" y="437" class="arch-h">AgentCore Memory</text>
+<text x="308" y="456">history, session</text>
+<text x="308" y="475">context and the</text>
+<text x="308" y="494">paused tool call</text>
+<text x="308" y="525" class="arch-m">kept per session</text>
+<rect class="arch-group" x="496" y="415" width="154" height="130" rx="8"/>
+<text x="508" y="436" class="arch-h">Bedrock Guardrail</text>
+<text x="508" y="454">blocks prompt attacks</text>
+<text x="508" y="472">and off-topic requests</text>
+<rect class="arch-box" x="508" y="484" width="130" height="50" rx="8"/>
+<text x="518" y="505" class="arch-h">Bedrock model</text>
+<text x="518" y="523" class="arch-m">prod: Haiku 4.5</text>
+<path class="arch-ln" d="M573,385 L573,413" marker-end="url(#arch-ah)"/>
+<text x="581" y="404" class="arch-m">calls</text>
+<path class="arch-ln" d="M470,560 L470,698" marker-end="url(#arch-ah)"/>
+<text x="478" y="622">OTel spans</text>
+<text x="478" y="640" class="arch-c arch-m">model.id, prompt.version</text>
+<rect class="arch-group" x="730" y="30" width="250" height="240" rx="10"/>
+<text x="744" y="54" class="arch-hl">AgentCore Gateway</text>
+<text x="744" y="72" class="arch-m">checks the machine token</text>
+<rect class="arch-box" x="744" y="86" width="222" height="170" rx="8"/>
+<text x="756" y="108" class="arch-h">AgentCore Policy (Cedar)</text>
+<text x="756" y="128">permit: the token has a</text>
+<text x="756" y="148">customer_id</text>
+<text x="756" y="168">forbid: the input</text>
+<text x="756" y="185">customer_id differs</text>
+<text x="756" y="210">forbid: block or claim</text>
+<text x="756" y="227">unless customer_confirmed</text>
+<text x="756" y="244">is true</text>
+<path class="arch-ln" d="M855,270 L855,303" marker-end="url(#arch-ah)"/>
+<text x="863" y="291" class="arch-m">if permitted</text>
+<rect class="arch-box" x="730" y="305" width="250" height="240" rx="8"/>
+<text x="744" y="328" class="arch-h">9 Lambda tools</text>
+<text x="744" y="348" class="arch-m">read</text>
+<text x="744" y="366" class="arch-c">list_credit_cards</text>
+<text x="744" y="383" class="arch-c">list_card_transactions</text>
+<text x="744" y="400" class="arch-c">get_session_context</text>
+<text x="744" y="417" class="arch-c">classify_call_type</text>
+<text x="744" y="434" class="arch-c">explain_transaction</text>
+<text x="744" y="451" class="arch-c">transaction_fraud_detection</text>
+<text x="744" y="472" class="arch-m">behind a Yes/No tap</text>
+<text x="744" y="490" class="arch-c">block_credit_card</text>
+<text x="744" y="507" class="arch-c">open_claim</text>
+<text x="744" y="524" class="arch-c">human_agent_hand_off</text>
+<path class="arch-ln" d="M855,545 L855,588" marker-end="url(#arch-ah)"/>
+<text x="863" y="572" class="arch-m">SQL</text>
+<rect class="arch-box" x="730" y="590" width="250" height="72" rx="8"/>
+<text x="744" y="613" class="arch-h">Aurora DSQL</text>
+<text x="744" y="631">8 of the 9 tools; the</text>
+<text x="744" y="649">hand-off stores nothing</text>
+<path class="arch-ln" d="M730,250 L700,250 L700,760 L728,760" marker-end="url(#arch-ah)"/>
+<text x="708" y="690" class="arch-m">Gateway traces</text>
+<rect class="arch-box" x="730" y="700" width="250" height="122" rx="8"/>
+<text x="744" y="723" class="arch-h">AWS X-Ray</text>
+<text x="744" y="742">Gateway tracing spans:</text>
+<text x="744" y="761" class="arch-c">AgentCore.Policy.AuthorizeAction</text>
+<text x="744" y="779">with the Cedar decision, and</text>
+<text x="744" y="797" class="arch-c">AgentCore.Gateway.InvokeTool</text>
+<rect class="arch-box" x="280" y="700" width="385" height="122" rx="8"/>
+<text x="296" y="723" class="arch-h">CloudWatch Transaction Search</text>
+<text x="296" y="742"><tspan class="arch-c">aws/spans</tspan></text>
+<text x="296" y="763">Strands spans (invoke_agent, chat,</text>
+<text x="296" y="780">execute_tool), each tagged with</text>
+<text x="296" y="799" class="arch-c">session.id, model.id, prompt.version</text>
+<path class="arch-ln-a" d="M280,760 L232,760" marker-end="url(#arch-ah-a)"/>
+<text x="255" y="752" class="arch-mid arch-a">reads</text>
+<text x="255" y="777" class="arch-mid arch-a">spans</text>
+<circle class="arch-badge" cx="230" cy="40" r="11"/>
+<text x="230" y="44" class="arch-bn">1</text>
+<circle class="arch-badge" cx="456" cy="235" r="11"/>
+<text x="456" y="239" class="arch-bn">2</text>
+<circle class="arch-badge" cx="230" cy="520" r="11"/>
+<text x="230" y="524" class="arch-bn">3</text>
+<circle class="arch-badge" cx="230" cy="700" r="11"/>
+<text x="230" y="704" class="arch-bn">4</text>
+<path class="arch-life" d="M30,846 L970,846"/>
+<circle class="arch-badge" cx="51" cy="870" r="11"/>
+<text x="51" y="874" class="arch-bn">1</text>
+<text x="70" y="874">signs in like a customer, as a member of evaluators</text>
+<circle class="arch-badge" cx="531" cy="870" r="11"/>
+<text x="531" y="874" class="arch-bn">2</text>
+<text x="550" y="874">override gate: only the model and base prompt change</text>
+<circle class="arch-badge" cx="51" cy="898" r="11"/>
+<text x="51" y="902" class="arch-bn">3</text>
+<text x="70" y="902">SSE events graded locally: this verdict decides</text>
+<circle class="arch-badge" cx="531" cy="898" r="11"/>
+<text x="531" y="902" class="arch-bn">4</text>
+<text x="550" y="902">spans scored by AgentCore Evaluations: corroborates</text>
+<text x="40" y="924" class="arch-m">Dashed accent marks evaluation-only parts. Hooks, guardrail and Cedar run unchanged for evaluators.</text>
+</svg>

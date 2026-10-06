@@ -115,3 +115,20 @@ test("a -c deploy_scope override wins over config.yaml", () => {
 test("rejects an unknown -c deploy_scope override", () => {
   expect(() => resolveDeployScope("full", "all")).toThrow(/deploy_scope/)
 })
+
+test("the evaluation model list defaults to the agent model and is read trimmed", () => {
+  expect(loadBackend("  pattern: ledgerlens\n").eval_model_ids).toEqual(["deepseek.v3.2"])
+  expect(
+    loadBackend('  eval_model_ids: [" deepseek.v3.2 ", "openai.gpt-oss-120b-1:0"]\n').eval_model_ids
+  ).toEqual(["deepseek.v3.2", "openai.gpt-oss-120b-1:0"])
+})
+
+test.each([
+  ["an empty list", "  eval_model_ids: []\n"],
+  ["a string instead of a list", '  eval_model_ids: "deepseek.v3.2"\n'],
+  ["a blank entry", '  eval_model_ids: ["deepseek.v3.2", " "]\n'],
+  ["a non-string entry", "  eval_model_ids: [42]\n"],
+])("rejects %s for eval_model_ids", (_name, backendLines) => {
+  expect(() => loadBackend(backendLines)).toThrow(/backend.eval_model_ids/)
+})
+

@@ -17,13 +17,20 @@ from strands.models import BedrockModel
 from tools.confirmation_hook import ConfirmationHook, confirmation_events, resume_prompt
 from tools.conversation_memory import create_conversation_manager
 from tools.customer_id_hook import CustomerIdHook
+from tools.eval_override import (
+    EvalOverrideRejected,
+    EvalSettings,
+    parse_allowlist,
+    resolve_eval_settings,
+)
 from tools.gateway import create_gateway_mcp_client
 from tools.guardrail import guardrail_settings
 from tools.leaked_markup import LeakedMarkupFilter
 from tools.mcp_registry import build_registry_mcp_clients, is_discovery_enabled
 from tools.session_context import apply_session_context
-from tools.system_prompt import PROMPT_VERSION, build_system_prompt
+from tools.system_prompt import build_system_prompt
 from utils.auth import (
+    extract_claims_from_context,
     extract_customer_id_from_token,
     extract_user_id_from_context,
     get_gateway_access_token,
@@ -86,8 +93,20 @@ def _create_session_manager(
     )
 
 
+# Per-model BedrockModel settings on top of the defaults in create_strands_agent.
+# gpt-oss reasons before it answers, so it needs room for those tokens.
+# ponytail: fixed table; tune from the eval pilot's stop reasons (a change needs a deploy).
+MODEL_SETTINGS: dict[str, dict] = {
+    "openai.gpt-oss-120b-1:0": {"max_tokens": 8192},
+}
+
+
 def create_strands_agent(
-    user_id: str, session_id: str, access_token: str, customer_id: str
+    user_id: str,
+    session_id: str,
+    access_token: str,
+    customer_id: str,
+    settings: EvalSettings,
 ) -> Agent:
     """Create a Strands agent with Gateway tools and memory.
 
@@ -97,17 +116,15 @@ def create_strands_agent(
         access_token: The Gateway access token for this request.
         customer_id: The customer_id claim from access_token, or "" when the
             user has no linked customer.
+        settings: The model and base prompt for this request: MODEL_ID and
+            BASE_SYSTEM_PROMPT unless an evaluation login overrides them
+            (tools/eval_override.py).
     """
-
-    # MODEL_ID comes from config.yaml (backend.model_id). GPT-6 models reject temperature.
-    model_id = os.environ.get("MODEL_ID")
-    if not model_id:
-        raise ValueError("MODEL_ID environment variable is required")
-
     # The guardrail blocks prompt attacks and topics unrelated to banking; it masks nothing.
     bedrock_model = BedrockModel(
-        model_id=model_id,
+        model_id=settings.model_id,
         temperature=0.1,
+        **MODEL_SETTINGS.get(settings.model_id, {}),
         **guardrail_settings(),
     )
 
@@ -136,7 +153,7 @@ def create_strands_agent(
 
     return Agent(
         name="strands_agent",
-        system_prompt=build_system_prompt(customer_id),
+        system_prompt=build_system_prompt(customer_id, base=settings.base_prompt),
         tools=tools,
         model=bedrock_model,
         session_manager=session_manager,
@@ -148,8 +165,9 @@ def create_strands_agent(
         trace_attributes={
             "user.id": user_id,
             "session.id": session_id,
-            # Lets evaluation and observability tell prompt versions apart.
-            "prompt.version": PROMPT_VERSION,
+            # Let evaluation and observability tell models and prompt versions apart.
+            "model.id": settings.model_id,
+            "prompt.version": settings.prompt_version,
         },
     )
 
@@ -172,16 +190,32 @@ async def invocations(payload, context: RequestContext):
         return
 
     try:
+        claims = extract_claims_from_context(context)
         user_id = extract_user_id_from_context(context)
+        try:
+            settings = resolve_eval_settings(
+                payload,
+                claims,
+                os.environ.get("MODEL_ID", ""),
+                parse_allowlist(os.environ.get("EVAL_MODEL_IDS", "")),
+            )
+        except EvalOverrideRejected as e:
+            yield {"status": "error", "error": f"eval override rejected: {e}"}
+            return
         # One token per request: the agent reads customer_id from the same token
         # the Gateway checks with Cedar.
         access_token = get_gateway_access_token(user_id)
         customer_id = extract_customer_id_from_token(access_token)
-        agent = create_strands_agent(user_id, session_id, access_token, customer_id)
-        logger.info("[PROMPT] version=%s session=%s", PROMPT_VERSION, session_id)
+        agent = create_strands_agent(user_id, session_id, access_token, customer_id, settings)
+        logger.info(
+            "[PROMPT] version=%s model=%s session=%s",
+            settings.prompt_version,
+            settings.model_id,
+            session_id,
+        )
         # Session context: fetched once per session into agent.state, then rendered
         # into the system prompt every turn, out of reach of the conversation window.
-        await apply_session_context(agent, customer_id)
+        await apply_session_context(agent, customer_id, settings.base_prompt)
 
         # A paused claim or hand-off resumes with the customer's answer instead of a prompt.
         # ponytail: _interrupt_state is Strands-internal (1.32.0); it's the only way to

@@ -24,14 +24,12 @@ from utils.ssm import get_ssm_parameter
 logger = logging.getLogger(__name__)
 
 
-def extract_user_id_from_context(context: RequestContext) -> str:
+def extract_claims_from_context(context: RequestContext) -> dict:
     """
-    Securely extract the user ID from the JWT token in the request context.
+    Return the claims of the JWT in the request context.
 
     AgentCore Runtime validates the JWT token before passing it to the agent,
-    so we can safely skip signature verification here. The user ID is taken
-    from the token's 'sub' claim rather than from the request payload, which
-    prevents impersonation via prompt injection.
+    so we can safely skip signature verification here.
 
     Args:
         context (RequestContext): The request context provided by AgentCore
@@ -39,11 +37,10 @@ def extract_user_id_from_context(context: RequestContext) -> str:
             Authorization JWT.
 
     Returns:
-        str: The user ID (sub claim) extracted from the validated JWT token.
+        dict: The token's claims (e.g. "sub", "cognito:groups").
 
     Raises:
-        ValueError: If the Authorization header is missing or the JWT does
-            not contain a 'sub' claim.
+        ValueError: If the request headers or the Authorization header are missing.
     """
     request_headers = context.request_headers
     if not request_headers:
@@ -69,15 +66,32 @@ def extract_user_id_from_context(context: RequestContext) -> str:
     )
 
     # Decode without signature verification — AgentCore Runtime already validated the token.
-    # We use options to skip all verification since this is a trusted, pre-validated token.
-    claims = jwt.decode(  # nosec B105
+    return jwt.decode(  # nosec B105
         jwt=token,
         # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode — signature verification intentionally skipped; AgentCore Runtime already validated the JWT
         options={"verify_signature": False},
         algorithms=["RS256"],
     )
 
-    user_id = claims.get("sub")
+
+def extract_user_id_from_context(context: RequestContext) -> str:
+    """
+    Securely extract the user ID from the JWT token in the request context.
+
+    The user ID is taken from the token's 'sub' claim rather than from the
+    request payload, which prevents impersonation via prompt injection.
+
+    Args:
+        context (RequestContext): The request context provided by AgentCore Runtime.
+
+    Returns:
+        str: The user ID (sub claim) extracted from the validated JWT token.
+
+    Raises:
+        ValueError: If the Authorization header is missing or the JWT does
+            not contain a 'sub' claim.
+    """
+    user_id = extract_claims_from_context(context).get("sub")
     if not user_id:
         raise ValueError(
             "JWT token does not contain a 'sub' claim. Cannot determine user identity."

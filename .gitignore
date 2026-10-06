@@ -41,3 +41,6 @@ datathon/
 # Local handoff material (decks, metrics, prompts); never committed
 docs/agent-handoff/
 
+# Evaluation harness: run outputs and its venv (the final report lives in docs/evaluation/)
+evals/results/
+evals/.venv/

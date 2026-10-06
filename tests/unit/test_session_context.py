@@ -220,3 +220,14 @@ def test_fetch_unwraps_the_lambdas_own_content_envelope(session_context):
     context = asyncio.run(session_context._fetch_session_context(agent, CUSTOMER_ID))
 
     assert context == CONTEXT
+
+
+def test_a_custom_base_is_kept_when_the_context_is_rendered(session_context, fetch):
+    agent = StateAgent()
+
+    asyncio.run(
+        session_context.apply_session_context(agent, CUSTOMER_ID, base="EVAL POLICY")
+    )
+
+    assert agent.system_prompt.startswith("EVAL POLICY\n\n")
+    assert '"first_name":"Ana"' in agent.system_prompt

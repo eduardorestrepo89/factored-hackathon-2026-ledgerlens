@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="gate-root" viewBox="0 0 1000 800" width="100%" role="img" aria-labelledby="gate-title gate-desc">
+<title id="gate-title">The per-session eval override gate</title>
+<desc id="gate-desc">resolve_eval_settings in agent/ledgerlens/tools/eval_override.py runs on every request. Without an eval field the request gets the production model (MODEL_ID, Claude Haiku 4.5) and BASE_SYSTEM_PROMPT. If the runtime JWT's cognito:groups does not include evaluators, the field is ignored, a warning is logged, and the production model and prompt are used. For an evaluator, the request is rejected and the session stops when eval is not an object, when model_id (MODEL_ID if missing) is not in EVAL_MODEL_IDS, when a sent system_prompt is not text, is blank, or is longer than 40,000 characters, or when prompt_name does not fully match [a-z0-9][a-z0-9._-]{0,31}. The runtime then yields one error event, builds no agent, and the runner records a harness error without retrying. A valid override runs that model with that text as the base prompt and tags prompt.version with the name and the first 8 hex characters of the text's SHA-256; the customer_id and session context blocks, both hooks, the guardrail and Cedar are unchanged. The allowlist is deepseek.v3.2, openai.gpt-oss-120b-1:0 and global.anthropic.claude-haiku-4-5-20251001-v1:0.</desc>
+<style>
+.gate-root .gate-box{fill:var(--surface);stroke:var(--line);stroke-width:1.25}
+.gate-root .gate-group{fill:var(--soft);stroke:var(--line);stroke-width:1.25}
+.gate-root .gate-eval{fill:var(--surface);stroke:var(--accent);stroke-width:1.75;stroke-dasharray:6 4}
+.gate-root .gate-note{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.gate-root .gate-none{fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:4 4}
+.gate-root .gate-chip{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+.gate-root .gate-badge{fill:var(--surface);stroke:var(--accent);stroke-width:1.75}
+.gate-root .gate-dot{fill:var(--ink);stroke:none}
+.gate-root .gate-ln{fill:none;stroke:var(--ink);stroke-width:1.4}
+.gate-root .gate-ln-a{fill:none;stroke:var(--accent);stroke-width:1.75}
+.gate-root .gate-ln-d{fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:5 4}
+.gate-root .gate-life{fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:3 4}
+.gate-root .gate-hd{fill:var(--ink);stroke:none}
+.gate-root .gate-hd-a{fill:var(--accent);stroke:none}
+.gate-root .gate-hd-m{fill:var(--muted);stroke:none}
+.gate-root text{font-family:var(--body);font-size:13px;fill:var(--ink);stroke:none}
+.gate-root .gate-h{font-family:var(--display);font-size:14px;font-weight:600}
+.gate-root .gate-hl{font-family:var(--display);font-size:15px;font-weight:600}
+.gate-root .gate-m{fill:var(--muted)}
+.gate-root .gate-c{font-family:var(--mono);font-size:12px}
+.gate-root .gate-a{fill:var(--accent)}
+.gate-root .gate-tp{fill:var(--pass)}
+.gate-root .gate-tf{fill:var(--fail)}
+.gate-root .gate-tw{fill:var(--warn)}
+.gate-root .gate-b{font-weight:600}
+.gate-root .gate-mid{text-anchor:middle}
+.gate-root .gate-bn{font-size:12px;font-weight:700;fill:var(--accent);text-anchor:middle}
+</style>
+<defs><marker id="gate-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="gate-hd" d="M0,0 L10,5 L0,10 z"/></marker><marker id="gate-ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="gate-hd-a" d="M0,0 L10,5 L0,10 z"/></marker><marker id="gate-ah-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="gate-hd-m" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="gate-box" x="30" y="24" width="420" height="54" rx="8"/>
+<text x="46" y="46" class="gate-h">Every request to invocations()</text>
+<text x="46" y="66" class="gate-c">resolve_eval_settings(payload, claims)</text>
+<text x="530" y="46" class="gate-m">The runner sends the same eval field on every</text>
+<text x="530" y="64" class="gate-m">request of a session, Yes/No taps included.</text>
+<path class="gate-ln" d="M240,78 L240,102" marker-end="url(#gate-ah)"/>
+<path class="gate-box" d="M50,104 H430 L450,137.0 L430,170 H50 L30,137.0 Z"/>
+<text x="240" y="132.0" class="gate-mid">Is there an eval field in the body?</text>
+<text x="240" y="150.0" class="gate-mid gate-c gate-m">payload["eval"]</text>
+<path class="gate-ln" d="M450,137 L528,137" marker-end="url(#gate-ah)"/>
+<text x="490" y="130" class="gate-mid gate-m">no</text>
+<path class="gate-ln" d="M240,170 L240,194" marker-end="url(#gate-ah)"/>
+<text x="248" y="187.0" class="gate-m">yes</text>
+<path class="gate-box" d="M50,196 H430 L450,229.0 L430,262 H50 L30,229.0 Z"/>
+<text x="240" y="224.0" class="gate-mid">Does the runtime JWT's cognito:groups</text>
+<text x="240" y="242.0" class="gate-mid">include evaluators?</text>
+<path class="gate-ln" d="M450,229 L528,229" marker-end="url(#gate-ah)"/>
+<text x="490" y="222" class="gate-mid gate-m">no</text>
+<path class="gate-ln" d="M240,262 L240,286" marker-end="url(#gate-ah)"/>
+<text x="248" y="279.0" class="gate-m">yes</text>
+<path class="gate-box" d="M50,288 H430 L450,321.0 L430,354 H50 L30,321.0 Z"/>
+<text x="240" y="307.0" class="gate-mid">Is eval an object, and is its model_id</text>
+<text x="240" y="325.0" class="gate-mid gate-c">in EVAL_MODEL_IDS?</text>
+<text x="240" y="343.0" class="gate-mid gate-m">(no model_id: MODEL_ID is checked)</text>
+<path class="gate-ln" d="M450,321 L528,321" marker-end="url(#gate-ah)"/>
+<text x="490" y="314" class="gate-mid gate-m">no</text>
+<path class="gate-ln" d="M240,354 L240,378" marker-end="url(#gate-ah)"/>
+<text x="248" y="371.0" class="gate-m">yes</text>
+<path class="gate-box" d="M50,380 H430 L450,413.0 L430,446 H50 L30,413.0 Z"/>
+<text x="240" y="399.0" class="gate-mid">If system_prompt is sent: is it text,</text>
+<text x="240" y="417.0" class="gate-mid">not blank, at most 40,000 characters?</text>
+<text x="240" y="435.0" class="gate-mid gate-m">(not sent: the production prompt)</text>
+<path class="gate-ln" d="M450,413 L528,413" marker-end="url(#gate-ah)"/>
+<text x="490" y="406" class="gate-mid gate-m">no</text>
+<path class="gate-ln" d="M240,446 L240,470" marker-end="url(#gate-ah)"/>
+<text x="248" y="463.0" class="gate-m">yes</text>
+<path class="gate-box" d="M50,472 H430 L450,505.0 L430,538 H50 L30,505.0 Z"/>
+<text x="240" y="491.0" class="gate-mid">Does prompt_name fully match</text>
+<text x="240" y="509.0" class="gate-mid gate-c">[a-z0-9][a-z0-9._-]{0,31} ?</text>
+<text x="240" y="527.0" class="gate-mid gate-m">(checked only with a system_prompt)</text>
+<path class="gate-ln" d="M450,505 L528,505" marker-end="url(#gate-ah)"/>
+<text x="490" y="498" class="gate-mid gate-m">no</text>
+<path class="gate-ln" d="M240,538 L240,572" marker-end="url(#gate-ah)"/>
+<text x="248" y="560.0" class="gate-m">yes</text>
+<rect class="gate-box" x="530" y="104" width="440" height="66" rx="8"/>
+<text x="546" y="127" class="gate-h">Production model and prompt</text>
+<text x="546" y="146">MODEL_ID (Claude Haiku 4.5), BASE_SYSTEM_PROMPT,</text>
+<text x="546" y="163" class="gate-m">prompt.version v12: what every customer gets</text>
+<rect class="gate-box" x="530" y="196" width="440" height="66" rx="8"/>
+<text x="546" y="219" class="gate-h gate-tw">Ignored and logged</text>
+<text x="546" y="238" class="gate-c">[EVAL] override ignored: not an evaluator sub=…</text>
+<text x="546" y="255" class="gate-m">then the production model and prompt, as for a customer</text>
+<rect class="gate-box" x="530" y="288" width="440" height="250" rx="8"/>
+<text x="546" y="312" class="gate-h gate-tf">Rejected: the session stops</text>
+<text x="546" y="333">The runtime yields one event and returns:</text>
+<text x="546" y="350" class="gate-c">{"status": "error", "error":</text>
+<text x="546" y="367" class="gate-c">"eval override rejected: &lt;reason&gt;"}</text>
+<text x="546" y="384">No agent is built and no model is called. The runner</text>
+<text x="546" y="401">records a harness error and does not retry it; the</text>
+<text x="546" y="418">run ends with exit code 2.</text>
+<text x="546" y="449" class="gate-m">Reasons in the code:</text>
+<text x="546" y="467" class="gate-c">eval must be an object</text>
+<text x="546" y="484" class="gate-c">model_id '…' is not in EVAL_MODEL_IDS</text>
+<text x="546" y="501" class="gate-c">system_prompt must be 1 to 40000 characters of text</text>
+<text x="546" y="518" class="gate-c">prompt_name must match [a-z0-9][a-z0-9._-]{0,31}</text>
+<rect class="gate-box" x="30" y="574" width="940" height="122" rx="8"/>
+<text x="46" y="598" class="gate-h gate-tp">Override applied</text>
+<text x="46" y="620">that model_id, with that text as the base prompt</text>
+<text x="46" y="638" class="gate-c">prompt.version = &lt;prompt_name&gt;-&lt;first 8 hex of sha256(text)&gt;</text>
+<text x="46" y="656"><tspan>logged: </tspan><tspan class="gate-c">[EVAL] override sub=… model=… prompt=…</tspan></text>
+<text x="46" y="674" class="gate-m">prompt texts are never logged</text>
+<path class="gate-life" d="M520,590 L520,680"/>
+<text x="536" y="598" class="gate-h">Unchanged for evaluators</text>
+<text x="536" y="620">customer_id and session context prompt blocks</text>
+<text x="536" y="638">CustomerIdHook and ConfirmationHook</text>
+<text x="536" y="656">Bedrock Guardrail, Cedar policy at the Gateway</text>
+<text x="536" y="674" class="gate-m">exactly as for a customer</text>
+<rect class="gate-group" x="30" y="716" width="940" height="64" rx="8"/>
+<text x="46" y="739" class="gate-h">Allowlist: EVAL_MODEL_IDS, set from config.yaml eval_model_ids</text>
+<text x="46" y="763" class="gate-c">deepseek.v3.2   ·   openai.gpt-oss-120b-1:0   ·   global.anthropic.claude-haiku-4-5-20251001-v1:0</text>
+</svg>
