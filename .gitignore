@@ -32,8 +32,7 @@ scripts/zip-artifact/
 public/
 # The frontend's static files (favicons, the public final presentation); aws-exports.json stays ignored above
 !frontend/public/
-# Videos stay out of git (the pitch is ~95 MB); the deploy script warns when the pitch video is missing
-frontend/public/**/*.mp4
+# Videos stay out of git (the pitch is ~95 MB)
 docs/**/*.mp4
 .mkdocs/public/
 .codegraph/
