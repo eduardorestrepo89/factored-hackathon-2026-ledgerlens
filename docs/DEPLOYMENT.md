@@ -1,438 +1,365 @@
 # Deployment Guide
 
-This guide walks you through deploying the Fullstack AgentCore Solution Template (FAST) to AWS.
+LedgerLens deploys to one AWS account and region as two CDK stacks, plus a React frontend pushed to Amplify Hosting by a script:
+
+| Stack | Holds | Code |
+|---|---|---|
+| `ledgerlens-bank-assistant-data` | Aurora DSQL, its VPC endpoint, the tool IAM roles and the data load pipeline | `infra-cdk/lib/data-stack.ts`, `data-construct.ts` |
+| `ledgerlens-bank-assistant` | Amplify app, Cognito, AgentCore Runtime, Memory, Gateway, Cedar policy, the 9 tool Lambdas, the guardrail and the feedback API | `infra-cdk/lib/ledgerlens-main-stack.ts`, `backend-construct.ts`, `cognito-construct.ts`, `amplify-hosting-construct.ts` |
+
+The main stack uses the data stack's VPC, security group, roles and DSQL host, so the data stack always deploys first. `cdk deploy --all` handles that order.
+
+## Current deployment
+
+| | |
+|---|---|
+| AWS account / region | `704650059996` / `us-east-1` |
+| CLI profile | `ledgerlens` (always set `AWS_PROFILE=ledgerlens`; the default profile is a different account) |
+| App URL | https://main.dteq5fgkcy7a4.amplifyapp.com |
+| Cognito user pool | `us-east-1_XEG5COTSy` (web client `1jlfd5jrsta9pdup2iijguu255`, group `evaluators`) |
+| Cognito domain | `ledgerlens-bank-assistant-704650059996-us-east-1.auth.us-east-1.amazoncognito.com` |
+| AgentCore Runtime | `ledgerlens_bank_assistant_ledgerlens_agent-VuhAwlER4L` |
+| AgentCore Gateway | `ledgerlens-bank-assistant-gateway-0emkqlikrv` |
+| Cedar policy engine | `ledgerlens_bank_assistant_policy_engine-e2smpf2suo` |
+| Feedback API | `https://t886ssi6jk.execute-api.us-east-1.amazonaws.com/prod/` |
+| Aurora DSQL cluster | `cfud6ejrtw4cwqwbnac6njkokm` (private host `cfud6ejrtw4cwqwbnac6njkokm.dsql-fnh4.us-east-1.on.aws`) |
+| Data pipeline | Step Functions `ledgerlens-data-pipeline`, CodeBuild `ledgerlens-data-load` |
+
+These IDs change if a stack is deleted and recreated. Read the current values from the stack outputs:
+
+```bash
+export AWS_PROFILE=ledgerlens
+aws cloudformation describe-stacks --stack-name ledgerlens-bank-assistant \
+  --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" --output table
+aws cloudformation describe-stacks --stack-name ledgerlens-bank-assistant-data \
+  --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" --output table
+```
+
+## What each stack creates
+
+### Data stack (`ledgerlens-bank-assistant-data`)
+
+- **Aurora DSQL cluster.** Deletion protection is on and the removal policy is RETAIN, so deleting the stack keeps the cluster. A cluster policy denies `dsql:DbConnect` and `dsql:DbConnectAdmin` from outside the VPC, except for the loader role.
+- **Network.** The account's default VPC, one AZ. An interface (PrivateLink) endpoint for DSQL on port 5432 with private DNS, reachable only from the tools security group. The subnets are public, but Lambdas get no public IP, so the tools reach only the DSQL endpoint.
+- **IAM roles.**
+  - `ledgerlens-tools`: the read tools, `dsql:DbConnect` as `ll_read`.
+  - `ledgerlens-write-tools`: `block_credit_card` and `open_claim`, `dsql:DbConnect` as `ll_write`.
+  - Loader role: the CodeBuild stages, `dsql:DbConnectAdmin`.
+- **Team bucket** (S3, SSE-S3, public access blocked): raw, clean and curated data plus the run records.
+- **Secret `ledgerlens/hackathon-s3`**: the organizer's read-only S3 keys. CDK creates it with a placeholder value, and a person sets the real value once.
+- **CodeBuild `ledgerlens-data-load`**: ARM, LARGE, 8 h timeout, one build at a time. It runs `python -m data_load $STAGE` with a pinned `aurora-dsql-loader` release (checksum verified).
+- **Lambda `ledgerlens-dsql-read-check`**: runs in the tools' subnet as `ledgerlens-tools` and checks that the tools can read what was loaded.
+- **Step Functions `ledgerlens-data-pipeline`**: Ingest → Transform → Curate → Load (CodeBuild) → ReadCheck (Lambda).
+
+### Main stack (`ledgerlens-bank-assistant`)
+
+- **Amplify Hosting app** `ledgerlens-bank-assistant-frontend`, branch `main`. It is a manual-deploy app: there is no Git connection, and `scripts/deploy-frontend.py` uploads a zip to the staging bucket and starts the job. Responses carry a CSP, HSTS, `X-Frame-Options: DENY` and related headers (`amplify-hosting-construct.ts`).
+- **Cognito.**
+  - User pool `ledgerlens-bank-assistant-user-pool`: no self sign-up, email sign-in, strong password policy, Essentials plan, managed login v2.
+  - Web client: Authorization Code grant, no secret. Callbacks are the Amplify URL and `http://localhost:3000`.
+  - Machine client: client credentials grant, with the resource server `ledgerlens-bank-assistant-gateway` (`read`/`write` scopes). Its secret is stored in Secrets Manager as `/ledgerlens-bank-assistant/machine_client_secret`.
+  - Group `evaluators`: logins that may switch the model and base prompt per session.
+  - V3 pre-token Lambda `ledgerlens-bank-assistant-pretoken-v3`: adds `customer_id` to the M2M token, looked up from `USER_CUSTOMER_IDS_MAP` (hard-coded in `cognito-construct.ts`).
+- **AgentCore Runtime** `ledgerlens_bank_assistant_ledgerlens_agent`.
+  - Built as an ARM64 Docker image from `agent/ledgerlens/Dockerfile`, with the repo root as the build context.
+  - PUBLIC network mode, HTTP protocol.
+  - JWT authorizer on the web client; the `Authorization` header is allowlisted so the agent can read the user's `sub`.
+  - Its environment variables come from `config.yaml` (see [Configuration](#configuration)).
+- **AgentCore Memory**: 30-day expiry. A semantic `FactExtractor` strategy is defined, but retrieval only runs when `use_long_term_memory: true`.
+- **Bedrock Guardrail** `ledgerlens-bank-assistant-agent-guardrail` (`lib/utils/agent-guardrail.ts`).
+  - Content filters (prompt attack included) and four denied off-topic groups, on the Standard tier through the `us.guardrail.v1:0` cross-region profile.
+  - It masks nothing. A new guardrail version is published whenever its policy changes.
+- **AgentCore Gateway** `ledgerlens-bank-assistant-gateway`: MCP `2025-03-26`, with a custom JWT authorizer that accepts only the machine client. It has one Lambda target per tool (table below).
+- **OAuth2 credential provider** `ledgerlens-bank-assistant-runtime-gateway-auth` (custom resource, `lambdas/oauth2-provider`). The agent itself fetches the Gateway token straight from the Cognito `/oauth2/token` endpoint, passing the user's `sub` as `aws_client_metadata` (`agent/utils/auth.py`). That way the pre-token Lambda can add the `customer_id` claim.
+- **Cedar policy engine** `ledgerlens_bank_assistant_policy_engine` (custom resource, `lambdas/cedar-policy`) loads `gateway/policies/policy.cedar`:
+  - It permits the 9 tools only for a token with a non-empty `customer_id`.
+  - It forbids any call whose `customer_id` input differs from that claim.
+  - It forbids `block_credit_card` and `open_claim` unless `customer_confirmed` is `true`. The confirmation hook sets that flag only after the customer taps Yes.
+- **Feedback API.**
+  - DynamoDB table `ledgerlens-bank-assistant-feedback` (on-demand, PITR).
+  - Lambda `ledgerlens-bank-assistant-feedback`.
+  - REST API `ledgerlens-bank-assistant-api`, stage `prod`, `POST /feedback` behind a Cognito authorizer.
+- **SSM parameters** under `/ledgerlens-bank-assistant/`: `runtime-arn`, `gateway_url`, `cognito-user-pool-id`, `cognito-user-pool-client-id`, `machine_client_id`, `cognito_provider`, `feedback-api-url`.
+
+#### Gateway tools
+
+Each tool is `gateway/tools/<tool>/`: `tool_spec.json` is the MCP schema, `<tool>_lambda/delivery/handler.py` the handler. Every tool Lambda runs Python 3.13 on ARM64, logs to `/aws/lambda/ledgerlens-bank-assistant-<slug>` with one-week retention, and gets `DSQL_CLUSTER_ENDPOINT` (the private host) and `AS_OF` (`data.as_of`) when it uses DSQL.
+
+| Tool | Lambda | Gateway target | DSQL access |
+|---|---|---|---|
+| `list_credit_cards` | `ledgerlens-list-credit-cards` | `list-credit-cards-target` | `ll_read`, in VPC |
+| `list_card_transactions` | `ledgerlens-list-card-transactions` | `list-card-transactions-target` | `ll_read`, in VPC |
+| `get_session_context` | `ledgerlens-get-session-context` | `get-session-context-target` | `ll_read`, in VPC |
+| `transaction_fraud_detection` | `ledgerlens-transaction-fraud-detection` | `fraud-detection-target` | `ll_read`, in VPC |
+| `explain_transaction` | `ledgerlens-explain-transaction` | `explain-transaction-target` | `ll_read`, in VPC |
+| `classify_call_type` | `ledgerlens-classify-call-type` | `classify-call-type-target` | `ll_read`, in VPC |
+| `block_credit_card` | `ledgerlens-block-credit-card` | `block-credit-card-target` | `ll_write`, in VPC |
+| `open_claim` | `ledgerlens-open-claim` | `open-claim-target` | `ll_write`, in VPC |
+| `human_agent_hand_off` | `ledgerlens-human-agent-hand-off` | `human-agent-hand-off-target` | none, outside the VPC |
 
 ## Prerequisites
 
-> **Note:** If you prefer not to install local tooling, see [Option B: Deploy via CodeBuild](#option-b-deploy-via-codebuild) — requires only Python 3.11+ and AWS CLI.
-
-For local deployment (Option A), ensure you have:
-
-- **Node.js 20+** installed (see [AWS guide for installing Node.js on EC2](https://docs.aws.amazon.com/sdk-for-javascript/v2/developer-guide/setting-up-node-on-ec2-instance.html))
-- **AWS CLI** configured with credentials (`aws configure`) - see [AWS CLI Configuration guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html)
-- **AWS CDK CLI** installed: `npm install -g aws-cdk` (see [CDK Getting Started guide](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html))
-- **Python 3.11 or above+** (standard library only - no virtual environment needed for deployment)
-- **Docker** - Required for all deployments. See [Install Docker Engine](https://docs.docker.com/engine/install/). Verify with `docker ps`. Alternatively, [Finch](https://github.com/runfinch/finch) can be used on Mac. See below if you have a non-ARM machine.
-- An AWS account with sufficient permissions to create:
-  - S3 buckets
-  - CloudFront distributions
-  - Cognito User Pools
-  - Amplify Hosting projects
-  - Bedrock AgentCore resources
-  - IAM roles and policies
+- **AWS CLI v2** with the `ledgerlens` profile, and **git**.
+- **Python 3.11+**. The deploy scripts use only the standard library.
+- **Node.js 20.19+ or 22.12+ and npm**, to build the frontend (`deploy-frontend.py`). Vite 8 needs one of those.
+- **Bedrock model access** in the account for `backend.model_id` (Claude Haiku 4.5 through the `global.` inference profile). The extra `eval_model_ids` (DeepSeek V3.2, gpt-oss-120b) are third-party models and need their Marketplace agreement accepted before first use.
+- **Only for a local CDK deploy (Option B):** Docker with ARM64 builds and the CDK CLI (`infra-cdk` pins `aws-cdk` as a dev dependency, so `npx cdk` works).
 
 ## Configuration
 
-### 1. Update Configuration File
+Everything is set in `infra-cdk/config.yaml`. The values in use:
 
-Edit `infra-cdk/config.yaml` to customize your deployment:
+| Key | Value | Effect |
+|---|---|---|
+| `stack_name_base` | `ledgerlens-bank-assistant` | Main stack name; the data stack adds `-data`. It prefixes most resource names. Max 35 characters. |
+| `deploy_scope` | `full` | `full` = data + main stacks; `data` = only the data stack. Override per run with `-c deploy_scope=data`. |
+| `admin_user_email` | empty | When set, CDK creates that Cognito user and emails a temporary password. |
+| `backend.agent_name` | `ledgerlens_agent` | Runtime name suffix. |
+| `backend.pattern` | `ledgerlens` | Agent folder under `agent/`. |
+| `backend.deployment_type` | `docker` | `zip` packages the agent with a Lambda instead of building an image. |
+| `backend.network_mode` | `PUBLIC` | `VPC` moves the runtime into a VPC you provide ([appendix](#appendix-vpc-mode-for-the-runtime)). |
+| `backend.model_id` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | The agent's model (`MODEL_ID`). |
+| `backend.eval_model_ids` | DeepSeek V3.2, gpt-oss-120b, Haiku 4.5 | Models an `evaluators` login may pick per session (`EVAL_MODEL_IDS`). |
+| `backend.use_long_term_memory` | `false` | Turns on semantic memory retrieval (`ltm_top_k`, `ltm_relevance_score`). |
+| `backend.stm_window_size` | `30` | Messages sent to the model per turn. |
+| `backend.use_stm_summarization` | `false` | Summarizes messages that fall out of the window (`stm_*` keys). |
+| `backend.mcp_registry.enabled` | `false` | Auto-connects MCP servers from an AWS Agent Registry. |
+| `data.as_of` | `2026-06-17T23:59:59` | The bank's "today" for the tools (`AS_OF`). The curate stage has its own copy in `data_load/curate_rules.py`; change both together. |
 
-```yaml
-stack_name_base: your-project-name # Change this to your preferred stack name (max 35 chars)
+Some names don't use `stack_name_base`: the IAM roles `ledgerlens-tools` and `ledgerlens-write-tools`, `ledgerlens-data-load`, `ledgerlens-data-pipeline`, `ledgerlens-dsql-read-check`, the secret `ledgerlens/hackathon-s3` and the `ledgerlens-<slug>` tool Lambdas. A second copy of the stacks in the same account would collide with the first on these names.
 
-admin_user_email: null # Optional: admin@example.com (auto-creates user & emails credentials)
+## First deployment
 
-backend:
-  pattern: ledgerlens # Agent folder under agent/ to deploy
-  deployment_type: docker # Available deployment types: docker (default), zip
-```
+All commands run from the repo root.
 
-**Important**: 
-- Change `stack_name_base` to a unique name for your project to avoid conflicts
-- Maximum length is 35 characters (due to AWS AgentCore runtime naming constraints)
+### 1. Deploy the stacks
 
-### Deployment Types
+**Option A, CodeBuild (what the team uses):**
 
-FAST supports two deployment types for AgentCore Runtime. Set `deployment_type` in `infra-cdk/config.yaml`:
-
-| Type | Description |
-|------|-------------|
-| `docker` (default) | Builds container image, pushes to ECR |
-| `zip` | Packages code via Lambda, uploads to S3 |
-
-**Note**: Docker is required for both deployment types. The `zip` option only affects how the agent runtime is packaged. Other Lambda functions in the stack still use Docker for dependency bundling.
-
-**Use Docker (default) when:**
-- You need native C/C++ libraries without ARM64 wheels on PyPI
-- Your deployment package exceeds 250 MB
-- You need custom OS-level dependencies
-- You want maximum compatibility
-
-**Use ZIP when:**
-- You want faster iteration during development
-- Your dependencies are pure Python or have ARM64 wheels available
-- You need higher session throughput
-
-**ZIP packaging includes**: The `agent/<your-pattern>/` and `agent/utils/` directories are bundled together with dependencies from `requirements.txt`. This matches the `COPY` commands in the Docker deployment's Dockerfile.
-
-### VPC Deployment (Private Network)
-
-By default, the AgentCore Runtime runs in PUBLIC network mode with internet access. To deploy the runtime into an existing VPC for private network isolation, set `network_mode: VPC` in `infra-cdk/config.yaml` and provide your VPC details.
-
-#### What runs inside vs outside the VPC
-
-When VPC mode is enabled, the **AgentCore Runtime** (your agent code) runs inside your VPC's private subnets. All network calls the agent makes are subject to VPC networking rules and reach AWS services through VPC endpoints — the agent never makes direct internet calls.
-
-The following components run **outside** the VPC in AWS-managed infrastructure:
-
-- **Gateway tool Lambdas** — The agent calls the Gateway through the `bedrock-agent-runtime` VPC endpoint (private networking). The Gateway then invokes Lambda functions on AWS-managed infrastructure. The agent's network call stays private; only the Lambda execution happens outside the VPC.
-- **Bedrock model invocations** — Model calls go through the `bedrock-runtime` VPC endpoint to Bedrock's managed infrastructure.
-- **Frontend (Amplify/CloudFront)** — Entirely separate, public-facing, and not part of the VPC deployment.
-
-In short: the agent's outbound network traffic stays on private AWS networking via VPC endpoints. The services it calls (Bedrock, Gateway) may execute on infrastructure outside the VPC, but the network path from the agent to those service APIs is private.
-
-#### Configuration
-
-```yaml
-backend:
-  pattern: ledgerlens
-  deployment_type: docker
-  network_mode: VPC
-  vpc:
-    vpc_id: vpc-0abc1234def56789a
-    subnet_ids:
-      - subnet-aaaa1111bbbb2222c
-      - subnet-cccc3333dddd4444e
-    security_group_ids:  # Optional - a default SG is created if omitted
-      - sg-0abc1234def56789a
-```
-
-The `vpc_id` and `subnet_ids` fields are required. The `security_group_ids` field is optional — if omitted, the CDK construct will create a default security group for the runtime.
-
-#### Required VPC Endpoints
-
-When deploying in VPC mode, the runtime runs in private subnets without internet access. Your VPC must have the following VPC endpoints configured so the agent can reach the AWS services it depends on:
-
-| Endpoint | Service | Type |
-|----------|---------|------|
-| `com.amazonaws.{region}.bedrock-runtime` | Bedrock model invocation | Interface |
-| `com.amazonaws.{region}.bedrock-agent-runtime` | AgentCore Runtime | Interface |
-| `com.amazonaws.{region}.bedrock-agentcore` | AgentCore Identity (Token Vault) | Interface |
-| `com.amazonaws.{region}.bedrock-agentcore.gateway` | AgentCore Gateway (MCP tools) | Interface |
-| `com.amazonaws.{region}.ssm` | SSM Parameter Store | Interface |
-| `com.amazonaws.{region}.secretsmanager` | Secrets Manager | Interface |
-| `com.amazonaws.{region}.logs` | CloudWatch Logs | Interface |
-| `com.amazonaws.{region}.ecr.api` | ECR API (Docker deployment) | Interface |
-| `com.amazonaws.{region}.ecr.dkr` | ECR Docker (Docker deployment) | Interface |
-| `com.amazonaws.{region}.s3` | S3 (ZIP deployment, ECR layers) | Gateway |
-| `com.amazonaws.{region}.dynamodb` | DynamoDB (feedback table) | Gateway |
-| `com.amazonaws.{region}.xray` | X-Ray (OTel trace export) | Interface |
-
-Replace `{region}` with your deployment region (e.g. `us-east-1`).
-
-All interface endpoints must have private DNS enabled and must be associated with the same subnets and security groups that allow traffic from the AgentCore Runtime.
-
-#### Subnet Requirements
-
-- Use private subnets (no internet gateway route) for proper network isolation
-- Subnets should be in at least two Availability Zones for high availability
-- Subnets must have sufficient available IP addresses for the runtime ENIs
-
-#### NAT Gateway
-
-A NAT Gateway is **required** if you use identity-aware Gateway authentication (Approach 1 in `agent/ledgerlens/tools/gateway.py`). This approach calls the Cognito `/oauth2/token` hosted domain endpoint directly to propagate user identity into M2M tokens. The Cognito hosted domain is a public HTTPS endpoint with no VPC endpoint available, so outbound internet access via NAT Gateway is needed.
-
-If you use the standard `@requires_access_token` decorator (Approach 2), a NAT Gateway is **not required** — the AgentCore Identity service handles the Cognito token exchange server-side within AWS, reachable through the `bedrock-agentcore` VPC endpoint.
-
-> **Note:** If you add custom tools or integrations that make outbound internet calls, you will also need a NAT Gateway in a public subnet with a `0.0.0.0/0` route from your private subnets.
-
-#### Security Group Configuration
-
-The CDK stack auto-creates a security group for the AgentCore Runtime. This same security group is typically applied to your VPC endpoints. You must add a self-referencing inbound rule to allow the runtime to reach the endpoints:
-
-- Protocol: TCP, Port: 443, Source: the security group itself
-
-## Deployment Steps
-
-### TL;DR version
-
-**Full local setup (Node.js + Docker + CDK):**
 ```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py
+```
+
+The script runs `cdk bootstrap` and `cdk deploy --all` on an ARM CodeBuild machine, because local Docker can't bundle the ARM64 image and Lambdas without emulation.
+- It zips git-tracked and staged files only; untracked files are skipped with a warning, so stage new files first.
+- It streams the build log to your terminal.
+- It creates temporary `ledgerlens-deploy*` resources: a source bucket, a project, and an IAM role with a permission boundary. On success they are deleted. On failure they are kept for debugging and reused on the next run.
+- It does not deploy the frontend (step 4).
+
+To deploy one stack, name it (the data stack must already exist before the main stack can deploy):
+
+```bash
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant-data
+AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant
+```
+
+Your IAM user needs the permissions listed in `scripts/README.md` to run it.
+
+**Option B, local CDK (ARM64 machine or Docker with ARM64 emulation):**
+
+```bash
+export AWS_PROFILE=ledgerlens
 cd infra-cdk
-npm install
-cdk bootstrap # Once ever
-cdk deploy
-cd ..
-python scripts/deploy-frontend.py
+npm ci
+npx cdk bootstrap          # once per account/region
+npx cdk deploy --all       # or a stack name; -c deploy_scope=data for only the data stack
 ```
 
-**No local tooling (just Python + AWS CLI):**
-```bash
-python scripts/deploy-with-codebuild.py
+On an x86_64 machine, enable ARM64 builds first (see [Docker cross-platform setup](#docker-cross-platform-setup)).
+
+### 2. Set the organizer's S3 keys (once)
+
+Write a JSON file outside the repo, set it as the secret's value, then delete the file. Never commit it.
+
+```json
+{"aws_access_key_id": "...", "aws_secret_access_key": "...", "bucket": "<datathon bucket>", "region": "us-east-2", "prefix": "data/"}
 ```
-
-### Option A: Deploy Locally (CDK + Docker)
-
-This path requires the full set of prerequisites listed above (Node.js, Docker, CDK, Python).
-
-### 1. Install Dependencies
-
-Install infrastructure dependencies:
 
 ```bash
-cd infra-cdk
-npm install
+aws secretsmanager put-secret-value --profile ledgerlens --secret-id ledgerlens/hackathon-s3 \
+  --secret-string file://<file-outside-the-repo>.json
 ```
 
-**Note**: Frontend dependencies are automatically installed during deployment via Docker bundling, so no separate frontend `npm install` is required.
-
-### 2. Bootstrap CDK (First Time Only)
-
-If this is your first time using CDK in this AWS account/region:
+### 3. Load the data
 
 ```bash
-cdk bootstrap
+AWS_PROFILE=ledgerlens make load-data
 ```
 
-### 3. Deploy backend with CDK
+This starts `ledgerlens-data-pipeline` and prints the console link for the execution. A full run takes about 10 minutes and costs under $1. To rerun one stage, retune the curation or run the `access` stage after adding a DB role, see [Operating the data pipeline](#operating-the-data-pipeline). A load drops and recreates the tables, so the tools fail for about 2 minutes: never reload during a demo.
 
-Build and deploy the complete stack:
+### 4. Deploy the frontend
 
 ```bash
-cdk deploy
+AWS_PROFILE=ledgerlens python scripts/deploy-frontend.py
 ```
 
-The deployment will:
+The script:
+1. Reads the main stack's outputs.
+2. Writes `frontend/public/aws-exports.json`.
+3. Runs `npm install` if needed, then `npm run build` (Vite, output `frontend/build`).
+4. Zips the build to the staging bucket and starts an Amplify deployment on `main`.
+5. Waits for it and prints the App URL.
 
-1. Create a Cognito User Pool for authentication
-1. Build and push the agent container to ECR
-1. Create the AgentCore runtime
-1. Set up CloudFront distribution for the frontend
+### 5. Create logins and link them to customers
 
-**Note**: The deployment takes approximately 5-10 minutes due to container building and AgentCore setup.
+Cedar refuses every tool call from a login whose Cognito `sub` isn't in `USER_CUSTOMER_IDS_MAP`, because its `customer_id` claim is blank.
+- **Demo login:** create `demo@ledgerlens.example` and switch it between personas, following [Logins and personas](usage.md#logins-and-personas).
+- **Evaluation logins:** `python -m evals.eval_users create --apply` creates them and writes their subs into `cognito-construct.ts`. After the deploy that creates the `evaluators` group, run `python -m evals.eval_users add-to-group --apply`. See `evals/README.md`.
 
-### 4. Deploy frontend
+After adding subs to the map in `infra-cdk/lib/cognito-construct.ts`, commit them and redeploy the main stack. A redeploy resets the Lambda's map to the committed value, so subs that are only in the console are lost.
 
-```bash
-# From root directory
-python scripts/deploy-frontend.py
-```
+## Updating
 
-This script automatically:
+| What changed | Deploy |
+|---|---|
+| Agent code (`agent/`), tool code or schemas (`gateway/tools/`), `gateway/policies/policy.cedar`, the guardrail, `backend.*` or `data.as_of` in `config.yaml`, `USER_CUSTOMER_IDS_MAP` | `AWS_PROFILE=ledgerlens python scripts/deploy-with-codebuild.py ledgerlens-bank-assistant` |
+| Frontend (`frontend/`) | `AWS_PROFILE=ledgerlens python scripts/deploy-frontend.py` |
+| `data_load/`, `data-construct.ts` | `... deploy-with-codebuild.py ledgerlens-bank-assistant-data`, then rerun the pipeline if the data must change |
+| Demo persona | No deploy: [switch the persona](usage.md#logins-and-personas) |
+| Frontend on your machine against the deployed backend | `AWS_PROFILE=ledgerlens python scripts/deploy-frontend.py --config-only`, then `cd frontend && npm install && npm run dev` (http://localhost:3000) |
 
-- Generates fresh `aws-exports.json` from CDK stack outputs (see below for more information about `aws-exports.json`)
-- Installs/updates npm dependencies if needed
-- Builds the frontend
-- Deploys to AWS Amplify Hosting
+When agent code changes, the main stack deploy builds a new image and the runtime moves to a new version.
 
-You will see the URL for application in the script's output, which will look similar to this:
+**Adding a Gateway tool** takes four steps:
+1. Add `gateway/tools/<tool>/` with `tool_spec.json` and `<tool>_lambda/delivery/handler.py`.
+2. Add an entry to `toolTargets` in `backend-construct.ts` (with `role: readRole` or `writeRole` if it uses DSQL).
+3. Add its `<target>___<tool>` action to the permit and the `customer_id` forbid in `policy.cedar`, and to the `customer_confirmed` forbid if it writes. Without step 3, Cedar denies the tool.
+4. Deploy the main stack.
 
-```
-ℹ App URL: https://main.d123abc456def7.amplifyapp.com
-```
+The model sees each tool as `gateway_<target>___<tool>`, and Bedrock rejects every request if any tool name is over 64 characters. Give a long tool a shorter `target` name, as `fraud-detection-target` does.
 
-### 5. Create a Cognito User (if necessary)
+## Verifying a deployment
 
-**If you provided `admin_user_email` in config:**
+- **Stack outputs:** see [Current deployment](#current-deployment).
+- **Data:** `aws lambda invoke --profile ledgerlens --function-name ledgerlens-dsql-read-check out.json`.
+- **Gateway and Cedar without the agent:** `test-scripts/test-gateway.py --user-sub <sub> [--customer-id <id>]`.
+- **The deployed agent:** `test-scripts/test-agent.py` (as the demo login). `test-feedback-api.py` and `test-memory.py` cover the other pieces; see `test-scripts/README.md`.
+- **Logs:**
+  - Agent: `/aws/bedrock-agentcore/runtimes/<runtime-id>-DEFAULT`
+  - Tools and other Lambdas: `/aws/lambda/ledgerlens-bank-assistant-<name>`
+  - Data stages: `/aws/codebuild/ledgerlens-data-load`
+  - Feedback API access log: `/aws/apigateway/ledgerlens-bank-assistant-api-access`
 
-- Check your email for temporary password
-- Sign in and change password on first login
+## Operating the data pipeline
 
-**If you didn't provide email:**
+`make load-data` runs the whole pipeline: Ingest → Transform → Curate → Load → ReadCheck. The execution name is the run id. Each stage writes `runs/<run-id>/<stage>.json` in the team bucket. Curate fixes per-customer incoherence (rules C1–C12) and selects the customers; Load reads `curated/<run-id>/`. Design: [data pipeline spec](superpowers/specs/2026-10-02-data-pipeline-design.md) and [curate stage spec](superpowers/specs/2026-10-03-curate-stage-design.md).
 
-1. Go to the [AWS Cognito Console](https://console.aws.amazon.com/cognito/)
-2. Find your User Pool (named `{stack_name_base}-user-pool`)
-3. Click on the User Pool
-4. Go to "Users" tab
-5. Click "Create user"
-6. Fill in the user details:
-   - **Email**: Your email address
-   - **Temporary password**: Create a temporary password
-   - **Mark email as verified**: Check this box
-7. Click "Create user"
+- **Rerun one stage** of an existing run (stages: `ingest`, `transform`, `curate`, `load`):
 
-### 6. Access the Application
+  ```bash
+  aws codebuild start-build --profile ledgerlens --project-name ledgerlens-data-load \
+    --environment-variables-override name=STAGE,value=<stage>,type=PLAINTEXT name=RUN_ID,value=<run-id>,type=PLAINTEXT
+  ```
 
-1. Open the Amplify Hosting URL in your browser
-1. Sign in with the Cognito user you created
-1. You'll be prompted to change your temporary password on first login
+- **Retune the customer selection:** rerun `curate`, then `load`, for the same run (about 6 minutes). Transform isn't rerun.
+- **After a manual rerun,** run the read check yourself:
 
----
+  ```bash
+  aws lambda invoke --profile ledgerlens --function-name ledgerlens-dsql-read-check out.json
+  ```
 
-### Option B: Deploy via CodeBuild
+- **Add a DB role to a loaded cluster:** after a data stack deploy that adds a role, run the `access` stage once. It creates the roles, maps them to their IAM roles and re-runs the grants, without touching the data:
 
-Requires only Python 3.11+, AWS CLI, and git — no Node.js, Docker, or CDK needed.
+  ```bash
+  aws codebuild start-build --profile ledgerlens --project-name ledgerlens-data-load \
+    --environment-variables-override name=STAGE,value=access,type=PLAINTEXT
+  ```
 
-1. Edit `infra-cdk/config.yaml` (see [Configuration](#configuration) above)
-2. Stage or commit your changes — only git-tracked or staged files are packaged for deployment. Untracked files are skipped and reported as a warning.
-3. Run:
+- **Check for an organizer re-upload:** this compares the organizer's bucket (read with the `hackathon` profile) to an ingest run's record (read with the `ledgerlens` profile):
 
-```bash
-python scripts/deploy-with-codebuild.py
-```
+  ```bash
+  uv run --no-project --with-requirements data_load/requirements.txt python -m data_load check --run <run-id> --team-bucket <team-bucket>
+  ```
 
-The script packages your git-tracked source and runs the full CDK + frontend deploy in the cloud via CodeBuild, streaming logs to your terminal. On success, the build resources (project, IAM role, permission boundary, S3 bucket) are removed; on failure they are retained for debugging (the script prints the console URL and log group) and reused on the next run.
-
-See `scripts/README.md` for details and required IAM permissions.
-
-## Post-Deployment
-
-### Updating the Application
-
-To update the frontend code:
-
-```bash
-# From root directory
-python scripts/deploy-frontend.py
-```
-
-To update the backend agent:
-
-**Docker deployment:**
-```bash
-cd infra-cdk
-cdk deploy --all
-```
-
-### Monitoring and Logs
-
-- **Frontend logs**: Check CloudFront access logs
-- **Backend logs**: Check CloudWatch logs for the AgentCore runtime
-- **Build logs**: Check CodeBuild project logs for container builds
-
-## Cleanup
-
-To remove all resources:
-
-```bash
-cd infra-cdk
-cdk destroy --force
-```
-
-If you deployed via CodeBuild (Option B), its build resources are already removed on success (or on the next successful run) — only the deployed FAST stack above needs tearing down. If you don't have CDK installed locally (the CodeBuild path doesn't require it), delete the stack directly:
-
-```bash
-aws cloudformation delete-stack --stack-name <stack_name_base>
-```
-
-Like `cdk destroy`, this removes the FAST stack but not the CDK bootstrap or asset buckets.
-
-**Warning**: `cdk destroy` will delete all data including S3 buckets created during deployment and ECR images.
-
-## Troubleshooting
-
-### Common Issues
-
-1. **`cdk deploy` fails with Docker errors**
-
-   - Ensure Docker is installed and the daemon is running: `docker ps`
-   - On Mac, open Docker Desktop or start Finch: `finch vm start`
-   - On Linux: `sudo systemctl start docker`
-
-2. **"Architecture incompatible" or "exec format error" during Docker build**
-
-   - This occurs when deploying from a non-ARM machine without cross-platform build setup
-   - Follow the "Docker Cross-Platform Build Setup" instructions in the Prerequisites section
-   - Ensure you've installed QEMU emulation: `docker run --privileged --rm tonistiigi/binfmt --install all`
-   - Verify ARM64 support: `docker buildx ls` should show `linux/arm64` in platforms
-
-3. **"Agent Runtime ARN not configured"**
-
-   - Ensure the backend stack deployed successfully
-   - Check that SSM parameters were created correctly
-
-4. **Authentication errors**
-
-   - Verify you created a Cognito user
-   - Check that the user's email is verified
-
-4. **Build failures**
-
-   - Check CodeBuild logs in the AWS Console
-   - Ensure your agent code in `agent/` is valid
-
-5. **Permission errors**
-   - Verify your AWS credentials have sufficient permissions
-   - Check IAM roles created by the stack
-
-### Getting Help
-
-- Check CloudWatch logs for detailed error messages
-- Review the CDK deployment output for any warnings
-- Ensure all prerequisites are met
-
-## Security Considerations
-
-- The Cognito User Pool is configured with strong password policies
-- All communication uses HTTPS via CloudFront
-- AgentCore runtime uses JWT authentication
-- IAM roles follow least-privilege principles
-
-For production deployments, consider:
-
-- Enabling MFA on Cognito users
-- Setting up custom domains with your own certificates
-- Configuring additional monitoring and alerting
-- Implementing backup strategies for any persistent data
-
-
-## Docker Cross-Platform Build Setup (Required for non-ARM machines)
-
-**Important**: BedrockAgentCore Runtime only supports ARM64 architecture. If you're deploying from a non-ARM machine (x86_64/amd64), you need to enable Docker's cross-platform building capabilities.
-
-Check your machine architecture:
-```bash
-uname -m
-```
-
-If the output is `x86_64` (not `aarch64` or `arm64`), run these commands:
-
-1. **Install QEMU for ARM64 emulation:**
-   ```bash
-   docker run --privileged --rm tonistiigi/binfmt --install all
-   ```
-
-2. **Enable Docker buildx and create a multi-platform builder:**
-   ```bash
-   docker buildx create --use --name multiarch --driver docker-container
-   docker buildx inspect --bootstrap
-   ```
-
-3. **Verify ARM64 support is available:**
-   ```bash
-   docker buildx ls
-   ```
-   You should see `linux/arm64` in the platforms list.
-
-**Note**: This setup is only required once per machine. The CDK deployment will automatically use these capabilities to build ARM64 containers.
-
+- **Follow a stage's log:** `aws logs tail /aws/codebuild/ledgerlens-data-load --follow --profile ledgerlens`.
+- **Reload downtime:** a load drops and recreates the 13 tables, so the tools fail for about 2 minutes. Never reload during a demo.
+- **Cost and deleting the cluster:** see [Cleanup](#cleanup).
+- **Query the database by hand:** laptops are refused, admin credentials included, by the cluster policy. Ad-hoc queries need a temporary exception in that policy (pipeline spec section 7.3).
 
 ## Understanding aws-exports.json
 
-The `aws-exports.json` file is a critical configuration file that enables the React frontend to communicate with AWS Cognito for authentication. This file is automatically generated during frontend deployment and contains the necessary configuration parameters for Cognito authentication.
-
-**What is aws-exports.json?**
-
-The `aws-exports.json` file contains authentication configuration that the React application reads to properly configure Cognito Authentication. It's created automatically by the deployment script and placed in `frontend/public/aws-exports.json`.
-
-**Why is it necessary?**
-
-This configuration file is essential because:
-
-- It provides the React application with the correct Cognito User Pool and Client IDs
-- It specifies the authentication endpoints and redirect URIs
-- It configures the authentication flow parameters
-- Without this file, Cognito authentication will not work
-
-**How is it created?**
-
-The file is automatically generated by `deploy-frontend.py` which:
-
-1. Extracts configuration from your deployed CDK stack outputs
-2. Automatically detects the AWS region from the CloudFormation stack ARN
-3. Retrieves the required values: `CognitoClientId`, `CognitoUserPoolId`, and `AmplifyUrl`
-4. Generates the configuration file with the following structure:
+`deploy-frontend.py` generates `frontend/public/aws-exports.json` from the main stack's outputs and copies it into the build. Don't edit it by hand: every deploy regenerates it. With `--config-only`, the redirect URIs point to `http://localhost:3000` instead of the Amplify URL.
 
 ```json
 {
-  "authority": "https://cognito-idp.region.amazonaws.com/user-pool-id",
-  "client_id": "your-client-id",
-  "redirect_uri": "https://your-amplify-url",
-  "post_logout_redirect_uri": "https://your-amplify-url",
+  "authority": "https://cognito-idp.<region>.amazonaws.com/<CognitoUserPoolId>",
+  "client_id": "<CognitoClientId>",
+  "redirect_uri": "<AmplifyUrl>",
+  "post_logout_redirect_uri": "<AmplifyUrl>",
   "response_type": "code",
   "scope": "email openid profile",
-  "automaticSilentRenew": true
+  "automaticSilentRenew": true,
+  "agentRuntimeArn": "<RuntimeArn>",
+  "awsRegion": "<region>",
+  "feedbackApiUrl": "<FeedbackApiUrl>",
+  "agentPattern": "ledgerlens"
 }
 ```
 
-**Important**: You should not manually edit this file as it's regenerated on each deployment. If authentication isn't working, redeploy the frontend to ensure you have the latest configuration.
+## Cleanup
+
+Delete the main stack first: it imports the data stack's exports.
+
+```bash
+export AWS_PROFILE=ledgerlens
+aws cloudformation delete-stack --stack-name ledgerlens-bank-assistant
+aws cloudformation wait stack-delete-complete --stack-name ledgerlens-bank-assistant
+aws cloudformation delete-stack --stack-name ledgerlens-bank-assistant-data
+```
+
+(`cd infra-cdk && npx cdk destroy --all` does the same.) The buckets, the stacks' log groups, the user pool and the feedback table are deleted with the stacks. These stay behind:
+
+- **The DSQL cluster** (deletion protection and RETAIN). To remove it:
+
+  ```bash
+  aws dsql update-cluster --identifier <cluster-id> --no-deletion-protection-enabled
+  aws dsql delete-cluster --identifier <cluster-id>
+  ```
+
+  Redeploying the data stack afterwards creates a new, empty cluster that has to be loaded again.
+- **The `CDKToolkit` bootstrap stack** and its asset bucket and ECR repository.
+- **Failed CodeBuild deploy resources** (`ledgerlens-deploy*`), until the next successful run removes them.
+- **The runtime's log groups** (`/aws/bedrock-agentcore/runtimes/*`), which AgentCore creates itself.
+
+While the stacks exist, the data stack costs about $9.70 a month, mostly the DSQL endpoint. The feedback API's 0.5 GB stage cache bills by the hour on top of that.
+
+## Troubleshooting
+
+- **AccessDenied, or "stack does not exist":** the command ran without `AWS_PROFILE=ledgerlens` and reached another account.
+- **Local `cdk deploy` fails with Docker or "exec format error":** the machine can't build ARM64. Use `deploy-with-codebuild.py`, or set up [ARM64 emulation](#docker-cross-platform-setup).
+- **A new file isn't in the CodeBuild deploy:** it was untracked. `git add` it and rerun.
+- **The pipeline fails in Ingest:** the `ledgerlens/hackathon-s3` secret still holds its placeholder, or a key is missing (`aws_access_key_id`, `aws_secret_access_key`, `bucket`, `region`, `prefix`).
+- **The agent says it can't see the customer's cards, or tool calls are denied:** the login's `sub` isn't in `USER_CUSTOMER_IDS_MAP`, or a redeploy reset the map to its committed value. Check the `customer_id` claim with `test-gateway.py`.
+- **Tools fail with connection or "table does not exist" errors:** a load is running, or the cluster was never loaded. After adding a DB role, run the `access` stage.
+- **Bedrock AccessDenied on the model:** the account can't invoke `model_id` yet, or a third-party model's Marketplace agreement hasn't been accepted.
+- **Sign-in redirects fail:** `aws-exports.json` is stale. Rerun `deploy-frontend.py` (or `--config-only` for local).
+- **A failed CodeBuild deploy:** the script prints the project console URL. The build log is under `/aws/codebuild/ledgerlens-deploy*`.
+
+## Docker cross-platform setup
+
+AgentCore Runtime runs only ARM64 images, and the Lambdas are bundled for ARM64. To deploy with local CDK from an x86_64 machine (`uname -m` prints `x86_64`), enable emulation once:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+docker buildx create --use --name multiarch --driver docker-container
+docker buildx inspect --bootstrap
+docker buildx ls   # should list linux/arm64
+```
+
+## Appendix: VPC mode for the runtime
+
+The deployed runtime uses `network_mode: PUBLIC`. This mode is about the agent runtime only: the tool Lambdas join the data stack's VPC either way. To put the runtime in your own VPC:
+
+```yaml
+backend:
+  network_mode: VPC
+  vpc:
+    vpc_id: vpc-0abc1234def56789a
+    subnet_ids: [subnet-aaaa1111bbbb2222c, subnet-cccc3333dddd4444e]
+    security_group_ids: [sg-0abc1234def56789a]   # optional; a default SG is created if omitted
+```
+
+The private subnets need interface endpoints with private DNS for `bedrock-runtime`, `bedrock-agent-runtime`, `bedrock-agentcore`, `bedrock-agentcore.gateway`, `ssm`, `secretsmanager`, `logs`, `ecr.api`, `ecr.dkr` and `xray`, plus a gateway endpoint for `s3`. The runtime's security group must allow TCP 443 to them.
+
+You also need a **NAT gateway**: the agent calls the Cognito hosted domain's `/oauth2/token` directly to get the Gateway token (`agent/utils/auth.py`), and that endpoint has no VPC endpoint.
