@@ -14,10 +14,15 @@ type AwsExportsConfig = {
 
 /**
  * Configuration Priority (highest to lowest):
- * 1. Environment variables (VITE_COGNITO_*)
+ * 1. Environment variables (VITE_COGNITO_*), on the dev server only
  * 2. aws-exports.json file
  * 3. Default values
  */
+
+// The VITE_COGNITO_* overrides are for the local dev server. A production build uses the deployed
+// aws-exports.json only: vite build also reads a developer's .env, and its localhost redirect_uri
+// would send every user back to localhost after signing in.
+const env: Partial<ImportMetaEnv> = import.meta.env.DEV ? import.meta.env : {}
 
 // Cache for loaded config
 let configCache: AwsExportsConfig | null = null
@@ -60,14 +65,14 @@ export async function createCognitoAuthConfig(): Promise<AwsExportsConfig> {
   }
 
   // Get environment variables
-  const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID
-  const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID
-  const region = import.meta.env.VITE_COGNITO_REGION
-  const redirectUri = import.meta.env.VITE_COGNITO_REDIRECT_URI
-  const postLogoutRedirectUri = import.meta.env.VITE_COGNITO_POST_LOGOUT_REDIRECT_URI
-  const responseType = import.meta.env.VITE_COGNITO_RESPONSE_TYPE
-  const scope = import.meta.env.VITE_COGNITO_SCOPE
-  const automaticSilentRenew = import.meta.env.VITE_COGNITO_AUTOMATIC_SILENT_RENEW
+  const userPoolId = env.VITE_COGNITO_USER_POOL_ID
+  const clientId = env.VITE_COGNITO_CLIENT_ID
+  const region = env.VITE_COGNITO_REGION
+  const redirectUri = env.VITE_COGNITO_REDIRECT_URI
+  const postLogoutRedirectUri = env.VITE_COGNITO_POST_LOGOUT_REDIRECT_URI
+  const responseType = env.VITE_COGNITO_RESPONSE_TYPE
+  const scope = env.VITE_COGNITO_SCOPE
+  const automaticSilentRenew = env.VITE_COGNITO_AUTOMATIC_SILENT_RENEW
 
   // Build authority from environment variables if region and userPoolId are provided
   const envAuthority =
@@ -96,10 +101,10 @@ export async function createCognitoAuthConfig(): Promise<AwsExportsConfig> {
 
 // Synchronous version for backwards compatibility (uses env vars as fallback)
 export const cognitoAuthConfig = {
-  authority: `https://cognito-idp.${import.meta.env.VITE_COGNITO_REGION}.amazonaws.com/${import.meta.env.VITE_COGNITO_USER_POOL_ID}`,
-  client_id: import.meta.env.VITE_COGNITO_CLIENT_ID,
-  redirect_uri: import.meta.env.VITE_COGNITO_REDIRECT_URI,
-  post_logout_redirect_uri: import.meta.env.VITE_COGNITO_REDIRECT_URI,
+  authority: `https://cognito-idp.${env.VITE_COGNITO_REGION}.amazonaws.com/${env.VITE_COGNITO_USER_POOL_ID}`,
+  client_id: env.VITE_COGNITO_CLIENT_ID,
+  redirect_uri: env.VITE_COGNITO_REDIRECT_URI,
+  post_logout_redirect_uri: env.VITE_COGNITO_REDIRECT_URI,
   response_type: "code",
   scope: "email openid profile",
   automaticSilentRenew: true,
