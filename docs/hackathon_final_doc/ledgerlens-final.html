@@ -69,7 +69,13 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 .hud button { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line); transition: background .3s, border-color .3s; }
 .hud button:hover { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.2); }
 .hud .count { padding: 0 8px; }
-.hint { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); z-index: 10; transition: opacity .6s; }
+/* How to use the deck: shown on the opening screen, and on any slide with Esc */
+.hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(1040px, calc(100% - 32px)); padding: 14px 22px 16px; border-radius: 16px; border: 1px solid rgba(111,130,255,.4); background: rgba(14,16,40,.92); backdrop-filter: blur(8px); box-shadow: 0 18px 40px -18px rgba(0,0,0,.8); z-index: 10; pointer-events: none; transition: opacity .6s; }
+.hint b { display: block; margin-bottom: 10px; font-size: 11.5px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase; color: var(--cobalt-hi); }
+.hint ul { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px 22px; }
+.hint li { font-size: 13.5px; line-height: 1.35; color: var(--soft); }
+.hint kbd { display: inline-block; min-width: 22px; padding: 1px 6px; margin-right: 3px; border-radius: 6px; border: 1px solid rgba(255,255,255,.22); border-bottom-width: 2px; background: rgba(255,255,255,.06); font: 500 12px/1.5 var(--sans); color: var(--text); text-align: center; }
+.hint .dotted { border-bottom: 1px dashed var(--soft); color: var(--text); }
 
 /* ---------- cloud switch: the architecture as AWS (default) or as generic building blocks ---------- */
 .cloud { position: fixed; right: clamp(16px, 3vw, 32px); top: 14px; display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 99px; border: 1.5px solid rgba(111,130,255,.6); background: rgba(22,26,51,.92); box-shadow: 0 0 0 4px rgba(46,70,232,.12), 0 10px 30px -10px rgba(46,70,232,.6); backdrop-filter: blur(8px); z-index: 11; opacity: 0; visibility: hidden; transition: opacity .6s, visibility 0s .6s; }
@@ -165,7 +171,52 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 .s-solution .tags { justify-content: center; }
 .s-solution .line { font-family: var(--display); font-size: clamp(16px, 1.5vw, 20px); color: var(--text); }
 
-/* ---------- slide 3: scope ---------- */
+/* ---------- slide 3: model evaluation (tool use, AWS second opinion) ---------- */
+.s-eval .inner { width: min(1320px, 100%); display: grid; gap: clamp(12px, 2vh, 22px); }
+.s-eval h2 { font-size: clamp(30px, 3.6vw, 54px); margin-top: 10px; }
+.s-eval .lede { max-width: none; margin-top: 10px; font-size: clamp(15px, 1.25vw, 18px); }
+.ev-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: clamp(14px, 2vw, 26px); align-items: stretch; }
+.ev-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ev-top .k { margin-bottom: 0; }
+.ev-prompt { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 99px; border: 1.5px solid rgba(111,130,255,.55); background: rgba(22,26,51,.9); }
+.ev-prompt span { padding: 0 6px 0 10px; font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--cobalt-hi); }
+.ev-prompt button { padding: 6px 16px; border-radius: 99px; font-size: 14px; font-weight: 500; color: var(--soft); transition: background .3s, color .3s; }
+.ev-prompt button:hover { color: var(--text); background: rgba(255,255,255,.06); }
+.ev-prompt button[aria-checked="true"] { background: var(--cobalt); color: #fff; box-shadow: 0 4px 14px -4px rgba(46,70,232,.9); }
+.ev-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 26px; margin: 16px 0 8px; font-size: 16.5px; font-weight: 500; color: #c3c8e0; }
+.ev-legend span::before { content: ""; display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-right: 9px; vertical-align: -2px; background: var(--c); }
+.ev-legend em { font-style: normal; font-size: 11.5px; font-weight: 400; letter-spacing: .12em; text-transform: uppercase; padding: 2px 7px; margin-left: 4px; border-radius: 99px; border: 1px solid rgba(111,130,255,.5); color: var(--cobalt-hi); }
+.haiku { --c: var(--cobalt-hi); } .deepseek { --c: rgba(169,182,255,.8); } .gptoss { --c: rgba(154,160,187,.4); }
+.ev-legend .haiku { color: var(--text); }
+.ev-rows { display: grid; }
+.ev-row { display: grid; grid-template-columns: minmax(170px, 36%) 1fr; gap: 18px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.ev-m { justify-self: start; font-size: 14.5px; line-height: 1.3; }
+.ev-bars { display: grid; gap: 3px; }
+.ev-bar { display: grid; grid-template-columns: 1fr 44px; align-items: center; gap: 10px; }
+.ev-bar .t { height: 6px; border-radius: 99px; background: rgba(255,255,255,.05); overflow: hidden; }
+.ev-bar.haiku .t { height: 9px; }
+.ev-bar i { display: block; height: 100%; width: var(--v); border-radius: 99px; background: var(--c); transition: width 1.1s var(--ease); }
+.ev-bar.haiku i { background: linear-gradient(90deg, var(--cobalt), var(--cobalt-hi)); box-shadow: 0 0 12px rgba(111,130,255,.5); }
+.ev-tools:not(.on) .ev-bar i { width: 0; }
+.ev-tools.on .ev-row:nth-child(2) i { transition-delay: .08s; } .ev-tools.on .ev-row:nth-child(3) i { transition-delay: .16s; }
+.ev-tools.on .ev-row:nth-child(4) i { transition-delay: .24s; } .ev-tools.on .ev-row:nth-child(5) i { transition-delay: .32s; }
+.ev-tools.on .ev-row:nth-child(6) i { transition-delay: .4s; }
+.ev-bar b { font-weight: 400; font-size: 12.5px; color: var(--soft); text-align: right; font-variant-numeric: tabular-nums; }
+.ev-bar.haiku b { color: var(--text); font-weight: 500; font-size: 13.5px; }
+.ev-aws { display: grid; align-content: start; gap: 10px; }
+.ev-aws .k { margin-bottom: 0; }
+.ev-who { font-size: 13.5px; }
+.ev-score { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); }
+.ev-num { font-family: var(--display); font-weight: 300; font-size: clamp(40px, 3.8vw, 60px); line-height: 1; letter-spacing: -0.03em; color: var(--cobalt-hi); font-variant-numeric: tabular-nums; }
+.ev-score div b { display: block; font-weight: 500; font-size: 16px; }
+.ev-score div span { font-size: 13.5px; color: var(--soft); line-height: 1.45; }
+.card p.ev-agree { font-size: 13.5px; }
+.ev-agree b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ev-verdict { padding: 14px 20px; border-radius: 16px; border: 1px solid rgba(111,130,255,.35); background: linear-gradient(90deg, rgba(46,70,232,.18), rgba(46,70,232,.04)); }
+.ev-verdict p { font-size: clamp(15px, 1.3vw, 18px); line-height: 1.5; color: var(--soft); }
+.ev-verdict b { color: var(--text); font-weight: 500; }
+
+/* ---------- slide 4: scope ---------- */
 .s-scope .inner { display: grid; gap: clamp(16px, 2.6vh, 28px); }
 .s-scope h2 { margin-top: 12px; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(14px, 2vw, 26px); }
@@ -178,11 +229,8 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 .out-grid span { color: var(--soft); font-size: 14px; line-height: 1.5; }
 .out-grid span b { display: inline; color: var(--text); }
 
-/* ---------- slide 4: architecture ---------- */
-.s-arch .inner { width: min(1320px, 100%); display: grid; gap: clamp(12px, 2vh, 22px); }
-.s-arch h2 { font-size: clamp(30px, 3.6vw, 54px); margin-top: 10px; }
-.s-arch .arch svg { width: 100%; height: auto; max-height: calc(100dvh - 300px); display: block; }
-.s-arch .line { font-family: var(--display); font-size: clamp(16px, 1.5vw, 20px); }
+/* ---------- architecture diagram (on the technical solution slide) ---------- */
+.s-how .line { font-family: var(--display); font-size: clamp(16px, 1.5vw, 20px); }
 .arch .node rect { fill: rgba(255,255,255,.04); stroke: rgba(255,255,255,.16); stroke-width: 1.2; transition: fill .5s, stroke .5s; }
 .arch .node.ai rect { stroke: rgba(111,130,255,.55); fill: rgba(46,70,232,.12); }
 .arch .node.human rect { stroke: rgba(242,163,27,.6); fill: rgba(242,163,27,.08); }
@@ -207,6 +255,8 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 .s-how .inner { width: min(1320px, 100%); display: grid; gap: clamp(12px, 2vh, 22px); }
 .s-how h2 { font-size: clamp(30px, 3.6vw, 52px); margin-top: 10px; }
 .how { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(12px, 2vh, 20px); }
+/* The steps and their text sit above the diagram, so the current step reads first */
+.how > .walk { order: 1; } .how > .walk-detail { order: 2; } .how > .arch-mini { order: 3; }
 .walk { list-style: none; counter-reset: w; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .walk li { counter-increment: w; position: relative; padding: 12px 0 0 36px; border-top: 2px solid var(--line); transition: border-color .4s, opacity .9s var(--ease), transform .9s var(--ease), filter .9s var(--ease); }
 .walk li.current { border-top-color: var(--cobalt-hi); }
@@ -266,7 +316,8 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 @media (max-width: 900px) {
   html, body { overflow: auto; }
   .slide { place-items: start center; overflow-y: auto; padding-top: 72px; padding-bottom: 80px; }
-  .beats, .pillars, .outcomes, .cols, .out-grid, .how, .walk, .toolset, .profit, .big-save { grid-template-columns: 1fr !important; }
+  .beats, .pillars, .outcomes, .cols, .out-grid, .how, .walk, .toolset, .profit, .big-save, .ev-grid { grid-template-columns: 1fr !important; }
+  .ev-row { grid-template-columns: 1fr; gap: 8px; }
   .hint { display: none; }
   .cloud .lbl { font-size: 0; gap: 0; padding: 0 4px 0 8px; }
   .cloud button { padding: 6px 12px; font-size: 13.5px; }
@@ -380,7 +431,60 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
     </div>
   </section>
 
-  <!-- 3 · Technical scope -->
+  <!-- 3 · Model evaluation (docs/evaluation/ledgerlens-under-test.html, Results: tool use & AWS second opinion) -->
+  <section class="slide s-eval" data-steps="3" aria-label="Model evaluation">
+    <div class="inner">
+      <div class="ev-head" data-step="0">
+        <div class="eyebrow">Model evaluation</div>
+        <h2>We tested it <span class="grad">before it shipped.</span></h2>
+        <p class="lede">We wrote 12 different prompts; 3 made it to the final evaluation of the agent's replies and tool use. Here are the 2 best finalists: three models, 10 scripted customer cases, 3 runs each, against the deployed agent on AWS. That is 180 complete test conversations, fully automated: a script plays the customer and code checks every reply and tool call.</p>
+      </div>
+      <div class="ev-grid">
+        <div class="card ev-tools" data-step="1">
+          <div class="ev-top">
+            <div class="k">Tool use · checked by code</div>
+            <div class="ev-prompt" id="evPrompt" role="radiogroup" aria-label="Finalist prompt">
+              <span aria-hidden="true">Finalist</span>
+              <button role="radio" data-p="v11" aria-checked="false">Runner-up</button>
+              <button role="radio" data-p="v12" aria-checked="true">Winner</button>
+            </div>
+          </div>
+          <div class="ev-legend"><span class="haiku">Claude Haiku 4.5 <em>production</em></span><span class="deepseek">DeepSeek V3.2</span><span class="gptoss">gpt-oss-120b</span></div>
+          <div class="ev-rows">
+            <div class="ev-row"><span class="ev-m cost tip-right" tabindex="0">Valid tool calls<span class="tip" role="tooltip"><b>Valid tool calls</b>Calls with the right tool name and arguments inside the tool's spec.</span></span><div class="ev-bars"><div class="ev-bar haiku" aria-label="Haiku 4.5"><span class="t"><i style="--v:100%"></i></span><b data-v11="100" data-v12="100" data-fmt="pct">100%</b></div><div class="ev-bar deepseek" aria-label="DeepSeek V3.2"><span class="t"><i style="--v:83%"></i></span><b data-v11="77" data-v12="83" data-fmt="pct">83%</b></div><div class="ev-bar gptoss" aria-label="gpt-oss-120b"><span class="t"><i style="--v:84%"></i></span><b data-v11="80" data-v12="84" data-fmt="pct">84%</b></div></div></div>
+            <div class="ev-row"><span class="ev-m cost tip-right" tabindex="0">Calls without an error<span class="tip" role="tooltip"><b>Calls without an error</b>Tool results that didn't come back as an error (unknown tool, tool error): 100% minus the report's tool error rate.</span></span><div class="ev-bars"><div class="ev-bar haiku" aria-label="Haiku 4.5"><span class="t"><i style="--v:100%"></i></span><b data-v11="100" data-v12="100" data-fmt="pct">100%</b></div><div class="ev-bar deepseek" aria-label="DeepSeek V3.2"><span class="t"><i style="--v:93%"></i></span><b data-v11="80" data-v12="93" data-fmt="pct">93%</b></div><div class="ev-bar gptoss" aria-label="gpt-oss-120b"><span class="t"><i style="--v:75%"></i></span><b data-v11="68" data-v12="75" data-fmt="pct">75%</b></div></div></div>
+            <div class="ev-row"><span class="ev-m cost tip-right" tabindex="0">Asks for a Yes only when warranted<span class="tip" role="tooltip"><b>Proposal precision</b>Of the Yes/No buttons it showed (block a card, open a claim, hand off to a person), the share the case called for.</span></span><div class="ev-bars"><div class="ev-bar haiku" aria-label="Haiku 4.5"><span class="t"><i style="--v:100%"></i></span><b data-v11="100" data-v12="100" data-fmt="pct">100%</b></div><div class="ev-bar deepseek" aria-label="DeepSeek V3.2"><span class="t"><i style="--v:93%"></i></span><b data-v11="82" data-v12="93" data-fmt="pct">93%</b></div><div class="ev-bar gptoss" aria-label="gpt-oss-120b"><span class="t"><i style="--v:70%"></i></span><b data-v11="71" data-v12="70" data-fmt="pct">70%</b></div></div></div>
+            <div class="ev-row"><span class="ev-m cost tip-right" tabindex="0">Asks for a Yes whenever needed<span class="tip" role="tooltip"><b>Proposal recall</b>Of the Yes/No buttons the case required, the share it showed.</span></span><div class="ev-bars"><div class="ev-bar haiku" aria-label="Haiku 4.5"><span class="t"><i style="--v:100%"></i></span><b data-v11="60" data-v12="100" data-fmt="pct">100%</b></div><div class="ev-bar deepseek" aria-label="DeepSeek V3.2"><span class="t"><i style="--v:80%"></i></span><b data-v11="80" data-v12="80" data-fmt="pct">80%</b></div><div class="ev-bar gptoss" aria-label="gpt-oss-120b"><span class="t"><i style="--v:80%"></i></span><b data-v11="80" data-v12="80" data-fmt="pct">80%</b></div></div></div>
+            <div class="ev-row"><span class="ev-m cost tip-right" tabindex="0">Right hand-off reason<span class="tip" role="tooltip"><b>Hand-off reason right</b>Hand-offs to a person whose reason matches the one the case expects.</span></span><div class="ev-bars"><div class="ev-bar haiku" aria-label="Haiku 4.5"><span class="t"><i style="--v:100%"></i></span><b data-v11="100" data-v12="100" data-fmt="pct">100%</b></div><div class="ev-bar deepseek" aria-label="DeepSeek V3.2"><span class="t"><i style="--v:100%"></i></span><b data-v11="100" data-v12="100" data-fmt="pct">100%</b></div><div class="ev-bar gptoss" aria-label="gpt-oss-120b"><span class="t"><i style="--v:33%"></i></span><b data-v11="30" data-v12="33" data-fmt="pct">33%</b></div></div></div>
+            <div class="ev-row"><span class="ev-m cost tip-right" tabindex="0">Explains the button in words<span class="tip" role="tooltip"><b>Write proposals explained</b>Block or claim buttons that came with a reply explaining them. Runner-up: Haiku 7/7, DeepSeek 7/8, gpt-oss 0/11. Winner: Haiku 9/9, DeepSeek 4/8, gpt-oss 1/11.</span></span><div class="ev-bars"><div class="ev-bar haiku" aria-label="Haiku 4.5"><span class="t"><i style="--v:100%"></i></span><b data-v11="100" data-v12="100" data-fmt="pct">100%</b></div><div class="ev-bar deepseek" aria-label="DeepSeek V3.2"><span class="t"><i style="--v:50%"></i></span><b data-v11="88" data-v12="50" data-fmt="pct">50%</b></div><div class="ev-bar gptoss" aria-label="gpt-oss-120b"><span class="t"><i style="--v:9%"></i></span><b data-v11="0" data-v12="9" data-fmt="pct">9%</b></div></div></div>
+          </div>
+        </div>
+        <div class="card ev-aws" data-step="2">
+          <div class="k">AWS second opinion</div>
+          <p class="ev-who">AgentCore Evaluations · Claude Haiku 4.5 · <span data-ev-p>winning</span> prompt</p>
+          <div class="ev-score">
+            <b class="ev-num" data-v11="0.71" data-v12="0.80" data-fmt="dec2">0.80</b>
+            <div><b>Goal success</b><span>Did the customer get what they came for? AWS's judge, 0 to 1.</span></div>
+          </div>
+          <p class="ev-agree">Agrees with our automated checks on <b data-v11="71" data-v12="87" data-fmt="pct">87%</b> · scored <b data-v11="21" data-v12="15" data-fmt="int">15</b> of 30 conversations</p>
+          <div class="ev-score">
+            <b class="ev-num" data-v11="0.33" data-v12="1.00" data-fmt="dec2">1.00</b>
+            <div><b>Trajectory match</b><span>Were the expected tools called, in order?</span></div>
+          </div>
+          <p class="ev-agree">Agrees with our automated checks on <b data-v11="100" data-v12="100" data-fmt="pct">100%</b> · scored <b data-v11="9" data-v12="3" data-fmt="int">3</b> of 30 conversations</p>
+        </div>
+      </div>
+      <div class="ev-verdict" data-step="3">
+        <p><b>Claude Haiku 4.5 on the winning prompt is what runs in production today.</b> It's the only configuration at 100% on all six tool checks. From the runner-up to the winner, asking for a Yes whenever needed went from 60% to 100%, once the prompt explained why to hand off in the same turn instead of adding rules.</p>
+      </div>
+      <div class="tags" data-step="3">
+        <span class="src data">Source: docs/evaluation/ledgerlens-under-test.html · Results · Tool quality and AgentCore Evaluations</span>
+        <span class="src assume">10 cases × 3 runs per model and prompt: small samples. Trajectory 1.00 rests on 3 sessions.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · Technical scope -->
   <section class="slide s-scope" data-steps="3" aria-label="Technical scope">
     <div class="inner">
       <div data-step="0">
@@ -416,21 +520,22 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
     </div>
   </section>
 
-  <!-- 4 · Architecture (redrawn from docs/architecture-diagram/ledgerlens-architecture.drawio) -->
-  <section class="slide s-arch" data-steps="3" aria-label="Architecture">
+  <!-- 5 · Technical solution (architecture redrawn from docs/architecture-diagram/ledgerlens-architecture.drawio) -->
+  <section class="slide s-how" data-steps="4" aria-label="Technical solution">
     <div class="inner">
       <div data-step="0">
-        <div class="eyebrow">Architecture</div>
-        <h2>Serverless, secure, <span class="grad">in production on AWS.</span></h2>
+        <div class="eyebrow">The technical solution</div>
+        <h2>One chat, one turn, end to end. <span class="grad">Serverless, secure, in production on AWS.</span></h2>
         <p class="cloud-note" data-term="note" hidden></p>
       </div>
-      <div class="arch">
-        <svg id="archSvg" viewBox="0 0 1200 540" role="img" aria-label="LedgerLens architecture on AWS">
+      <div class="how">
+        <div class="arch arch-mini" id="archMini">
+        <svg viewBox="0 0 1200 540" role="img" aria-label="LedgerLens architecture on AWS">
           <defs>
             <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#6f82ff"/></marker>
           </defs>
 
-          <g class="lane" data-step="0">
+          <g class="lane">
             <text class="lane-t" x="135" y="24">CHANNEL</text>
             <g class="node" data-node="customer"><rect x="20" y="44" width="230" height="50" rx="12"/><text x="135" y="74">Customer</text></g>
             <g class="node" data-node="amplify"><rect x="20" y="130" width="230" height="64" rx="12"/><text x="135" y="157">React web chat<tspan class="d" data-term="web.d" x="135" dy="20">Amplify Hosting</tspan></text></g>
@@ -441,7 +546,7 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
             <path class="edge" d="M135 294 V328" marker-end="url(#ah)"/>
           </g>
 
-          <g class="lane" data-step="1">
+          <g class="lane">
             <text class="lane-t" x="440" y="24">AGENT ENGINE</text>
             <rect class="box" x="290" y="40" width="300" height="340" rx="16"/>
             <text class="box-t" x="306" y="60" data-term="runtime">AgentCore Runtime</text>
@@ -455,7 +560,7 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
             <text class="el" x="256" y="96">JWT</text>
           </g>
 
-          <g class="lane" data-step="2">
+          <g class="lane">
             <text class="lane-t" x="770" y="24">TOOLS</text>
             <g class="node ai" data-node="gateway"><rect x="630" y="72" width="280" height="64" rx="12"/><text x="770" y="99"><tspan data-term="gateway">AgentCore Gateway (MCP)</tspan><tspan class="d" x="770" dy="20">Cedar policy approves each call</tspan></text></g>
             <rect class="box vpc" x="630" y="160" width="280" height="214" rx="16"/>
@@ -470,7 +575,7 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
             <path class="edge" d="M910 104 H924 V426 H912" marker-end="url(#ah)"/>
           </g>
 
-          <g class="lane" data-step="3">
+          <g class="lane">
             <text class="lane-t" x="1065" y="24">DATA &amp; FEEDBACK</text>
             <g class="node" data-node="sfn"><rect x="950" y="72" width="230" height="48" rx="12"/><text x="1065" y="101"><tspan data-term="workflow">Step Functions</tspan></text></g>
             <g class="node" data-node="codebuild"><rect x="950" y="140" width="230" height="64" rx="12"/><text x="1065" y="167"><tspan data-term="jobs">CodeBuild</tspan><tspan class="d" x="1065" dy="20">ingest · transform · curate · load</tspan></text></g>
@@ -484,24 +589,7 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
             <text class="el" x="600" y="494">thumbs up / down from the chat</text>
           </g>
         </svg>
-      </div>
-      <div class="tags" data-step="3">
-        <span class="line" data-term="iac">Everything deployed as code with AWS CDK.</span>
-        <span class="src build">From the LedgerLens build · docs/architecture-diagram/ledgerlens-architecture.drawio</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- 5 · Technical solution -->
-  <section class="slide s-how" data-steps="4" aria-label="Technical solution">
-    <div class="inner">
-      <div data-step="0">
-        <div class="eyebrow">The technical solution</div>
-        <h2>One chat turn, <span class="grad">end to end.</span></h2>
-        <p class="cloud-note" data-term="note" hidden></p>
-      </div>
-      <div class="how">
-        <div class="arch arch-mini" id="archMini" aria-hidden="true"></div>
+        </div>
         <ol class="walk">
           <li data-step="0" data-focus="customer amplify cognito pretoken"><b>Sign in</b></li>
           <li data-step="1" data-focus="amplify agent memory bedrock guardrail"><b>Session</b></li>
@@ -533,7 +621,8 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
         </div>
       </div>
       <div class="tags" data-step="0">
-        <span class="src build">From the LedgerLens build · agent/ledgerlens, gateway/policies/policy.cedar, infra-cdk</span>
+        <span class="line" data-term="iac">Everything deployed as code with AWS CDK.</span>
+        <span class="src build">From the LedgerLens build · agent/ledgerlens, gateway/policies/policy.cedar, infra-cdk, docs/architecture-diagram</span>
       </div>
     </div>
   </section>
@@ -632,7 +721,20 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 
 </main>
 
-<div class="hint" id="hint">Press → to begin</div>
+<div class="hint" id="hint" role="note" aria-label="How to use this presentation">
+  <b>How to use this presentation</b>
+  <ul>
+    <li><kbd>→</kbd><kbd>Space</kbd> or click: next step</li>
+    <li><kbd>←</kbd> back one step</li>
+    <li><kbd>1</kbd>–<kbd>6</kbd> jump to a slide</li>
+    <li><kbd>F</kbd> full screen</li>
+    <li>Hover a <span class="dotted">dotted label</span> or figure for its detail</li>
+    <li><kbd>Esc</kbd> show or hide this guide</li>
+    <li><kbd>P</kbd> on Model evaluation: switch finalist prompt</li>
+    <li><kbd>C</kbd> on Technical solution: AWS or any cloud</li>
+    <li>The top bar shows your progress</li>
+  </ul>
+</div>
 <div class="cloud" id="cloud" role="radiogroup" aria-label="Show the architecture as">
   <span class="lbl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.3 12.5 3.5 3.5 0 0 0 6.5 19z"/></svg>View as</span>
   <button role="radio" data-cloud="aws" aria-checked="true">AWS</button>
@@ -698,15 +800,8 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
   }
 
   // slide hooks
-  // Technical solution: a clone of the architecture; each step highlights its part
+  // Technical solution: each step of the walkthrough highlights its part of the architecture
   const mini = document.getElementById('archMini');
-  const clone = document.getElementById('archSvg').cloneNode(true);
-  clone.removeAttribute('id');
-  // Own marker id, so the arrowheads paint while slide 4 is hidden
-  clone.querySelector('marker').id = 'ah-mini';
-  clone.querySelectorAll('[marker-end]').forEach(p => p.setAttribute('marker-end', 'url(#ah-mini)'));
-  clone.querySelectorAll('[data-step]').forEach(el => el.removeAttribute('data-step'));
-  mini.appendChild(clone);
   hooks.push((s, st) => {
     if (!s.classList.contains('s-how')) return;
     const shown = [...s.querySelectorAll('[data-focus]')].filter(li => +li.dataset.step <= st);
@@ -717,7 +812,7 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
     s.querySelectorAll('.walk li').forEach(li => li.classList.toggle('current', li === last));
     s.querySelectorAll('.walk-detail > div').forEach((d, i) => d.classList.toggle('current', i === shown.length - 1));
   });
-  // Cloud switch (AWS / any cloud): renames every [data-term] (both diagrams, the walkthrough, the footer).
+  // Cloud switch (AWS / any cloud): renames every [data-term] (the diagram, the walkthrough, the footer).
   // Like a theme switch, but the deck always opens on AWS: nothing is remembered.
   const terms = JSON.parse(document.getElementById('cloudTerms').textContent);
   const CLOUDS = ['aws', 'generic'];
@@ -745,8 +840,45 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
   }
   cloudBox.querySelectorAll('button').forEach(b => b.onclick = () => setCloud(b.dataset.cloud));
   document.fonts?.ready.then(fitTerms);
-  // The switch shows only on the two slides it changes
-  hooks.push(s => cloudBox.classList.toggle('show', s.classList.contains('s-arch') || s.classList.contains('s-how')));
+  // The switch shows only on the slide it changes
+  hooks.push(s => cloudBox.classList.toggle('show', s.classList.contains('s-how')));
+
+  // Model evaluation: the finalist switch (the winner, v12, by default; the runner-up is v11) moves every bar and number to that prompt's value
+  const evSlide = document.querySelector('.s-eval');
+  const evBox = document.getElementById('evPrompt');
+  let prompt = 'v12';
+  function tween(el, from, to) {
+    const show = v => el.dataset.fmt === 'dec2' ? v.toFixed(2) : Math.round(v) + (el.dataset.fmt === 'pct' ? '%' : '');
+    if (reduce) { el.textContent = show(to); return; }
+    const t0 = performance.now();
+    const tick = t => {
+      const p = Math.min(1, (t - t0) / 900), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = show(from + (to - from) * e);
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  function setPrompt(p, scope = evSlide, fromZero = false) {
+    const was = prompt;
+    prompt = p;
+    scope.querySelectorAll('[data-v11]').forEach(el => {
+      tween(el, fromZero ? 0 : +el.dataset[was], +el.dataset[p]);
+      el.closest('.ev-bar')?.querySelector('i').style.setProperty('--v', el.dataset[p] + '%');
+    });
+    evSlide.querySelectorAll('[data-ev-p]').forEach(el => el.textContent = p === 'v12' ? 'winning' : 'runner-up');
+    evBox.querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', b.dataset.p === p));
+  }
+  evBox.querySelectorAll('button').forEach(b => b.onclick = () => { if (b.dataset.p !== prompt) setPrompt(b.dataset.p); });
+  // Each card's numbers count up from 0 the first time its step shows; leaving the slide resets them
+  const evShown = new Set();
+  hooks.push((s, st) => {
+    if (s !== evSlide) { evShown.clear(); return; }
+    evSlide.querySelectorAll('[data-step]').forEach(card => {
+      if (!card.querySelector('[data-v11]') || +card.dataset.step > st || evShown.has(card)) return;
+      evShown.add(card);
+      setPrompt(prompt, card, true);
+    });
+  });
 
   // Solution slide: the lens closes as the slide arrives
   hooks.push(s => document.getElementById('heroMark').classList.toggle('split', !s.classList.contains('s-solution')));
@@ -776,7 +908,13 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
     document.getElementById('progress').style.width = (done / total * 100) + '%';
     document.getElementById('count').textContent = (cur + 1) + ' / ' + slides.length;
     document.getElementById('brand').classList.toggle('show', !s.classList.contains('s-solution'));
-    document.getElementById('hint').style.opacity = cur === 0 && step === 0 ? 1 : 0;
+    showGuide();
+  }
+
+  // The guide shows on the opening screen; Esc shows or hides it anywhere
+  let guideOpen = false;
+  function showGuide() {
+    document.getElementById('hint').style.opacity = guideOpen || (cur === 0 && step === 0) ? 1 : 0;
   }
 
   function next() {
@@ -808,8 +946,10 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
   document.fonts?.ready.then(fit);
 
   addEventListener('keydown', e => {
-    // Space and Enter on a switch button pick that cloud instead of advancing
-    if (e.target.closest?.('.cloud') && [' ', 'Enter'].includes(e.key)) return;
+    // Space and Enter on a switch button pick that option instead of advancing
+    if (e.target.closest?.('.cloud, .ev-prompt') && [' ', 'Enter'].includes(e.key)) return;
+    if (e.key === 'Escape') { guideOpen = !guideOpen; showGuide(); return; }
+    if (e.key === 'p' && slides[cur].classList.contains('s-eval')) { setPrompt(prompt === 'v12' ? 'v11' : 'v12'); return; }
     if (e.key === 'c' && cloudBox.classList.contains('show')) { setCloud(CLOUDS[(CLOUDS.indexOf(cloud) + 1) % CLOUDS.length]); return; }
     if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); next(); }
     else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); prev(); }
