@@ -7,7 +7,7 @@ The repository is a fork of the AWS "Fullstack AgentCore Solution Template" (FAS
 Generated folders are left out (`node_modules`, `.git`, `__pycache__`, `cdk.out`, `build`, `.venv`). Of the nine tool folders, only `list_credit_cards` is expanded; the others have the same layout.
 
 ```text
-ledgerlens-bank-assistant/
+factored-hackathon-2026-ledgerlens/
 ├── agent/                                  # The agent that runs on AgentCore Runtime
 │   ├── ledgerlens/
 │   │   ├── Dockerfile                      # ARM64 image; build context is the repo root

@@ -37,8 +37,8 @@ aws --version        # aws-cli/2.x
 ## 1. Clone
 
 ```bash
-git clone https://github.com/eduardorestrepo89/ledgerlens-bank-assistant.git
-cd ledgerlens-bank-assistant
+git clone https://github.com/eduardorestrepo89/factored-hackathon-2026-ledgerlens.git
+cd factored-hackathon-2026-ledgerlens
 git switch stage
 ```
 

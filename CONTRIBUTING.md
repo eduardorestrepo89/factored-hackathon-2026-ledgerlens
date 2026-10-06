@@ -1,6 +1,6 @@
 # Contributing to LedgerLens
 
-How the team works on this repo: [eduardorestrepo89/ledgerlens-bank-assistant](https://github.com/eduardorestrepo89/ledgerlens-bank-assistant).
+How the team works on this repo: [eduardorestrepo89/factored-hackathon-2026-ledgerlens](https://github.com/eduardorestrepo89/factored-hackathon-2026-ledgerlens).
 
 ## Setup
 

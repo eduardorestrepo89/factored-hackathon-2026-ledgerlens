@@ -2,7 +2,7 @@
 
 LedgerLens is a customer-service agent for LATAM Bank's credit card holders. It answers questions about their cards and charges in the bank's app chat, blocks a card or opens a fraud claim when the customer confirms, and hands the case to a person with a summary. It is the team's entry to the Factored AI & Data Hackathon 2026, built on AWS from the [Fullstack AgentCore Solution Template (FAST)](https://github.com/awslabs/fullstack-solution-template-for-agentcore).
 
-Live app: https://main.dteq5fgkcy7a4.amplifyapp.com (us-east-1). Repository: [eduardorestrepo89/ledgerlens-bank-assistant](https://github.com/eduardorestrepo89/ledgerlens-bank-assistant).
+Live app: https://main.dteq5fgkcy7a4.amplifyapp.com (us-east-1). Repository: [eduardorestrepo89/factored-hackathon-2026-ledgerlens](https://github.com/eduardorestrepo89/factored-hackathon-2026-ledgerlens).
 
 ## 📚 Documentation
 
@@ -84,8 +84,8 @@ You need git, Python 3.11+, Node.js 20.19+ or 22.12+, and the AWS CLI v2 with th
 1. Clone the repo:
 
    ```bash
-   git clone https://github.com/eduardorestrepo89/ledgerlens-bank-assistant.git
-   cd ledgerlens-bank-assistant
+   git clone https://github.com/eduardorestrepo89/factored-hackathon-2026-ledgerlens.git
+   cd factored-hackathon-2026-ledgerlens
    ```
 
 2. Install the Python test dependencies and the frontend (`requirements-dev.txt` doesn't install: its CDK pins conflict):
@@ -137,7 +137,7 @@ Loading the data, rerunning a stage, the reload downtime, cost and deleting the 
 ## Project structure
 
 ```
-ledgerlens-bank-assistant/
+factored-hackathon-2026-ledgerlens/
 ├── agent/
 │   ├── ledgerlens/          # Strands agent: ledgerlens_agent.py, Dockerfile
 │   │   └── tools/           # system prompt, hooks (customer_id, confirmation), guardrail, memory, session context
