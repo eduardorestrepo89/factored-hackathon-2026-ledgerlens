@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="pipe-root" viewBox="0 0 960 736" width="100%" role="img" aria-labelledby="pipe-title pipe-desc">
+<title id="pipe-title">From one scripted session to a verdict</title>
+<desc id="pipe-desc">The runner sends each scripted customer turn or tap to the LedgerLens agent over HTTPS and reads its SSE stream. The stream digest builds one record per request, and the session record (texts, tool calls with raw model input, tool results, confirmations, token usage, latency) is appended to sessions.jsonl. A harness error was already retried once with a new session id and is never graded. Otherwise every named check of the case runs; the first failing check names a failed verdict, and no failure means pass. The four unsafe detectors run on every graded session, apart from the verdict. Results are aggregated per model and prompt: pass^1, pass^3 with a Wilson 95% interval over the 10 cases, and unsafe cases with the rule-of-three bound. On the side, AgentCore Evaluations scores the same session from its spans with GoalSuccessRate and TrajectoryInOrderMatch and is compared for agreement; it corroborates and never decides. Sessions with a confirmation fail there with SpanEventParsingException.</desc>
+<style>
+.pipe-root .pipe-box{fill:var(--surface);stroke:var(--line);stroke-width:1.25}
+.pipe-root .pipe-rec{fill:var(--soft);stroke:var(--accent);stroke-width:1.5}
+.pipe-root .pipe-aws{fill:var(--surface);stroke:var(--muted);stroke-width:1.25;stroke-dasharray:6 4}
+.pipe-root .pipe-harn{fill:var(--surface);stroke:var(--warn);stroke-width:1.25}
+.pipe-root .pipe-agg{fill:var(--soft);stroke:var(--ink);stroke-width:1.25}
+.pipe-root .pipe-chip{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.pipe-root .pipe-pass{fill:var(--surface);stroke:var(--pass);stroke-width:1.5}
+.pipe-root .pipe-fail{fill:var(--surface);stroke:var(--fail);stroke-width:1.5}
+.pipe-root .pipe-div{fill:none;stroke:var(--line);stroke-width:1}
+.pipe-root .pipe-ln{fill:none;stroke:var(--ink);stroke-width:1.4}
+.pipe-root .pipe-ln-d{fill:none;stroke:var(--muted);stroke-width:1.4;stroke-dasharray:5 4}
+.pipe-root .pipe-hd{fill:var(--ink);stroke:var(--ink);stroke-width:0.5}
+.pipe-root .pipe-hd-m{fill:var(--muted);stroke:var(--muted);stroke-width:0.5}
+.pipe-root text{font-family:var(--body);font-size:13px;fill:var(--ink);stroke:none}
+.pipe-root .pipe-h{font-size:15px;font-weight:600}
+.pipe-root .pipe-m{fill:var(--muted)}
+.pipe-root .pipe-c{font-family:var(--mono);font-size:12.5px}
+.pipe-root .pipe-tp{fill:var(--pass);font-weight:600}
+.pipe-root .pipe-tf{fill:var(--fail)}
+.pipe-root .pipe-tw{fill:var(--warn);font-weight:600}
+.pipe-root .pipe-i{font-style:italic}
+.pipe-root .pipe-mid{text-anchor:middle}
+.pipe-root .pipe-end{text-anchor:end}
+</style>
+<defs>
+<marker id="pipe-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="pipe-hd" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="pipe-ah-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="pipe-hd-m" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+
+<!-- Row 1: drive one session -->
+<path class="pipe-ln" d="M114,64 V30 H820 V62" marker-end="url(#pipe-ah)"/>
+<text class="pipe-mid" x="467" y="52">each turn or tap: HTTPS POST with the eval override (model, prompt)</text>
+
+<rect class="pipe-box" x="24" y="64" width="180" height="100" rx="8"/>
+<text class="pipe-h" x="40" y="90">Runner</text>
+<text class="pipe-c pipe-m" x="40" y="110">evals/runner.py</text>
+<text x="40" y="132">scripted turns and</text>
+<text x="40" y="150">taps from cases.yaml</text>
+
+<rect class="pipe-box" x="324" y="64" width="240" height="100" rx="8"/>
+<text class="pipe-h" x="340" y="90">Stream digest</text>
+<text class="pipe-c pipe-m" x="340" y="110">evals/stream.py</text>
+<text x="340" y="132">one record per request:</text>
+<text x="340" y="150">messages, confirmations, usage</text>
+
+<rect class="pipe-box" x="704" y="64" width="232" height="100" rx="8"/>
+<text class="pipe-h" x="720" y="90">LedgerLens agent</text>
+<text class="pipe-m" x="720" y="110">AgentCore Runtime</text>
+<text x="720" y="132">uses the model and prompt</text>
+<text x="720" y="150">named in the override</text>
+
+<line class="pipe-ln" x1="704" y1="114" x2="566" y2="114" marker-end="url(#pipe-ah)"/>
+<text class="pipe-mid" x="634" y="104">SSE events</text>
+<text class="pipe-c pipe-m pipe-mid" x="634" y="134">data: &lt;json&gt;</text>
+
+<line class="pipe-ln" x1="324" y1="114" x2="206" y2="114" marker-end="url(#pipe-ah)"/>
+<text class="pipe-mid" x="264" y="104">next turn, or</text>
+<text class="pipe-mid" x="264" y="134">a scripted tap</text>
+
+<!-- Row 2: the session record -->
+<line class="pipe-ln" x1="444" y1="164" x2="444" y2="194" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="452" y="184">appended when the session ends</text>
+
+<rect class="pipe-rec" x="24" y="196" width="620" height="80" rx="8"/>
+<text class="pipe-h" x="40" y="222">Session record</text>
+<text class="pipe-c pipe-m" x="40" y="242">sessions.jsonl</text>
+<text class="pipe-m" x="40" y="262">one line per session</text>
+<rect class="pipe-chip" x="214" y="206" width="58" height="26" rx="13"/>
+<text class="pipe-mid" x="243" y="223.5">texts</text>
+<rect class="pipe-chip" x="282" y="206" width="212" height="26" rx="13"/>
+<text class="pipe-mid" x="388" y="223.5">tool calls + raw model input</text>
+<rect class="pipe-chip" x="504" y="206" width="108" height="26" rx="13"/>
+<text class="pipe-mid" x="558" y="223.5">tool results</text>
+<rect class="pipe-chip" x="214" y="242" width="118" height="26" rx="13"/>
+<text class="pipe-mid" x="273" y="259.5">confirmations</text>
+<rect class="pipe-chip" x="342" y="242" width="102" height="26" rx="13"/>
+<text class="pipe-mid" x="393" y="259.5">token usage</text>
+<rect class="pipe-chip" x="454" y="242" width="76" height="26" rx="13"/>
+<text class="pipe-mid" x="492" y="259.5">latency</text>
+
+<!-- inputs to AgentCore -->
+<path class="pipe-ln" d="M644,236 H744 V314" marker-end="url(#pipe-ah)"/>
+<text class="pipe-mid" x="694" y="228">session id</text>
+<text class="pipe-m pipe-mid" x="694" y="254">+ assertions</text>
+<path class="pipe-ln-d" d="M900,164 V314" marker-end="url(#pipe-ah-m)"/>
+<text class="pipe-m pipe-end" x="892" y="232">spans → CloudWatch</text>
+<text class="pipe-m pipe-end" x="892" y="250">ingested in 2–5 min</text>
+
+<!-- Row 3: grade one session -->
+<line class="pipe-ln" x1="104" y1="276" x2="104" y2="314" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="112" y="300">harness error</text>
+<line class="pipe-ln" x1="325" y1="276" x2="325" y2="314" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="333" y="300">graded</text>
+<line class="pipe-ln" x1="555" y1="276" x2="555" y2="314" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="563" y="300">in parallel</text>
+
+<rect class="pipe-harn" x="24" y="316" width="160" height="90" rx="8"/>
+<text class="pipe-h" x="40" y="340">Harness error</text>
+<text x="40" y="362">HTTP failure or an</text>
+<text x="40" y="382">error event</text>
+<line class="pipe-ln" x1="104" y1="406" x2="104" y2="444" marker-end="url(#pipe-ah)"/>
+<rect class="pipe-harn" x="24" y="446" width="160" height="130" rx="8"/>
+<text class="pipe-h" x="40" y="472">Retried once</text>
+<text x="40" y="494">with a new</text>
+<text x="40" y="512">session id</text>
+<text class="pipe-m" x="40" y="538">still failing:</text>
+<text class="pipe-tw" x="40" y="558">never graded</text>
+
+<rect class="pipe-box" x="200" y="316" width="250" height="120" rx="8"/>
+<text class="pipe-h" x="216" y="340">Case checks</text>
+<text x="216" y="362">all named checks run,</text>
+<text x="216" y="382">in cases.yaml order,</text>
+<text class="pipe-m" x="216" y="404">after the runner's unexpected</text>
+<text class="pipe-m" x="216" y="422">or missing confirmations</text>
+<line class="pipe-ln" x1="325" y1="436" x2="325" y2="464" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="333" y="455">failures list</text>
+<rect class="pipe-box" x="200" y="466" width="250" height="110" rx="8"/>
+<text class="pipe-h" x="216" y="490">Session verdict</text>
+<rect class="pipe-pass" x="216" y="502" width="100" height="26" rx="13"/>
+<text class="pipe-tp pipe-mid" x="266" y="519.5">pass</text>
+<rect class="pipe-fail" x="332" y="502" width="102" height="26" rx="13"/>
+<text class="pipe-tf pipe-mid" x="383" y="519.5">fail</text>
+<text class="pipe-m pipe-mid" x="266" y="548">no check failed</text>
+<text class="pipe-m pipe-mid" x="383" y="548">names the first</text>
+<text class="pipe-m pipe-mid" x="383" y="565">failing check</text>
+
+<rect class="pipe-box" x="466" y="316" width="178" height="140" rx="8"/>
+<text class="pipe-h" x="482" y="340">Unsafe detectors</text>
+<text class="pipe-m" x="482" y="360">every graded session</text>
+<text class="pipe-c" x="482" y="384">write_without_yes</text>
+<text class="pipe-c" x="482" y="403">foreign_customer_id</text>
+<text class="pipe-c" x="482" y="422">privacy_leak</text>
+<text class="pipe-c" x="482" y="441">pan_echo</text>
+<line class="pipe-ln" x1="555" y1="456" x2="555" y2="478" marker-end="url(#pipe-ah)"/>
+<rect class="pipe-box" x="466" y="480" width="178" height="96" rx="8"/>
+<text class="pipe-h" x="482" y="506">Unsafe flags</text>
+<text x="482" y="528">kept apart from</text>
+<text x="482" y="548">the verdict</text>
+
+<rect class="pipe-aws" x="704" y="316" width="232" height="260" rx="8"/>
+<text class="pipe-h" x="720" y="340">AgentCore Evaluations</text>
+<text class="pipe-c pipe-m" x="720" y="360">evals/aws_eval.py</text>
+<text x="720" y="384">scores the same session</text>
+<text x="720" y="402">from its spans</text>
+<rect class="pipe-chip" x="720" y="414" width="150" height="24" rx="4"/>
+<text class="pipe-c" x="730" y="430.5">GoalSuccessRate</text>
+<rect class="pipe-chip" x="720" y="444" width="196" height="24" rx="4"/>
+<text class="pipe-c" x="730" y="460.5">TrajectoryInOrderMatch</text>
+<text x="720" y="492">read-only session: <tspan class="pipe-tp">scored</tspan></text>
+<text x="720" y="516">with a confirmation:</text>
+<text class="pipe-c pipe-tf" x="720" y="536">SpanEventParsingException</text>
+<text class="pipe-m" x="720" y="556">no score; local verdict only</text>
+
+<!-- Row 4: aggregate -->
+<line class="pipe-ln" x1="104" y1="576" x2="104" y2="612" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="112" y="598">counted</text>
+<line class="pipe-ln" x1="325" y1="576" x2="325" y2="612" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="333" y="598">pass or fail per run</text>
+<line class="pipe-ln" x1="555" y1="576" x2="555" y2="612" marker-end="url(#pipe-ah)"/>
+<text class="pipe-m" x="563" y="598">unsafe flags</text>
+<line class="pipe-ln-d" x1="820" y1="576" x2="820" y2="612" marker-end="url(#pipe-ah-m)"/>
+<text class="pipe-m pipe-i" x="828" y="591">corroborates,</text>
+<text class="pipe-m pipe-i" x="828" y="607">never decides</text>
+
+<rect class="pipe-agg" x="24" y="614" width="912" height="100" rx="8"/>
+<text class="pipe-h" x="40" y="640">Per model × prompt</text>
+<text class="pipe-m" x="40" y="662">10 cases × 3 runs</text>
+<text class="pipe-c pipe-m" x="40" y="682">evals/report.py</text>
+<line class="pipe-div" x1="214" y1="626" x2="214" y2="702"/>
+<line class="pipe-div" x1="354" y1="626" x2="354" y2="702"/>
+<line class="pipe-div" x1="534" y1="626" x2="534" y2="702"/>
+<line class="pipe-div" x1="754" y1="626" x2="754" y2="702"/>
+<text class="pipe-h" x="230" y="640">pass^1</text>
+<text x="230" y="662">mean share of</text>
+<text x="230" y="680">passing runs</text>
+<text x="230" y="698">per case</text>
+<text class="pipe-h" x="370" y="640">pass^3</text>
+<text x="370" y="662">cases with all 3 runs</text>
+<text x="370" y="680">passing, Wilson 95%</text>
+<text x="370" y="698">interval over 10 cases</text>
+<text class="pipe-h" x="550" y="640">Unsafe cases</text>
+<text x="550" y="662">cases with any flagged run;</text>
+<text x="550" y="680">none of 10 → rule of three</text>
+<text x="550" y="698">bound: ≤ 30%</text>
+<text class="pipe-h" x="770" y="640">AgentCore</text>
+<text x="770" y="662">mean score and</text>
+<text x="770" y="680">agreement with local</text>
+<text x="770" y="698">(score ≥ 0.5 = pass)</text>
+</svg>

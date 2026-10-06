@@ -132,6 +132,13 @@ Prompt v10, 10 cases × 3 runs per model (`evals/results/baseline-v10`, `evals/r
 The production `model_id` moved from `deepseek.v3.2` to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
 Haiku's remaining failure (E2b, E4a) is offering a person in text instead of calling the hand-off.
 
+## Report
+
+`docs/evaluation/ledgerlens-under-test.html` is the full evaluation report, a single file you open in a browser. It has five tabs: overview, results, hackathon fit, method and every check explained. Next to it:
+- `docs/evaluation/report/`: the final `report.md`, `report.csv` and `grades.jsonl` for all 9 configurations;
+- `docs/evaluation/diagrams/`: the diagrams as SVG;
+- `docs/evaluation/data/`: the checks catalog and the hackathon metrics behind the page.
+
 ## Prompt series v10 → v11 → v12, 2026-10-05
 
 10 cases × 3 runs per model and prompt (`evals/results/haiku-v11`, `haiku-v12`, `others-v11-v12`).
