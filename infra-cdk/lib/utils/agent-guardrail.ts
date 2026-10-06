@@ -33,13 +33,15 @@ const DENIED_TOPICS = [
     name: "GeneralKnowledgeAndSchoolwork",
     definition:
       "Questions about general knowledge, science, history, geography, math problems, " +
-      "homework, essays or translations that are not about the customer's bank cards.",
+      "homework or essays that are not about the customer's bank cards.",
+    // No translations: the topic then caught "talk to me in Portuguese", and the agent
+    // must switch between its three languages. The prompt declines translating texts.
     examples: [
       "What is the capital of Australia?",
       "Solve this equation for x",
       "Write an essay about climate change",
       "¿Quién ganó el mundial de 2014?",
-      "Traduza este texto para o inglês",
+      "Me explica a fotossíntese para a minha prova",
     ],
   },
   {
