@@ -16,6 +16,8 @@ evals/.venv/Scripts/python -m evals.eval_users create            # lists the 8 l
 evals/.venv/Scripts/python -m evals.eval_users create --apply    # creates them; passwords -> evals/.env
 # after the deploy that creates the evaluators group:
 evals/.venv/Scripts/python -m evals.eval_users add-to-group --apply
+# the 5 hackathon judges (config.JUDGES), never added to the group:
+evals/.venv/Scripts/python -m evals.eval_users create-judges --apply
 ```
 
 `create --apply` also writes the logins' subs into `USER_CUSTOMER_IDS_MAP` in

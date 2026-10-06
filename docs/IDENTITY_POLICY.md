@@ -97,7 +97,7 @@ The Lambda's `USER_CUSTOMER_IDS_MAP` environment variable is a JSON object, as a
 {"<cognito-sub>": "CLI-50OIF5EIYSWK", "<another-sub>": "CLI-70U0WJ1NH1MN"}
 ```
 
-- **Where it is set:** hard-coded in `cognito-construct.ts`. It holds 9 subs today; two of them map to the same customer.
+- **Where it is set:** hard-coded in `cognito-construct.ts`. It holds 15 subs today (the demo, evaluation and judge logins); several map to the same customer.
 - **Console edits:** a change in the Lambda console applies to the next token. The agent fetches a new token on every request, so the next message already uses it. This is how the demo login switches personas.
 - **Redeploys:** a deploy of the main stack resets the variable to the committed value. Subs added only in the console are lost.
 

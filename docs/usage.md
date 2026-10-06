@@ -129,14 +129,16 @@ The agent's identity chain:
 
 So a login that isn't in the map can sign in and chat, but the agent can't see any card. It says the account isn't linked yet.
 
-The committed map, in `infra-cdk/lib/cognito-construct.ts`, holds 9 real subs:
+The committed map, in `infra-cdk/lib/cognito-construct.ts`, holds 15 real subs:
 
 | Login | Linked to | Who uses it |
 |---|---|---|
-| `demo@ledgerlens.example` | P03 by default, switchable | The team and the judges, for demos |
+| `demo@ledgerlens.example` | P03 by default, switchable | The team, for demos |
 | `eval-p01@ledgerlens.example` … `eval-p10@ledgerlens.example`, 8 logins: P01, P03, P04, P05, P06, P07, P09, P10 | Their own persona, fixed | The eval harness. They are in the Cognito group `evaluators`, which may also switch the model and base prompt per session ([api.md, Evaluation override](api.md#evaluation-override)). |
+| `judge-1@ledgerlens.example` … `judge-5@ledgerlens.example`: P07, P09, P05, P08, P04 | Their own persona, fixed | The hackathon judges, one use case each ([docs/evaluation/judges.md](evaluation/judges.md)). Not in `evaluators`, so always the production model and prompt. |
+| One more login | P07's alternate customer, `CLI-HTX9ITCO0IMR` | Added with the judge logins |
 
-The demo password is shared within the team, never in git. The evaluation passwords are in `evals/.env` (gitignored), written by `evals/eval_users.py`.
+The demo password is shared within the team, never in git. The evaluation and judge passwords are in `evals/.env` (gitignored), written by `evals/eval_users.py`. Two people on the same login see each other's changes: card blocks and claims are real writes.
 
 ### Create the demo login
 
@@ -182,16 +184,18 @@ set_persona() {  # usage: set_persona <customer_id>
 set_persona CLI-50OIF5EIYSWK   # P05
 ```
 
-- **Merge, don't replace.** `update-function-configuration` replaces the Lambda's whole environment. The older version of this function set the map to the demo login alone, which unlinked the 8 evaluation logins. This one keeps them.
+- **Merge, don't replace.** `update-function-configuration` replaces the Lambda's whole environment. The older version of this function set the map to the demo login alone, which unlinked every other login. This one keeps them.
 - **The switch takes effect on the next message:** the agent asks for a new Gateway token on every request.
 - **Start a new chat after every switch.** The old chat keeps the previous persona: its session context (name, cards, likely reasons) was saved with the session at its first message, and its memory holds the earlier answers.
 - **Don't switch during an evaluation run.** The evaluation rules forbid editing the map while a run is going ([evals/README.md](../evals/README.md#rules)).
 - **Who can switch:** only someone with AWS credentials for the `ledgerlens` account that may update that Lambda. The person chatting never can. Evaluation logins can switch the model, not the customer.
-- **A redeploy resets the map.** The next deploy of the main stack sets it back to the committed `USER_CUSTOMER_IDS_MAP`: the 9 subs above, with the demo login on P03. A sub that exists only in the console is lost.
+- **A redeploy resets the map.** The next deploy of the main stack sets it back to the committed `USER_CUSTOMER_IDS_MAP`: the subs above, with the demo login on P03. A sub that exists only in the console is lost.
 
-### Evaluation logins
+### Evaluation and judge logins
 
 `python -m evals.eval_users create --apply` creates the 8 logins, saves their passwords to `evals/.env` and writes their subs into `cognito-construct.ts`. After the deploy that creates the `evaluators` group, `python -m evals.eval_users add-to-group --apply` adds them. Without `--apply` both commands only list what they would do. Setup and the evaluation rules: [evals/README.md](../evals/README.md).
+
+`python -m evals.eval_users create-judges --apply` does the same for the 5 judge logins (`JUDGES` in `evals/config.py`), with passwords saved as `JUDGE_PASSWORD_J1` … `J5`. It never adds them to the `evaluators` group. What each judge should try: [docs/evaluation/judges.md](evaluation/judges.md).
 
 ### Personas
 

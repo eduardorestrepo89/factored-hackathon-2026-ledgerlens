@@ -198,7 +198,7 @@ The script:
 1. Reads the main stack's outputs.
 2. Writes `frontend/public/aws-exports.json`.
 3. Runs `npm install` if needed, then `npm run build` (Vite, output `frontend/build`).
-4. Zips the build to the staging bucket and starts an Amplify deployment on `main`.
+4. Zips the build to the staging bucket and starts an Amplify deployment on `main`. The build includes the public pages in `frontend/public/` (`/final_presentation`, `/ledgerlens_pitch`). The pitch video `ledgerlens_pitch/ledgerlens_bank_assistant.mp4` isn't in git (`.gitignore` excludes `*.mp4`): put it there before deploying, or the script warns and the page ships without it.
 5. Waits for it and prints the App URL.
 
 ### 5. Create logins and link them to customers
@@ -206,6 +206,7 @@ The script:
 Cedar refuses every tool call from a login whose Cognito `sub` isn't in `USER_CUSTOMER_IDS_MAP`, because its `customer_id` claim is blank.
 - **Demo login:** create `demo@ledgerlens.example` and switch it between personas, following [Logins and personas](usage.md#logins-and-personas).
 - **Evaluation logins:** `python -m evals.eval_users create --apply` creates them and writes their subs into `cognito-construct.ts`. After the deploy that creates the `evaluators` group, run `python -m evals.eval_users add-to-group --apply`. See `evals/README.md`.
+- **Judge logins:** `python -m evals.eval_users create-judges --apply` creates the 5 hackathon judge logins (`JUDGES` in `evals/config.py`) and writes their subs the same way. They stay out of `evaluators`, so they always get the production model and prompt. See `docs/evaluation/judges.md`.
 
 After adding subs to the map in `infra-cdk/lib/cognito-construct.ts`, commit them and redeploy the main stack. A redeploy resets the Lambda's map to the committed value, so subs that are only in the console are lost.
 
