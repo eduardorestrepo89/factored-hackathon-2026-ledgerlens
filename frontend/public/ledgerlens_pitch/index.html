@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LedgerLens Pitch</title>
+<meta name="description" content="LedgerLens bank assistant: the pitch video.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@400..600&family=Funnel+Sans:wght@400..500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #070818; --text: #eef0fa; --soft: #9aa0bb; --line: rgba(111,130,255,.28);
+  --cobalt: #3b5bff; --cobalt-hi: #a9b6ff; --amber: #e8a33d;
+  --display: "Funnel Display", system-ui, sans-serif; --sans: "Funnel Sans", system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body {
+  min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px;
+  background: radial-gradient(1200px 600px at 50% -10%, rgba(59,91,255,.18), transparent 60%), var(--bg);
+  color: var(--text); font-family: var(--sans);
+}
+main { width: min(1200px, 100%); display: grid; gap: 18px; }
+.brand { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--soft); }
+.brand img { width: 18px; height: 18px; }
+h1 { font-family: var(--display); font-weight: 500; font-size: clamp(26px, 3.4vw, 44px); line-height: 1.1; letter-spacing: -.01em; }
+h1 span { background: linear-gradient(90deg, var(--cobalt-hi), var(--amber)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.frame { border: 1px solid var(--line); border-radius: 18px; overflow: hidden; background: #000; box-shadow: 0 30px 80px -30px rgba(0,0,0,.9); }
+video { display: block; width: 100%; height: auto; max-height: calc(100dvh - 210px); background: #000; }
+.more { font-size: 14px; color: var(--soft); }
+.more a { color: var(--cobalt-hi); text-decoration: none; border-bottom: 1px solid rgba(169,182,255,.4); }
+.more a:hover, .more a:focus-visible { color: var(--text); border-color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><img src="/favicon.svg" alt="">LedgerLens</div>
+  <h1>LedgerLens bank assistant. <span>The pitch.</span></h1>
+  <div class="frame">
+    <video controls playsinline preload="metadata" src="/ledgerlens_pitch/ledgerlens_bank_assistant.mp4">
+      Your browser can't play this video. <a href="/ledgerlens_pitch/ledgerlens_bank_assistant.mp4">Download it</a> instead.
+    </video>
+  </div>
+  <p class="more">The slides behind it: <a href="/final_presentation/">the final presentation</a>.</p>
+</main>
+</body>
+</html>

@@ -19,10 +19,18 @@ document.documentElement.classList.toggle(
   theme ? theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches
 )
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <LanguageProvider>
-      <App />
-    </LanguageProvider>
-  </React.StrictMode>
-)
+// The final presentation and the pitch video are public static pages (public/final_presentation,
+// public/ledgerlens_pitch), outside sign-in. Amplify serves them directly; this hands over when the
+// SPA gets the path instead (the dev server).
+const publicPage = window.location.pathname.match(/^\/(final_presentation|ledgerlens_pitch)\/?$/)
+if (publicPage) {
+  window.location.replace(`/${publicPage[1]}/index.html` + window.location.hash)
+} else {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <LanguageProvider>
+        <App />
+      </LanguageProvider>
+    </React.StrictMode>
+  )
+}

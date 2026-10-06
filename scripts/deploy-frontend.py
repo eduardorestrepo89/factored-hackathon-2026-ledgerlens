@@ -576,6 +576,13 @@ def main() -> int:
     shutil.copy2(aws_exports_src, aws_exports_dst)
     log_success("Added aws-exports.json to build directory")
 
+    # The pitch video is kept out of git, so a fresh clone builds /ledgerlens_pitch without it
+    if not (build_dir / "ledgerlens_pitch" / "ledgerlens_bank_assistant.mp4").exists():
+        log_warning(
+            "frontend/public/ledgerlens_pitch/ledgerlens_bank_assistant.mp4 is missing (it is not in git): "
+            "/ledgerlens_pitch will deploy without its video"
+        )
+
     # Create deployment zip
     log_info("Creating deployment package...")
     zip_path = frontend_dir / "amplify-deploy.zip"
