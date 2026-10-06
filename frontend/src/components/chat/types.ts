@@ -18,9 +18,12 @@ export interface Confirmation {
   tool: string
   toolUseId: string
   details: Record<string, unknown>
-  /** How it was answered: a button, or "typed" when the customer wrote instead. */
-  answer?: "yes" | "no" | "typed"
+  /** How it was answered: a button, the biometric check after Yes, or "typed" when the customer wrote instead. */
+  answer?: "yes" | "no" | "typed" | BiometricCheck
 }
+
+/** The demo biometric check a card block goes through after Yes (ConfirmCard). */
+export type BiometricCheck = "verified" | "unverified"
 
 export type MessageSegment =
   | { type: "text"; content: string }

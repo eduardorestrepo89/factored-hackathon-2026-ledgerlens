@@ -108,31 +108,11 @@ describe("Build Output Tests", () => {
   })
 
   describe("Source Maps", () => {
-    it("should generate JavaScript source maps", () => {
+    // the build is served publicly by Amplify, so it must not ship the source
+    it("should not ship source maps", () => {
       const assetsPath = join(buildDir, "assets")
       if (existsSync(assetsPath)) {
-        const files = readdirSync(assetsPath)
-        const mapFiles = files.filter(f => f.endsWith(".js.map"))
-        expect(mapFiles.length).toBeGreaterThan(0)
-      }
-    })
-
-    it("should have valid source map structure", () => {
-      const assetsPath = join(buildDir, "assets")
-      if (existsSync(assetsPath)) {
-        const files = readdirSync(assetsPath)
-        const mapFiles = files.filter(f => f.endsWith(".js.map"))
-
-        if (mapFiles.length > 0) {
-          const mapFile = join(assetsPath, mapFiles[0])
-          const content = readFileSync(mapFile, "utf-8")
-          const sourceMap = JSON.parse(content)
-
-          // Valid source maps should have these properties
-          expect(sourceMap).toHaveProperty("version")
-          expect(sourceMap).toHaveProperty("sources")
-          expect(sourceMap).toHaveProperty("mappings")
-        }
+        expect(readdirSync(assetsPath).filter(f => f.endsWith(".map"))).toEqual([])
       }
     })
   })

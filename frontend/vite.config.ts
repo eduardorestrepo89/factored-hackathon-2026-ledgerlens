@@ -17,7 +17,7 @@ export default defineConfig({
 
   build: {
     outDir: "build",
-    sourcemap: true,
+    sourcemap: false, // the build is served publicly by Amplify; maps would publish the source
     rollupOptions: {
       output: {
         // Vite 8 uses the rolldown bundler, which requires manualChunks to be a
