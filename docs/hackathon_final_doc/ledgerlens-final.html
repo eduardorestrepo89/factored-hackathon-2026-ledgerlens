@@ -148,6 +148,21 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 .bar span, .bar b { position: relative; font-weight: 400; }
 .facts { list-style: none; display: grid; gap: 8px; margin-top: 14px; font-size: 14.5px; color: var(--soft); }
 .facts b { color: var(--text); font-weight: 500; margin-right: 4px; }
+.beat .lead { margin-top: -2px; font-size: 17px; color: var(--text); }
+.beat .lead.sub { margin-top: 18px; font-size: 14px; color: var(--soft); }
+.nums { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 18px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.nums.three { grid-template-columns: repeat(3, 1fr); margin-top: 10px; padding-top: 0; border-top: 0; }
+.nums > div { display: grid; gap: 4px; align-content: start; }
+.nums b { font-family: var(--display); font-weight: 300; font-size: clamp(26px, 2.5vw, 36px); line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nums b small { font-family: var(--sans); font-size: 14px; color: var(--soft); letter-spacing: 0; }
+.nums > div > span { font-size: 13px; line-height: 1.3; color: var(--soft); }
+.warn .nums .hot { color: var(--mango); }
+.s-problem .beat { display: flex; flex-direction: column; }
+.s-problem .beat .nums { margin-top: auto; }
+.s-problem .beat:has(.nums) .big { font-size: clamp(56px, 5.6vw, 88px); line-height: 1; margin-bottom: 12px; }
+.s-problem .beat .lead { margin-bottom: 18px; font-size: 19px; }
+.s-problem .beat .nums b { font-size: clamp(34px, 3.3vw, 50px); }
+.s-problem .beat .nums > div > span { font-size: 14px; }
 .foot { margin-top: 4px; font-size: 14px; }
 .foot b { color: var(--text); font-weight: 500; }
 
@@ -168,6 +183,19 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 .outcome { display: grid; gap: 4px; padding: 14px 18px; border-radius: 16px; border: 1px solid rgba(111,130,255,.28); background: rgba(46,70,232,.08); text-align: left; }
 .outcome b { font-weight: 500; font-size: 16px; }
 .outcome span { font-size: 13.5px; color: var(--soft); }
+.s-solution .pillar { padding: 18px 22px 20px; }
+.s-solution .pillar h3 { font-size: clamp(20px, 1.8vw, 26px); }
+.s-solution .pillar p { font-size: 14.5px; }
+.kpis { width: min(1080px, 100%); display: grid; gap: 14px; }
+.kpis-h { font-family: var(--display); font-weight: 400; font-size: clamp(18px, 1.7vw, 24px); letter-spacing: -0.01em; color: var(--text); }
+.kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(12px, 1.6vw, 20px); text-align: left; }
+.kpi { position: relative; display: grid; gap: 10px; padding: 22px 26px 22px; border-radius: 22px; border: 1.5px solid rgba(111,130,255,.5); background: radial-gradient(120% 140% at 0% 0%, rgba(46,70,232,.28), rgba(46,70,232,.06) 60%); box-shadow: 0 24px 60px -30px rgba(46,70,232,.8); }
+.kpi-name { display: flex; align-items: center; gap: 14px; font-size: clamp(16px, 1.35vw, 19px); font-weight: 500; color: var(--text); }
+.kpi .dir { flex: none; width: clamp(40px, 3.4vw, 50px); height: clamp(40px, 3.4vw, 50px); padding: 8px; border-radius: 50%; fill: none; stroke: #04130d; stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round; background: var(--green); box-shadow: 0 0 0 4px rgba(63,191,143,.22), 0 0 24px rgba(63,191,143,.55); }
+.kpi-val { font-family: var(--display); font-weight: 300; font-size: clamp(48px, min(5.6vw, 9vh), 88px); line-height: .95; letter-spacing: -0.045em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kpi-val small { margin-left: 6px; font-family: var(--sans); font-size: clamp(15px, 1.3vw, 19px); letter-spacing: 0; color: var(--soft); }
+.kpi-now { font-size: 14px; color: var(--soft); }
+.kpi-now b { font-weight: 500; color: var(--text); }
 .s-solution .tags { justify-content: center; }
 .s-solution .line { font-family: var(--display); font-size: clamp(16px, 1.5vw, 20px); color: var(--text); }
 
@@ -316,7 +344,7 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
 @media (max-width: 900px) {
   html, body { overflow: auto; }
   .slide { place-items: start center; overflow-y: auto; padding-top: 72px; padding-bottom: 80px; }
-  .beats, .pillars, .outcomes, .cols, .out-grid, .how, .walk, .toolset, .profit, .big-save, .ev-grid { grid-template-columns: 1fr !important; }
+  .beats, .pillars, .outcomes, .kpi-row, .cols, .out-grid, .how, .walk, .toolset, .profit, .big-save, .ev-grid { grid-template-columns: 1fr !important; }
   .ev-row { grid-template-columns: 1fr; gap: 8px; }
   .hint { display: none; }
   .cloud .lbl { font-size: 0; gap: 0; padding: 0 4px 0 8px; }
@@ -359,26 +387,25 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
             <div class="bar" style="--w:22.9%"><span>Commercial</span><b>8.0%</b></div>
             <div class="bar" style="--w:8.6%"><span>Retention</span><b>3.0%</b></div>
           </div>
-          <p class="foot"><b data-count="6661">6,661</b> a month · <b data-count="4663">4,663</b> of them inbound calls</p>
+          <p class="foot"><b data-count="6661">6,661</b> a month</p>
         </div>
-        <div class="card beat" data-step="2">
+        <div class="card beat warn" data-step="2">
+          <div class="k">Today, people answer every one</div>
+          <div class="big"><span data-count="288">288</span></div>
+          <p class="lead">Agent-hours a month</p>
+          <div class="nums">
+            <div><b><span data-count="4663">4,663</span></b><span>calls a month</span></div>
+            <div><b class="hot"><span data-count="-69.9" data-format="dec">−69.9</span></b><span>NPS: still unhappy</span></div>
+          </div>
+        </div>
+        <div class="card beat" data-step="3">
           <div class="k">#1 complaint</div>
           <div class="big"><span data-count="12297">12,297</span></div>
-          <p>charges the customer doesn't recognize: 18.3% of all complaints, 90.6% of transaction complaints.</p>
-          <ul class="facts">
-            <li><b>50.4%</b> came in through the call center</li>
-            <li><b>15.4 days</b> on average to resolve one</li>
-          </ul>
-        </div>
-        <div class="card beat warn" data-step="3">
-          <div class="k">Today, people answer every one</div>
-          <div class="big"><span data-count="288">288</span><small> agent-hours a month</small></div>
-          <p>4,663 inbound transactional calls × 3.7 min of handling. And customers still leave unhappy:</p>
-          <ul class="facts">
-            <li><b>−69.9</b> NPS</li>
-            <li><b>2.91 / 4</b> CSAT</li>
-            <li><b>70.1%</b> first-contact resolution (proxy)</li>
-          </ul>
+          <p class="lead">Unrecognized charges</p>
+          <div class="nums">
+            <div><b><span data-count="90.6" data-format="pct">90.6%</span></b><span>of transaction complaints</span></div>
+            <div><b><span data-count="15.4" data-format="dec">15.4</span><small> days</small></b><span>to resolve</span></div>
+          </div>
         </div>
       </div>
       <div class="tags" data-step="1">
@@ -418,13 +445,29 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
           <p>It checks an unrecognized charge, then blocks the card and opens the claim, only after the customer taps Yes.</p>
         </div>
       </div>
-      <div class="outcomes" data-step="2">
-        <div class="outcome"><b>Lower cost per contact</b><span>today: 3.7 min of a person per contact</span></div>
-        <div class="outcome"><b>Higher first-contact resolution</b><span>today: 70.1% (proxy)</span></div>
-        <div class="outcome"><b>Higher satisfaction</b><span>today: CSAT 2.91 / 4 · NPS −69.9</span></div>
+      <div class="kpis" data-step="2">
+        <h3 class="kpis-h">The KPIs we aim to improve</h3>
+        <div class="kpi-row">
+          <div class="kpi">
+            <div class="kpi-name"><svg class="dir down" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16m-7-7 7 7 7-7"/></svg>Cost per contact</div>
+            <div class="kpi-val"><span data-count="1.23" data-format="usd2">$1.23</span></div>
+            <div class="kpi-now">today, LATAM · global benchmark <b>$7.20</b></div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-name"><svg class="dir up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4m-7 7 7-7 7 7"/></svg>First-contact resolution</div>
+            <div class="kpi-val"><span data-count="70.1" data-format="pct">70.1%</span></div>
+            <div class="kpi-now">today (proxy)</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-name"><svg class="dir up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4m-7 7 7-7 7 7"/></svg>NPS</div>
+            <div class="kpi-val"><span data-count="-69.9" data-format="dec">−69.9</span></div>
+            <div class="kpi-now">today</div>
+          </div>
+        </div>
       </div>
       <div class="tags" data-step="2">
         <span class="src data">Today's values: provided contact-center dataset</span>
+        <span class="src bench">Cost per contact: benchmark estimate, see slide 6</span>
         <span class="src assume">The outcomes are goals, not measured results</span>
         <span class="line">Credit cards today. Any use case the bank wants tomorrow.</span>
       </div>
@@ -788,6 +831,7 @@ h2 { font-size: clamp(36px, 5.6vw, 84px); }
       : fmt === 'usd3' ? '$' + v.toFixed(3)
       : fmt === 'pct' ? v.toFixed(1) + '%'
       : fmt === 'dec' ? (v < 0 ? '−' : '') + Math.abs(v).toFixed(1)
+      : fmt === 'dec2' ? v.toFixed(2)
       : Math.round(v).toLocaleString('en-US');
     if (reduce) { el.textContent = show(target); return; }
     const t0 = performance.now(), dur = 1600;
