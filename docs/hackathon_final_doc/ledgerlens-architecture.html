@@ -368,7 +368,7 @@ h2 { font-size: clamp(30px, 3.4vw, 52px); margin-top: 12px; }
 /* ---------- intro slides 1–2: problem and solution, from ledgerlens-final.html ---------- */
 .s-problem .inner { display: grid; gap: clamp(18px, 3vh, 32px); }
 .s-problem h2 { font-size: clamp(32px, 4.4vw, 64px); max-width: 22ch; margin-top: 12px; }
-.beats { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(14px, 2vw, 26px); }
+.beats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(14px, 2vw, 26px); }
 .big { font-family: var(--display); font-weight: 300; font-size: clamp(38px, 3.8vw, 56px); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin-bottom: 8px; }
 .big small { font-family: var(--sans); font-size: 15px; color: var(--soft); letter-spacing: 0; }
 .bars { display: grid; gap: 6px; margin: 16px 0 14px; }
@@ -395,6 +395,22 @@ h2 { font-size: clamp(30px, 3.4vw, 52px); margin-top: 12px; }
 .s-problem .beat .lead { margin-bottom: 18px; font-size: 19px; }
 .s-problem .beat .nums b { font-size: clamp(34px, 3.3vw, 50px); }
 .s-problem .beat .nums > div > span { font-size: 14px; }
+.s-problem .beat .pair { display: grid; grid-template-columns: auto auto auto; justify-content: start; align-items: start; gap: 0 12px; }
+.s-problem .beat .pair .big { font-size: clamp(36px, 2.9vw, 54px); line-height: 1; margin-bottom: 8px; white-space: nowrap; }
+.s-problem .beat .pair .lead { margin: 0; font-size: 14px; color: var(--soft); }
+.s-problem .beat .pair .times { font-family: var(--display); font-weight: 300; font-size: clamp(20px, 1.6vw, 28px); line-height: clamp(36px, 2.9vw, 54px); color: var(--mango); }
+.tally { display: grid; grid-template-columns: repeat(20, 1fr); gap: 6px; margin-top: 28px; }
+.tally i { aspect-ratio: 1; border-radius: 50%; background: var(--mango); opacity: 0; transform: scale(.4); transition: opacity .4s, transform .4s var(--ease); transition-delay: calc(var(--i) * 8ms + .5s); }
+[data-step].on .tally i { opacity: .55; transform: none; }
+.tally-key { margin-top: 12px; font-size: 13px; color: var(--soft); }
+@media (prefers-reduced-motion: reduce) { .tally i { transition: none; } }
+.nums.one { grid-template-columns: 1fr; }
+.s-problem .title-veil { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 0 clamp(16px, 5vw, 88px); text-align: center; background: rgba(8,10,28,.5); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); pointer-events: none; }
+.s-problem .title-veil[data-step] { transform: none; filter: none; transition: opacity .9s var(--ease); }
+.s-problem .title-veil > div { transform: translateY(18px) scale(.98); transition: transform 1.1s var(--ease); }
+.s-problem .title-veil.on > div { transform: none; }
+.s-problem .title-veil .eyebrow { justify-content: center; }
+.s-problem .title-veil h2 { margin-inline: auto; }
 .foot { margin-top: 4px; font-size: 14px; }
 .foot b { color: var(--text); font-weight: 500; }
 
@@ -475,8 +491,8 @@ body[data-cam="off"] .bg { opacity: 0; }
 .sources summary { cursor: pointer; font-size: 12px; color: #7d83a3; letter-spacing: .04em; }
 .sources ul { margin-top: 8px; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: #7d83a3; }
 .sources a { color: var(--cobalt-hi); }
-.big-save { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(16px, 3vw, 48px); text-align: center; }
-.big-save .cost { display: inline-block; font-family: var(--display); font-weight: 300; font-size: clamp(48px, min(7.5vw, 10vh), 120px); line-height: 1; letter-spacing: -0.04em; color: var(--green); }
+.big-save { display: grid; align-self: center; text-align: center; }
+.big-save .cost { display: inline-block; font-family: var(--display); font-weight: 300; font-size: clamp(96px, min(15vw, 30vh), 260px); line-height: 1; letter-spacing: -0.04em; color: var(--green); }
 .big-save .lbl { display: block; margin-top: 8px; font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--soft); }
 .s-profit .close { font-family: var(--display); font-weight: 300; font-size: clamp(22px, 2.4vw, 34px); letter-spacing: -0.02em; text-align: center; }
 
@@ -602,12 +618,8 @@ body[data-cam="off"] .bg { opacity: 0; }
 <main class="deck" id="deck">
 
   <!-- 1 · The problem (from ledgerlens-final.html) -->
-  <section class="slide s-problem" data-steps="3" data-cam="off" data-sec="-1" aria-label="The problem">
+  <section class="slide s-problem" data-steps="4" data-cam="off" data-sec="-1" aria-label="The problem">
     <div class="inner">
-      <div data-step="0">
-        <div class="eyebrow">The problem</div>
-        <h2>A bank has to be <span class="grad">profitable.</span><br>Its contact center is one of its biggest costs.</h2>
-      </div>
       <div class="beats">
         <div class="card beat" data-step="1">
           <div class="k">#1 reason to contact the bank</div>
@@ -625,11 +637,15 @@ body[data-cam="off"] .bg { opacity: 0; }
         </div>
         <div class="card beat warn" data-step="2">
           <div class="k">Today, people answer every one</div>
-          <div class="big"><span data-count="288">288</span></div>
-          <p class="lead">Agent-hours a month</p>
-          <div class="nums">
-            <div><b><span data-count="4663">4,663</span></b><span>calls a month</span></div>
-            <div><b class="hot"><span data-count="-69.9" data-format="dec">−69.9</span></b><span>NPS: still unhappy</span></div>
+          <div class="pair">
+            <div><div class="big"><span data-count="4663">4,663</span></div><p class="lead">interactions a month</p></div>
+            <span class="times" aria-hidden="true">×</span>
+            <div><div class="big"><span class="cost tip-left" tabindex="0"><span data-count="1.23" data-format="usd2">$1.23</span><span class="tip" role="tooltip"><b>How we got $1.23</b><span class="f">$16/hr ÷ 60 × 3.7 min ÷ 0.8 = $1.23</span>$16/hr is the midpoint of the $12–20/hr fully loaded agent cost in Colombia (FusionCX, 2026). 3.7 min is the average handle time of a transactional contact in the dataset. 0.8 assumes agents spend 80% of paid time on calls (our assumption). Range: $0.93–1.54 at $12–20/hr.</span></span></div><p class="lead">per interaction, LATAM</p></div>
+          </div>
+          <div class="tally" data-n="120" role="img" aria-label="4,663 interactions a month, each handled by a person"></div>
+          <p class="tally-key">Each dot is about 39 interactions, all answered by a person.</p>
+          <div class="nums one">
+            <div><b class="hot"><span data-count="-69.9" data-format="dec">−69.9</span></b><span>NPS: customers unsatisfied</span></div>
           </div>
         </div>
         <div class="card beat" data-step="3">
@@ -645,9 +661,17 @@ body[data-cam="off"] .bg { opacity: 0; }
       <div class="biz-tags" data-step="1">
         <span class="src data">Source: provided contact-center dataset · 686,296 contacts, Jun 2023 to Jun 2026 (35 full months)</span>
         <span class="src assume">The dataset appears synthetic: its NPS answers range only from 2 to 7</span>
+        <span class="src bench">Cost benchmark: FusionCX 2026</span>
       </div>
     </div>
-    <aside class="notes-src" hidden data-secs="60">“A bank has to be profitable, and its contact center is one of its biggest costs. The number one reason customers contact the bank is a question about a transaction: 35 percent, 6,661 a month. Today people answer every one: 288 agent-hours a month, and customers are still unhappy, NPS minus 70. And the number one complaint is an unrecognized charge: 12,297 of them, 15 days to resolve.”</aside>
+    <!-- The title lands last, over the cards, blurring them behind it -->
+    <div class="title-veil" data-step="4">
+      <div>
+        <div class="eyebrow">The problem</div>
+        <h2>A bank has to be <span class="grad">profitable.</span><br>Its contact center is one of its biggest costs.</h2>
+      </div>
+    </div>
+    <aside class="notes-src" hidden data-secs="60">“A bank has to be profitable, and its contact center is one of its biggest costs. The number one reason customers contact the bank is a question about a transaction: 35 percent, 6,661 a month. Today people answer every one: 4,663 interactions a month at about $1.23 each, and customers are still unhappy, NPS minus 70. And the number one complaint is an unrecognized charge: 12,297 of them, 15 days to resolve.”</aside>
   </section>
 
   <!-- 2 · The solution (from ledgerlens-final.html) -->
@@ -965,48 +989,9 @@ body[data-cam="off"] .bg { opacity: 0; }
           </div>
         </div>
 
-        <div class="card save" data-step="3">
-          <div class="k">Saved per contact, at 6,661 contacts a month</div>
-          <table class="savings">
-            <thead><tr><th></th><th>vs LATAM $1.23</th><th>vs global $7.20</th><th>a month, LATAM / global</th></tr></thead>
-            <tbody>
-              <tr>
-                <th>DeepSeek v3.2</th>
-                <td><span class="cost tip-left" tabindex="0"><span data-count="1.13" data-format="usd2">$1.13</span> <small>92%</small><span class="tip" role="tooltip"><b>Saved vs a person, LATAM</b><span class="f">$1.23 − $0.099 = $1.13 (92%)</span>The human cost per contact minus LedgerLens on DeepSeek v3.2.</span></span></td>
-                <td><span class="cost tip-left" tabindex="0"><span data-count="7.10" data-format="usd2">$7.10</span> <small>99%</small><span class="tip" role="tooltip"><b>Saved vs a person, global</b><span class="f">$7.20 − $0.099 = $7.10 (99%)</span>ContactBabel's 2026 cost per inbound call minus LedgerLens on DeepSeek v3.2.</span></span></td>
-                <td><span class="cost tip-left" tabindex="0">$7,536 / $47,302<span class="tip" role="tooltip"><b>Saved a month, DeepSeek v3.2</b><span class="f">$8,193 − $657 = $7,536</span><span class="f">$47,959 − $657 = $47,302</span>People: 6,661 contacts × $1.23 = $8,193, or × $7.20 = $47,959. LedgerLens: 6,661 × $0.0986 (the unrounded total) = $657. 6,661 is the average of transactional contacts a month in the dataset.</span></span></td>
-              </tr>
-              <tr>
-                <th>Haiku 4.5</th>
-                <td><span class="cost tip-left" tabindex="0"><span data-count="1.07" data-format="usd2">$1.07</span> <small>87%</small><span class="tip" role="tooltip"><b>Saved vs a person, LATAM</b><span class="f">$1.23 − $0.157 = $1.07 (87%)</span>The human cost per contact minus LedgerLens on Claude Haiku 4.5.</span></span></td>
-                <td><span class="cost tip-left" tabindex="0"><span data-count="7.04" data-format="usd2">$7.04</span> <small>98%</small><span class="tip" role="tooltip"><b>Saved vs a person, global</b><span class="f">$7.20 − $0.157 = $7.04 (98%)</span>ContactBabel's 2026 cost per inbound call minus LedgerLens on Claude Haiku 4.5.</span></span></td>
-                <td><span class="cost tip-left" tabindex="0">$7,150 / $46,916<span class="tip" role="tooltip"><b>Saved a month, Haiku 4.5</b><span class="f">$8,193 − $1,043 = $7,150</span><span class="f">$47,959 − $1,043 = $46,916</span>People: 6,661 contacts × $1.23 = $8,193, or × $7.20 = $47,959. LedgerLens: 6,661 × $0.1566 (the unrounded total) = $1,043. 6,661 is the average of transactional contacts a month in the dataset.</span></span></td>
-              </tr>
-              <tr>
-                <th>Sonnet 4.5</th>
-                <td><span class="cost tip-left" tabindex="0"><span data-count="0.85" data-format="usd2">$0.85</span> <small>69%</small><span class="tip" role="tooltip"><b>Saved vs a person, LATAM</b><span class="f">$1.23 − $0.383 = $0.85 (69%)</span>The human cost per contact minus LedgerLens on Claude Sonnet 4.5.</span></span></td>
-                <td><span class="cost tip-left" tabindex="0"><span data-count="6.82" data-format="usd2">$6.82</span> <small>95%</small><span class="tip" role="tooltip"><b>Saved vs a person, global</b><span class="f">$7.20 − $0.383 = $6.82 (95%)</span>ContactBabel's 2026 cost per inbound call minus LedgerLens on Claude Sonnet 4.5.</span></span></td>
-                <td><span class="cost tip-left" tabindex="0">$5,640 / $45,406<span class="tip" role="tooltip"><b>Saved a month, Sonnet 4.5</b><span class="f">$8,193 − $2,553 = $5,640</span><span class="f">$47,959 − $2,553 = $45,406</span>People: 6,661 contacts × $1.23 = $8,193, or × $7.20 = $47,959. LedgerLens: 6,661 × $0.3833 (the unrounded total) = $2,553. 6,661 is the average of transactional contacts a month in the dataset.</span></span></td>
-              </tr>
-            </tbody>
-          </table>
-          <p class="caveat">Assumes the contact is fully automated. A contact handed to a person still costs a human contact.</p>
-          <details class="sources">
-            <summary>Sources</summary>
-            <ul>
-              <li><a href="https://www.fusioncx.com/blog/locations/colombia-vs-us-call-center-costs/" target="_blank" rel="noopener">FusionCX, Colombia vs. US Call Center Costs (2026)</a></li>
-              <li><a href="https://www.contactbabel.com/the-us-contact-center-decision-makers-guide/" target="_blank" rel="noopener">ContactBabel, The US Contact Center Decision-Makers' Guide (2026)</a></li>
-              <li><a href="https://www.destinationcrm.com/Articles/CRM-Insights/Insight/Gartner-Survey-Finds-Self-Service-Insufficient-135436.aspx" target="_blank" rel="noopener">Gartner poll via DestinationCRM (2019)</a></li>
-              <li><a href="https://aws.amazon.com/bedrock/pricing/" target="_blank" rel="noopener">Amazon Bedrock and Guardrails pricing</a></li>
-              <li><a href="https://aws.amazon.com/bedrock/agentcore/pricing/" target="_blank" rel="noopener">Amazon Bedrock AgentCore pricing</a></li>
-              <li><a href="https://aws.amazon.com/cognito/pricing/" target="_blank" rel="noopener">Amazon Cognito pricing</a> · <a href="https://aws.amazon.com/rds/aurora/dsql/pricing/" target="_blank" rel="noopener">Aurora DSQL pricing</a> · <a href="https://aws.amazon.com/privatelink/pricing/" target="_blank" rel="noopener">PrivateLink pricing</a> · <a href="https://aws.amazon.com/api-gateway/pricing/" target="_blank" rel="noopener">API Gateway pricing</a></li>
-            </ul>
-          </details>
+        <div class="big-save" data-step="3">
+          <div class="stat"><span class="cost" tabindex="0"><span data-count="83" data-format="int">83</span>%<span class="tip" role="tooltip"><b>Average saving vs a person, LATAM</b><span class="f">(92.0% + 87.3% + 68.8%) ÷ 3 = 82.7%</span>The saving per contact against the $1.23 LATAM human cost, averaged over DeepSeek v3.2, Haiku 4.5 and Sonnet 4.5. Each is ($1.23 − the model's unrounded total) ÷ $1.23.</span></span><span class="lbl">saved per contact vs LATAM</span></div>
         </div>
-      </div>
-      <div class="big-save" data-step="3">
-        <div class="stat"><span class="cost" tabindex="0"><span data-count="83" data-format="int">83</span>%<span class="tip" role="tooltip"><b>Average saving vs a person, LATAM</b><span class="f">(92.0% + 87.3% + 68.8%) ÷ 3 = 82.7%</span>The saving per contact against the $1.23 LATAM human cost, averaged over DeepSeek v3.2, Haiku 4.5 and Sonnet 4.5. Each is ($1.23 − the model's unrounded total) ÷ $1.23.</span></span><span class="lbl">saved per contact vs LATAM</span></div>
-        <div class="stat"><span class="cost" tabindex="0"><span data-count="97" data-format="int">97</span>%<span class="tip" role="tooltip"><b>Average saving vs a person, global reference</b><span class="f">(98.6% + 97.8% + 94.7%) ÷ 3 = 97.0%</span>The saving per contact against ContactBabel's $7.20 per inbound call, averaged over DeepSeek v3.2, Haiku 4.5 and Sonnet 4.5. Each is ($7.20 − the model's unrounded total) ÷ $7.20.</span></span><span class="lbl">saved per contact vs global reference</span></div>
       </div>
       <p class="close" data-step="3"><span class="grad">LedgerLens.</span> Every customer, understood.</p>
       <div class="biz-tags" data-step="1">
@@ -1016,7 +1001,7 @@ body[data-cam="off"] .bg { opacity: 0; }
         <span class="src assume">80% occupancy and the 9-turn session are assumptions</span>
       </div>
     </div>
-    <aside class="notes-src" hidden data-secs="45">“And it pays. A person answering a transactional contact in a LATAM bank costs about $1.23; the global reference is $7.20. LedgerLens costs ten cents on DeepSeek, sixteen on Haiku, thirty-eight on Sonnet, tokens, guardrail and infrastructure included. At 6,661 contacts a month that saves between $5,600 and $7,500 a month against LATAM costs: 83% per contact, 97% against the global reference. LedgerLens. Every customer, understood. Thank you.”</aside>
+    <aside class="notes-src" hidden data-secs="45">“And it pays. A person answering a transactional contact in a LATAM bank costs about $1.23; the global reference is $7.20. LedgerLens costs ten cents on DeepSeek, sixteen on Haiku, thirty-eight on Sonnet, tokens, guardrail and infrastructure included. At 6,661 contacts a month that saves between $5,600 and $7,500 a month against LATAM costs: 83% per contact. LedgerLens. Every customer, understood. Thank you.”</aside>
   </section>
 
 </main>
@@ -1071,6 +1056,11 @@ body[data-cam="off"] .bg { opacity: 0; }
     };
     requestAnimationFrame(tick);
   }
+
+  // Dot tallies: data-n dots, each fading in a beat after the one before
+  document.querySelectorAll('.tally').forEach(t => {
+    t.innerHTML = Array.from({ length: +t.dataset.n }, (_, i) => `<i style="--i:${i}"></i>`).join('');
+  });
 
   // ---------- the architecture camera ----------
   // Each step names the nodes it is about (data-focus). They light up, the edges between two lit
