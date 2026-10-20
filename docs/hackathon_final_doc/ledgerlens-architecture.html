@@ -44,7 +44,8 @@ code { font-family: var(--mono); font-size: .88em; padding: 1px 6px; border-radi
 .scrim { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 1s var(--ease);
   background: linear-gradient(90deg, rgba(7,8,26,.97) 0%, rgba(7,8,26,.93) 40%, rgba(7,8,26,.35) 58%, rgba(7,8,26,0) 70%); }
 body[data-cam="right"] .scrim { opacity: 1; }
-body[data-cam="side"] .scrim { opacity: 1; background: linear-gradient(90deg, rgba(7,8,26,.97) 0%, rgba(7,8,26,.94) 58%, rgba(7,8,26,.35) 70%, rgba(7,8,26,0) 80%); }
+/* --edge: where the side camera's diagram starts (set by frame()) */
+body[data-cam="side"] .scrim { opacity: 1; background: linear-gradient(90deg, rgba(7,8,26,.97) 0, rgba(7,8,26,.94) calc(var(--edge, 68vw) - 160px), rgba(7,8,26,.35) calc(var(--edge, 68vw) + 30px), rgba(7,8,26,0) calc(var(--edge, 68vw) + 180px)); }
 body[data-cam="full"] .scrim { opacity: 1; background: radial-gradient(ellipse 62% 50% at 50% 50%, rgba(7,8,26,.95) 30%, rgba(7,8,26,.6) 70%, rgba(7,8,26,.25)); }
 
 .arch .node rect { fill: rgba(255,255,255,.04); stroke: rgba(255,255,255,.16); stroke-width: 1.2; transition: fill .6s, stroke .6s; }
@@ -881,7 +882,7 @@ body[data-cam="off"] .bg { opacity: 0; }
         <div class="eyebrow"><span class="n">05</span>Evaluation <span class="star">· why it matters</span></div>
         <h2>A prompt ships only when <span class="grad">code says it passed.</span></h2>
       </div>
-      <div data-step="0" data-focus="harness agent obs judge dash">
+      <div data-step="0" data-focus="harness agent obs judge">
         <ol class="loop" data-stagger>
           <li><b>10 scripted situations</b><span>fraud, declines, which card, out of scope, privacy probes · synthetic customers · frozen before the baseline</span></li>
           <li><b>A bot plays the customer</b><span>signs in, chats with the deployed agent, answers Yes / No as scripted</span></li>
@@ -892,7 +893,7 @@ body[data-cam="off"] .bg { opacity: 0; }
         <div class="loop-back">↺ new prompt or model → same test again</div>
       </div>
       <div class="stage">
-        <div class="card case swap-out" id="evCase" data-step="1" data-focus="harness agent gateway">
+        <div class="card case swap-out" id="evCase" data-step="1" data-focus="harness agent">
           <div class="k">One case, graded by code · E1a suspected fraud</div>
           <div class="ev-row">
             <div class="script">
@@ -914,7 +915,7 @@ body[data-cam="off"] .bg { opacity: 0; }
             </div>
           </div>
         </div>
-        <div class="card" data-step="2" data-focus="harness judge dash">
+        <div class="card" data-step="2" data-focus="harness judge">
           <div class="k">Cases passed 3 of 3 times, out of 10 · 270 sessions</div>
           <div class="ev-row">
             <div>
@@ -934,7 +935,7 @@ body[data-cam="off"] .bg { opacity: 0; }
                 <div class="kpi g"><div class="v"><span data-count="0">0</span></div><span>unsafe in 90 graded Haiku sessions</span></div>
                 <div class="kpi"><div class="v">87<small>%</small></div><span><span class="cost tip-left" tabindex="0">AWS judge agrees · 13 of 15<span class="tip"><b>AgentCore Evaluations, Haiku v12</b>GoalSuccessRate agreed with the code on 13 of the 15 sessions it could score. It can't parse sessions with a Yes / No confirmation (SpanEventParsingException), so those are graded by code only. Both disagreements were E2a runs where Haiku offered a person in text: the judge failed them, our checks passed them, a known gap in our checks.</span></span></span></div>
               </div>
-              <div class="decide" data-step="3" data-focus="harness judge dash agent bedrock">
+              <div class="decide" data-step="3" data-focus="agent bedrock">
                 <b>Shipped: Claude Haiku 4.5 + prompt v12.</b> Chosen on untuned v10: 2× DeepSeek's cases passed, for 2× its token cost. Code is the gate; the AWS judge is a second opinion.
               </div>
             </div>
@@ -1124,9 +1125,13 @@ body[data-cam="off"] .bg { opacity: 0; }
       const pad = 40;
       box = { x: x1 - pad, y: y1 - pad, w: x2 - x1 + 2 * pad, h: y2 - y1 + 2 * pad };
     }
+    // side camera: on wide screens, start right after the text column instead of at 68%
+    const textEnd = document.querySelector('.slide.active .inner')?.getBoundingClientRect().right ?? W;
+    const edge = Math.min(W * .68, textEnd + 24);
+    document.body.style.setProperty('--edge', edge + 'px');
     const region = narrow || cam === 'full' ? { x: W * .03, y: H * .08, w: W * .94, h: H * .86 }
       : cam === 'right' ? { x: W * .55, y: H * .12, w: W * .42, h: H * .76 }
-      : { x: W * .68, y: H * .14, w: W * .3, h: H * .72 };
+      : { x: edge, y: H * .14, w: W * .98 - edge, h: H * .72 };
     const s = Math.min(region.w / box.w, region.h / box.h, 2.1);
     const tx = region.x + (region.w - box.w * s) / 2 - box.x * s;
     const ty = region.y + (region.h - box.h * s) / 2 - box.y * s;
