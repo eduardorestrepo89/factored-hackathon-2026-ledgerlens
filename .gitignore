@@ -51,6 +51,3 @@ evals/.venv/
 
 # Local HTML walkthroughs of how the app works; never committed
 explanations/
-
-# Local screenshot for the final doc; never committed
-docs/hackathon_final_doc/observability.png
