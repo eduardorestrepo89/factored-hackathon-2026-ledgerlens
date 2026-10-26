@@ -637,6 +637,9 @@ export class BackendConstruct extends Construct {
         throttlingBurstLimit: 200,
         // No stage cache: API Gateway only caches GET methods and this API only has
         // POST /feedback, so a cache cluster would bill hourly (~$14/month) without a single hit.
+        // Explicitly false: dropping the props leaves an existing cache running on update.
+        cachingEnabled: false,
+        cacheClusterEnabled: false,
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
         dataTraceEnabled: true,
         metricsEnabled: true,
